@@ -1,0 +1,56 @@
+# Same Pages pattern as ds-shacl-form-rs / ds-honeycomb-editor-rs: pinned
+# toolchain and Trunk, build_type "workflow", project-page public URL.
+name: Deploy Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "demo/**"
+      - "prose-core/**"
+      - "prose-yew/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.96.1
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk@0.22.0-beta.2
+      - name: Test
+        run: cargo test --workspace --locked
+      # --public-url makes asset URLs resolve under /ds-prose-rs/ on a
+      # GitHub project page; it also feeds index.html's <base>.
+      - name: Build demo
+        working-directory: demo
+        run: trunk build --release --public-url /ds-prose-rs/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: demo/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
