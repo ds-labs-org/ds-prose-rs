@@ -9,7 +9,7 @@
 #   demo         the Trunk app: paste an ODRL policy, read it.
 [workspace]
 resolver = "2"
-members = ["prose-core", "prose-yew", "demo"]
+members = ["prose-core", "prose-yew", "prose-wasm", "demo"]
 
 [workspace.package]
 version = "0.1.0"

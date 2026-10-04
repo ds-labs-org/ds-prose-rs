@@ -1,0 +1,22 @@
+<main>
+  <h1>ds-prose-rs Angular demo</h1>
+  <p>
+    The prose on the right is the Yew <code>&lt;OdrlProse&gt;</code> component, compiled to wasm and mounted by
+    <code>&lt;ds-odrl-prose&gt;</code>. Edit the JSON-LD and it re-renders.
+  </p>
+  <div class="presets">
+    @for (p of presets; track p.label) {
+      <button type="button" (click)="json.set(p.json)">{{ p.label }}</button>
+    }
+  </div>
+  <div class="columns">
+    <section>
+      <label for="policy">ODRL JSON-LD</label>
+      <textarea id="policy" rows="24" [value]="json()" (input)="json.set($any($event.target).value)"></textarea>
+    </section>
+    <section>
+      <h2>Prose</h2>
+      <ds-odrl-prose [json]="json()" />
+    </section>
+  </div>
+</main>

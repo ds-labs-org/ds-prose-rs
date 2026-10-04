@@ -1,0 +1,13 @@
+{
+  "name": "@ds-labs/prose-angular",
+  "version": "0.1.0",
+  "description": "Angular wrapper for ds-prose-rs: renders ODRL JSON-LD as prose via the Yew component, compiled to wasm",
+  "license": "Apache-2.0",
+  "private": true,
+  "scripts": {
+    "build:wasm": "cd ../prose-wasm && wasm-pack build --release --target web --out-dir ../prose-angular/wasm --out-name prose_wasm && rm -f ../prose-angular/wasm/.gitignore",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "peerDependencies": { "@angular/core": ">=19.0.0" },
+  "devDependencies": { "@angular/core": "^20.0.0", "rxjs": "^7.8.0", "typescript": "~5.8.0" }
+}
