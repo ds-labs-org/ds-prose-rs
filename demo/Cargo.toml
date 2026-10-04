@@ -1,0 +1,21 @@
+[package]
+name = "demo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Demo page for ds-prose-rs: paste an ODRL JSON-LD policy and read it as prose"
+publish = false
+
+[lib]
+name = "demo"
+path = "src/lib.rs"
+
+[[bin]]
+name = "demo"
+path = "src/main.rs"
+
+[dependencies]
+prose-yew = { path = "../prose-yew", features = ["csr"] }
+yew = { version = "0.23", features = ["csr"] }
+web-sys = { version = "0.3", features = ["HtmlTextAreaElement", "Window", "Document", "Element"] }

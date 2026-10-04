@@ -1,0 +1,18 @@
+[package]
+name = "prose-yew"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "A Yew component that renders ODRL JSON-LD as plain-language prose"
+keywords = ["yew", "odrl", "policy", "component"]
+categories = ["gui", "wasm"]
+
+[dependencies]
+prose-core = { path = "../prose-core", version = "0.1.0" }
+yew = { version = "0.23", default-features = false }
+
+[features]
+default = []
+csr = ["yew/csr"]
+ssr = ["yew/ssr"]

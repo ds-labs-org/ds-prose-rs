@@ -1,0 +1,11 @@
+[package]
+name = "prose-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Reads ODRL JSON-LD and writes it as structured plain-language prose"
+keywords = ["odrl", "json-ld", "policy", "prose"]
+
+[dependencies]
+serde_json = "1"

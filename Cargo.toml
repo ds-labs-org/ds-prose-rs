@@ -1,0 +1,18 @@
+# Workspace for ds-prose-rs -- PROSE: Prose Renderer for ODRL Semantic Encoding.
+#
+#   prose-core   reads ODRL JSON-LD (compact or lightly expanded) and builds a
+#                structured, plain-language Document. No UI framework, no RDF
+#                store: it reads the JSON the way an ODRL author writes it.
+#   prose-yew    the component: renders a Document as semantic HTML (headings,
+#                ordered rule list, nested condition lists). The host supplies
+#                class names; this crate supplies structure.
+#   demo         the Trunk app: paste an ODRL policy, read it.
+[workspace]
+resolver = "2"
+members = ["prose-core", "prose-yew", "demo"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/ds-labs-org/ds-prose-rs"
