@@ -1,0 +1,45 @@
+Ok(
+    Document {
+        policies: [
+            Policy {
+                kind: Set,
+                uid: Some(
+                    "urn:policy:a1",
+                ),
+                heading: "Policy set urn:policy:a1",
+                intro: "A set of rules.",
+                notes: [],
+                rules: [
+                    Rule {
+                        kind: Permission,
+                        uid: None,
+                        sentence: "Anyone may use urn:asset:1.",
+                        refinements: [],
+                        conditions: [],
+                        follow_ups: [],
+                    },
+                ],
+            },
+            Policy {
+                kind: Agreement,
+                uid: Some(
+                    "urn:policy:a2",
+                ),
+                heading: "Agreement urn:policy:a2",
+                intro: "An agreement between urn:party:x (assigner) and urn:party:y (assignee).",
+                notes: [],
+                rules: [
+                    Rule {
+                        kind: Obligation,
+                        uid: None,
+                        sentence: "urn:party:y must delete urn:asset:2, as required by urn:party:x.",
+                        refinements: [],
+                        conditions: [],
+                        follow_ups: [],
+                    },
+                ],
+            },
+        ],
+        warnings: [],
+    },
+)

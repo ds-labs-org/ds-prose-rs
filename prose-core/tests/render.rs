@@ -97,3 +97,22 @@ fn errors() {
     assert!(matches!(render("{"), Err(ProseError::Json(_))));
     assert_eq!(render(r#"{"hello":1}"#), Err(ProseError::NoPolicy));
 }
+
+#[test]
+fn unknown_key_warnings_are_alphabetical_whatever_the_document_order() {
+    let doc = render(
+        r#"{"@type":"Set","uid":"urn:p","zz:b":1,"aa:a":2,"permission":[{"action":"use","target":"urn:t"}]}"#,
+    )
+    .unwrap();
+    let aa = doc
+        .warnings
+        .iter()
+        .position(|w| w.contains("\"aa:a\""))
+        .unwrap();
+    let zz = doc
+        .warnings
+        .iter()
+        .position(|w| w.contains("\"zz:b\""))
+        .unwrap();
+    assert!(aa < zz, "{:?}", doc.warnings);
+}

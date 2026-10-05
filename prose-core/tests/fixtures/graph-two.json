@@ -1,0 +1,17 @@
+{
+  "@context": "http://www.w3.org/ns/odrl.jsonld",
+  "@graph": [
+    {
+      "@type": "Set",
+      "uid": "urn:policy:g1",
+      "target": "urn:asset:a",
+      "permission": [{ "action": "use" }]
+    },
+    {
+      "@type": "Offer",
+      "uid": "urn:policy:g2",
+      "assigner": "urn:party:org",
+      "prohibition": [{ "action": "distribute", "target": "urn:asset:b" }]
+    }
+  ]
+}

@@ -4,15 +4,34 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "A Yew component that renders ODRL JSON-LD as plain-language prose"
+description = "A Yew component that renders ODRL JSON-LD as plain-language prose, and edits it in place"
 keywords = ["yew", "odrl", "policy", "component"]
 categories = ["gui", "wasm"]
 
 [dependencies]
-prose-core = { path = "../prose-core", version = "0.1.0" }
+prose-core = { path = "../prose-core", version = "0.2.0" }
 yew = { version = "0.23", default-features = false }
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = [
+    "Document", "Window", "Element", "HtmlElement", "Node", "Text", "Selection", "Range",
+    "Event", "EventTarget", "KeyboardEvent", "FocusEvent", "InputEvent", "ClipboardEvent",
+    "DataTransfer", "DragEvent", "HtmlSelectElement",
+] }
 
 [features]
 default = []
 csr = ["yew/csr"]
 ssr = ["yew/ssr"]
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+yew = { version = "0.23", features = ["ssr"] }
+tokio = { version = "1", features = ["rt", "macros"] }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+yew = { version = "0.23", features = ["csr"] }
+wasm-bindgen-test = "0.3"
+gloo-timers = { version = "0.3", features = ["futures"] }
+web-sys = { version = "0.3", features = [
+    "KeyboardEventInit", "FocusEventInit", "InputEventInit", "ClipboardEventInit",
+    "EventInit", "HtmlInputElement", "DataTransfer",
+] }

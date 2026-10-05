@@ -17,3 +17,14 @@ textarea { width: 100%; font-family: ui-monospace, monospace; font-size: 0.85rem
 .prose-notes, .prose-warnings { font-size: 0.85rem; }
 .prose-warnings { border: 1px solid #b45309; border-radius: 6px; padding: 0.4rem 0.8rem; }
 .prose-error { color: #b91c1c; }
+.tabs { display: flex; gap: 0.25rem; margin-bottom: 1rem; }
+.tabs button { padding: 0.4rem 1rem; }
+.tabs button[aria-selected="true"] { font-weight: 700; border-bottom: 3px solid currentColor; }
+.hint { font-size: 0.85rem; opacity: 0.8; }
+.ds-prose.prose-edit .prose-slot { background: color-mix(in srgb, Highlight 10%, transparent); border-radius: 3px; }
+.ds-prose.prose-edit .prose-rule { margin-bottom: 1.25rem; }
+.ds-prose.prose-edit .prose-conditions ul, .ds-prose.prose-edit .prose-follow-up ul { margin: 0.2rem 0; }
+.ds-prose.prose-edit .prose-add-bar { margin: 0.25rem 0; }
+.ds-prose.prose-edit .prose-heading { font-size: 1.1rem; }
+.ds-prose.prose-edit .prose-toolbar { white-space: nowrap; }
+.ds-prose.prose-edit .prose-issue-error { color: #b91c1c; }

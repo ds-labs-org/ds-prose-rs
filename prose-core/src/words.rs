@@ -38,37 +38,41 @@ pub fn humanise(name: &str) -> String {
     out
 }
 
+/// The left operands this module has a noun phrase for: (term, phrase).
+pub(crate) const OPERANDS: &[(&str, &str)] = &[
+    ("dateTime", "the date and time"),
+    ("elapsedTime", "the elapsed time"),
+    ("meteredTime", "the metered time"),
+    ("delayPeriod", "the delay period"),
+    ("spatial", "the location"),
+    ("spatialCoordinates", "the coordinates"),
+    ("payAmount", "the payment amount"),
+    ("count", "the number of times used"),
+    ("deliveryChannel", "the delivery channel"),
+    ("fileFormat", "the file format"),
+    ("industry", "the industry"),
+    ("language", "the language"),
+    ("media", "the media"),
+    ("product", "the product"),
+    ("purpose", "the purpose"),
+    ("recipient", "the recipient"),
+    ("systemDevice", "the system or device"),
+    ("unitOfCount", "the unit of count"),
+    ("version", "the version"),
+    ("virtualLocation", "the virtual location"),
+    ("event", "the event"),
+    ("percentage", "the percentage"),
+    ("resolution", "the resolution"),
+    ("timeInterval", "the time interval"),
+];
+
 /// A left operand as a noun phrase.
 pub fn operand(term: &str) -> String {
     let local = local_name(term);
-    let known = match local {
-        "dateTime" => "the date and time",
-        "elapsedTime" => "the elapsed time",
-        "meteredTime" => "the metered time",
-        "delayPeriod" => "the delay period",
-        "spatial" => "the location",
-        "spatialCoordinates" => "the coordinates",
-        "payAmount" => "the payment amount",
-        "count" => "the number of times used",
-        "deliveryChannel" => "the delivery channel",
-        "fileFormat" => "the file format",
-        "industry" => "the industry",
-        "language" => "the language",
-        "media" => "the media",
-        "product" => "the product",
-        "purpose" => "the purpose",
-        "recipient" => "the recipient",
-        "systemDevice" => "the system or device",
-        "unitOfCount" => "the unit of count",
-        "version" => "the version",
-        "virtualLocation" => "the virtual location",
-        "event" => "the event",
-        "percentage" => "the percentage",
-        "resolution" => "the resolution",
-        "timeInterval" => "the time interval",
-        _ => return format!("the {}", humanise(local)),
-    };
-    known.to_string()
+    match OPERANDS.iter().find(|(t, _)| *t == local) {
+        Some((_, phrase)) => (*phrase).to_string(),
+        None => format!("the {}", humanise(local)),
+    }
 }
 
 /// An operator as a verb phrase that follows its left operand.

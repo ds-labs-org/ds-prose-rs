@@ -1,0 +1,47 @@
+Ok(
+    Document {
+        policies: [
+            Policy {
+                kind: Offer,
+                uid: Some(
+                    "http://example.com/policy:1010",
+                ),
+                heading: "Offer http://example.com/policy:1010",
+                intro: "An offer made by http://example.com/org:abc.",
+                notes: [
+                    "Written to the profile http://example.com/odrl:profile:01.",
+                ],
+                rules: [
+                    Rule {
+                        kind: Permission,
+                        uid: None,
+                        sentence: "Anyone may display http://example.com/asset:9898.movie, as permitted by http://example.com/org:abc.",
+                        refinements: [],
+                        conditions: [
+                            Condition {
+                                text: "the date and time is before 2026-12-31",
+                                children: [],
+                            },
+                        ],
+                        follow_ups: [
+                            FollowUp {
+                                label: "Duties to fulfil before this permission can be exercised",
+                                rules: [
+                                    Rule {
+                                        kind: Obligation,
+                                        uid: None,
+                                        sentence: "The assignee must attribute http://example.com/asset:9898.movie, as required by http://example.com/org:abc.",
+                                        refinements: [],
+                                        conditions: [],
+                                        follow_ups: [],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+        warnings: [],
+    },
+)

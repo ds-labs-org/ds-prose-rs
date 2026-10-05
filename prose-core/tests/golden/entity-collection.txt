@@ -1,0 +1,26 @@
+Ok(
+    Document {
+        policies: [
+            Policy {
+                kind: Set,
+                uid: Some(
+                    "urn:policy:coll",
+                ),
+                heading: "Policy set urn:policy:coll",
+                intro: "A set of rules.",
+                notes: [],
+                rules: [
+                    Rule {
+                        kind: Permission,
+                        uid: None,
+                        sentence: "urn:party:bob (a member of urn:collection:staff) may use any asset in the collection urn:collection:movies where the file format is equal to \"mp4\".",
+                        refinements: [],
+                        conditions: [],
+                        follow_ups: [],
+                    },
+                ],
+            },
+        ],
+        warnings: [],
+    },
+)

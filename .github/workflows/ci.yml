@@ -22,3 +22,38 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
       - run: cargo check -p demo --target wasm32-unknown-unknown --locked
+
+  # The Edit mode of prose-yew is DOM code (contenteditable, focus, events),
+  # which `cargo test --workspace` on the host cannot exercise: tests/edit_dom.rs
+  # compiles to an empty binary there. Here it is mounted in headless Chrome.
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.96.1
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@0.2.129
+
+      - name: Clippy (wasm32)
+        run: cargo clippy -p prose-yew -p demo --target wasm32-unknown-unknown --features csr --all-targets --locked -- -D warnings
+
+      # `--test '*'`, not a list of names: a new file under tests/ is covered
+      # the moment it exists (a bare `cargo test -p ... --target
+      # wasm32-unknown-unknown` also picks up the --lib target and dies on
+      # `Exec format error` first).
+      - name: Browser tests
+        run: |
+          set -euo pipefail
+          if [ -n "${CHROMEWEBDRIVER:-}" ] && [ -x "${CHROMEWEBDRIVER}/chromedriver" ]; then
+            export CHROMEDRIVER="${CHROMEWEBDRIVER}/chromedriver"
+          else
+            export CHROMEDRIVER="$(command -v chromedriver)"
+          fi
+          echo "chromedriver: ${CHROMEDRIVER}"
+          cargo test -p prose-yew --target wasm32-unknown-unknown --features csr --locked --test '*'
