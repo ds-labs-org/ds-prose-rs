@@ -1,0 +1,45 @@
+# cargo-deny policy. Run in CI by the `supply-chain` job.
+[graph]
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "wasm32-unknown-unknown",
+]
+
+[advisories]
+# Known vulnerabilities and unmaintained crates fail the build.
+yanked = "deny"
+# Both are "unmaintained" notices, not vulnerabilities, and both arrive only
+# through yew 0.23, which this repository cannot change. Revisit when yew moves.
+ignore = [
+  # proc-macro-error: a compile-time dependency of yew-macro; not in the wasm.
+  { id = "RUSTSEC-2024-0370", reason = "compile-time only, via yew-macro" },
+  # bincode: used by yew internally.
+  { id = "RUSTSEC-2025-0141", reason = "unmaintained notice, via yew" },
+]
+
+[licenses]
+# This repository is Apache-2.0. Only permissive licences are accepted from
+# dependencies; add one here deliberately, with a reason, not to silence a failure.
+allow = [
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "MIT",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-3.0",
+  "Zlib",
+  "CC0-1.0",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# The workspace's own path dependencies carry no version requirement.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

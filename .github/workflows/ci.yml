@@ -5,39 +5,76 @@ on:
     branches: ["**"]
   pull_request:
   workflow_dispatch:
+  # New advisories appear without any change to this repository.
+  schedule:
+    - cron: "17 5 * * 1"
+
+# Least privilege: nothing here writes to the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Everything that runs on the host. Fast feedback comes before the jobs
+  # that need a browser or a wasm toolchain download.
   gates:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.96.1
         with:
           components: rustfmt, clippy
           targets: wasm32-unknown-unknown
-      - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: cargo test --workspace --locked
-      - run: cargo check -p demo --target wasm32-unknown-unknown --locked
+      - uses: Swatinem/rust-cache@v2
 
-  # The Edit mode of prose-yew is DOM code (contenteditable, focus, events),
-  # which `cargo test --workspace` on the host cannot exercise: tests/edit_dom.rs
-  # compiles to an empty binary there. Here it is mounted in headless Chrome.
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      # Broken intra-doc links and missing items fail here, not on docs.rs.
+      - name: Docs
+        run: cargo doc --workspace --no-deps --locked
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+
+      # Each feature combination a consumer can pick must at least compile:
+      # the host-side SSR build, and the browser build the site uses.
+      - name: Feature builds
+        run: |
+          cargo check -p prose-core --locked
+          cargo check -p prose-core --target wasm32-unknown-unknown --locked
+          cargo check -p prose-yew --locked
+          cargo check -p prose-yew --features ssr --locked
+          cargo check -p prose-yew --features csr --target wasm32-unknown-unknown --locked
+
+  # prose-yew's Edit mode is DOM code (contenteditable, focus, events). The
+  # host cannot run it: tests/edit_dom.rs compiles to an empty binary there.
+  # Here it is mounted in headless Chrome.
   browser:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-
       - uses: dtolnay/rust-toolchain@1.96.1
         with:
           targets: wasm32-unknown-unknown
           components: clippy
-
+      - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
+          # Must match the wasm-bindgen version in Cargo.lock.
           tool: wasm-bindgen-cli@0.2.129
 
       - name: Clippy (wasm32)
@@ -57,3 +94,36 @@ jobs:
           fi
           echo "chromedriver: ${CHROMEDRIVER}"
           cargo test -p prose-yew --target wasm32-unknown-unknown --features csr --locked --test '*'
+
+  # The release demo build, served under the Pages sub-path and booted in a
+  # browser. Catches a build or boot failure before the deploy workflow does.
+  demo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.96.1
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk@0.22.0-beta.2
+
+      - name: Build demo
+        working-directory: demo
+        run: trunk build --release --public-url /ds-prose-rs/
+
+      - name: Boot check
+        run: scripts/smoke-demo.sh demo/dist /ds-prose-rs/
+
+  # Licences, advisories, banned or unknown sources: deny.toml.
+  supply-chain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - run: cargo deny check

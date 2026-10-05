@@ -1,10 +1,10 @@
-//! The editing view: [`OdrlProseView`] renders an [`EditDoc`] as
+//! The editing view: [`OdrlProseView`] renders an [`EditDoc`](prose_core::edit::EditDoc) as
 //! sentences, in Read mode as plain prose and in Edit mode with
 //! `contenteditable` slots, selects, and + / - buttons.
 //!
 //! The component is controlled. It never changes the document: every
 //! committed edit and every structural action leaves through `onedit` as
-//! an [`EditEvent`], and the host applies it (see [`use_prose_editor`] for
+//! an [`EditEvent`](prose_core::edit::EditEvent), and the host applies it (see [`use_prose_editor`] for
 //! a host that does so with an undo history).
 //!
 //! Classes (each added to, never replacing, the built-in name; see
@@ -23,7 +23,7 @@
 //!
 //! Markup: every policy, rule and condition container carries
 //! `data-node="<NodePath>"`; slots `data-slot="<SlotPath>"`; add buttons
-//! `data-add="<ListPath>"`. Controls the [`EditRules`] do not allow are not
+//! `data-add="<ListPath>"`. Controls the [`EditRules`](prose_core::edit::EditRules) do not allow are not
 //! rendered.
 //!
 //! Server rendering: Edit mode's `<style>` text is HTML-escaped by Yew's

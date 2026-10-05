@@ -11,6 +11,7 @@ on:
       - "prose-yew/**"
       - "Cargo.toml"
       - "Cargo.lock"
+      - "scripts/smoke-demo.sh"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -41,6 +42,12 @@ jobs:
       - name: Build demo
         working-directory: demo
         run: trunk build --release --public-url /ds-prose-rs/
+      # Never publish a demo whose wasm does not boot.
+      - name: Boot check
+        run: scripts/smoke-demo.sh demo/dist /ds-prose-rs/
+
+      - uses: actions/configure-pages@v5
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: demo/dist

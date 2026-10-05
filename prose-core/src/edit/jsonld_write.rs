@@ -42,7 +42,7 @@ pub fn set_property(obj: &mut Map<String, Value>, keys: &[&str], value: Option<V
 }
 
 /// Write the document as JSON-LD. For a document read by
-/// [`read_model_value`], `write_jsonld(&doc)` serialises to the same text
+/// [`read_model_value`](super::read_model_value), `write_jsonld(&doc)` serialises to the same text
 /// as the input until something is edited, and afterwards differs only in
 /// the edited properties.
 pub fn write_jsonld(doc: &EditDoc) -> Value {

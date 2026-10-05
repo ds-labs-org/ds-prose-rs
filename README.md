@@ -195,6 +195,23 @@ only through the `"plaintext-only"` path.
   get a humanised name, which can read awkwardly.
 - Party and asset identifiers are shown as written; they are not resolved.
 
+## CI
+
+`.github/workflows/ci.yml` runs on every push and pull request, and weekly
+for new advisories:
+
+| job | gates |
+|---|---|
+| `gates` | `cargo fmt --check`, `clippy -D warnings`, `cargo test`, `cargo doc` with warnings denied, every feature build (host, `ssr`, `csr` on wasm32) |
+| `browser` | wasm clippy, and the Edit-mode DOM tests mounted in headless Chrome |
+| `demo` | release `trunk build` under the Pages sub-path, then `scripts/smoke-demo.sh` boots it in Chrome and fails unless a policy rendered |
+| `supply-chain` | `cargo deny check` against `deny.toml`: licences, advisories, sources |
+
+`deny.toml` ignores two "unmaintained" notices that arrive only through
+`yew`, each with its reason. Dependabot proposes cargo and Actions updates
+weekly. `.github/workflows/pages.yml` deploys the demo from `main` after the
+same boot check.
+
 ## Develop
 
 ```bash
