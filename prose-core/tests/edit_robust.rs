@@ -341,15 +341,8 @@ fn structural_edits_on_generated_documents_round_trip() {
                 )
                 .unwrap_or_else(|e| panic!("case {n}: {e}"));
             }
-            doc.apply(
-                &EditEvent::Add {
-                    list,
-                    index: 0,
-                    item: NewItem::Default,
-                },
-                &rules,
-            )
-            .unwrap_or_else(|e| panic!("case {n}: {e}"));
+            doc.apply(&add_ev(&doc, list, 0, NewItem::Default), &rules)
+                .unwrap_or_else(|e| panic!("case {n}: {e}"));
         }
         let written = write_jsonld(&doc);
         let again = read_model_value(&written)

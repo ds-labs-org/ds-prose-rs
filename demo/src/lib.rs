@@ -28,6 +28,11 @@ pub fn demo_app() -> Html {
             }
         })
     };
+    // The Edit tab writes its document back, so leaving it keeps the edits.
+    let onchange = {
+        let json = json.clone();
+        Callback::from(move |written: AttrValue| json.set(written))
+    };
     let presets = fixtures::ALL.iter().map(|p| {
         let json = json.clone();
         let load = load.clone();
@@ -68,7 +73,7 @@ pub fn demo_app() -> Html {
                     </section>
                 </div>
             } else {
-                <EditDemo source={(*json).clone()} load={*load} />
+                <EditDemo source={(*json).clone()} load={*load} onchange={onchange} />
             }
         </main>
     }

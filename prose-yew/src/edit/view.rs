@@ -1,4 +1,5 @@
 //! `OdrlProseView`: the sentences of an `EditDoc`, read or edited.
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use wasm_bindgen::JsCast;
@@ -24,7 +25,11 @@ pub struct OdrlProseViewProps {
     pub mode: EditMode,
     #[prop_or_default]
     pub config: Rc<EditConfig>,
-    /// Every committed edit and structural action. Not applied here.
+    /// Every committed edit and structural action. Not applied here. The
+    /// host applies it before the user's next input (as `use_prose_editor`
+    /// does, synchronously): a structural event whose new document has not
+    /// arrived by then is treated as refused, and moves no focus and
+    /// announces nothing.
     #[prop_or_default]
     pub onedit: Callback<EditEvent>,
     /// `Some` when a slot or select gets focus, `None` when it loses it.
@@ -42,6 +47,115 @@ pub struct OdrlProseViewProps {
 
 fn is_structural(ev: &EditEvent) -> bool {
     !matches!(ev, EditEvent::SetText { .. } | EditEvent::SetChoice { .. })
+}
+
+/// The structural event waiting for the host's new document: the event, the
+/// document it was emitted against, and a serial number.
+type Pending = Rc<RefCell<Option<(EditEvent, usize, u64)>>>;
+
+/// How long a structural event may wait for the host's answer when no user
+/// input comes first. Far longer than any render, so a slow, multi-task
+/// render still lands inside it.
+#[cfg(target_arch = "wasm32")]
+const PENDING_WINDOW_MS: i32 = 500;
+
+#[cfg(target_arch = "wasm32")]
+const EXPIRY_KINDS: [&str; 4] = ["pointerdown", "mousedown", "keydown", "click"];
+
+/// What a registered expiry holds: the function the listeners and the timer
+/// call, and the timer. `disarm` removes all of it, once.
+#[cfg(target_arch = "wasm32")]
+#[derive(Default)]
+struct ExpiryShared {
+    f: RefCell<Option<web_sys::js_sys::Function>>,
+    timer: std::cell::Cell<Option<i32>>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl ExpiryShared {
+    fn disarm(&self) {
+        let Some(f) = self.f.borrow_mut().take() else {
+            return;
+        };
+        if let Some(w) = web_sys::window() {
+            if let Some(t) = self.timer.take() {
+                w.clear_timeout_with_handle(t);
+            }
+            if let Some(doc) = w.document() {
+                for kind in EXPIRY_KINDS {
+                    let _ = doc.remove_event_listener_with_callback_and_bool(kind, &f, true);
+                }
+            }
+        }
+    }
+}
+
+/// The registration of one pending event's expiry. Dropping it removes every
+/// listener and the timer, so a view that is unmounted, or that emits a newer
+/// event, leaves nothing behind.
+struct ExpiryGuard {
+    #[cfg(target_arch = "wasm32")]
+    shared: Rc<ExpiryShared>,
+    #[cfg(target_arch = "wasm32")]
+    _closure: wasm_bindgen::closure::Closure<dyn Fn()>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Drop for ExpiryGuard {
+    fn drop(&mut self) {
+        self.shared.disarm();
+    }
+}
+
+/// Forget the pending event with this serial number at the user's next
+/// input, or after `PENDING_WINDOW_MS`. The host's answer (a new document)
+/// comes before the next user input however long it takes Yew to render it,
+/// whereas a short timer can fire first: Yew yields to the browser with
+/// `setTimeout(0)` after 16 ms of work, and a timer queued before that yield
+/// runs before the render. When no answer came, the event was refused, and a
+/// later, unrelated change of the document must not run its focus move and
+/// announcement. The first of the four input kinds or the timer clears the
+/// event and removes all the others.
+fn expire_pending_on_next_input(pending: Pending, serial: u64) -> Option<ExpiryGuard> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let w = web_sys::window()?;
+        let doc = w.document()?;
+        let shared = Rc::new(ExpiryShared::default());
+        let closure = {
+            let shared = shared.clone();
+            wasm_bindgen::closure::Closure::<dyn Fn()>::new(move || {
+                {
+                    let mut p = pending.borrow_mut();
+                    if p.as_ref().is_some_and(|(_, _, s)| *s == serial) {
+                        *p = None;
+                    }
+                }
+                shared.disarm();
+            })
+        };
+        let f: web_sys::js_sys::Function = closure
+            .as_ref()
+            .unchecked_ref::<web_sys::js_sys::Function>()
+            .clone();
+        for kind in EXPIRY_KINDS {
+            let _ = doc.add_event_listener_with_callback_and_bool(kind, &f, true);
+        }
+        let timer = w
+            .set_timeout_with_callback_and_timeout_and_arguments_0(&f, PENDING_WINDOW_MS)
+            .ok();
+        shared.timer.set(timer);
+        *shared.f.borrow_mut() = Some(f);
+        Some(ExpiryGuard {
+            shared,
+            _closure: closure,
+        })
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (pending, serial);
+        None
+    }
 }
 
 fn css_escape(s: &str) -> String {
@@ -72,6 +186,8 @@ fn focus_target(root: &web_sys::Element, target: &FocusTarget, rule_select: bool
             format!("[data-node=\"{}\"]", css_escape(&p.to_string())),
             None,
         ),
+        // A target this version cannot locate leaves focus where it is.
+        _ => return false,
     };
     for sel in std::iter::once(primary).chain(fallback) {
         if let Ok(Some(el)) = root.query_selector(&sel) {
@@ -89,15 +205,41 @@ pub fn odrl_prose_view(props: &OdrlProseViewProps) -> Html {
     let prose = use_memo(props.doc.clone(), |d| sentences(d));
     let root = use_node_ref();
     let live = use_state(AttrValue::default);
-    let pending = use_mut_ref(|| None::<(EditEvent, usize)>);
+    let pending: Pending = use_mut_ref(|| None);
+    let serial = use_mut_ref(|| 0u64);
+    // The expiry of the pending event; emptied on unmount.
+    let expiry: Rc<RefCell<Option<ExpiryGuard>>> = use_mut_ref(|| None);
+    {
+        let expiry = expiry.clone();
+        use_effect_with((), move |_| {
+            move || {
+                expiry.borrow_mut().take();
+            }
+        });
+    }
     let ptr = Rc::as_ptr(&props.doc) as usize;
 
     let onedit = {
         let pending = pending.clone();
+        let serial = serial.clone();
+        let expiry = expiry.clone();
+        let live = live.clone();
         let onedit = props.onedit.clone();
         Callback::from(move |ev: EditEvent| {
             if is_structural(&ev) {
-                *pending.borrow_mut() = Some((ev.clone(), ptr));
+                // Empty the live region first: the same message twice in a
+                // row only reaches assistive technology if the text changes
+                // in between (Yew leaves an unchanged text node alone).
+                live.set(AttrValue::default());
+                let id = {
+                    let mut n = serial.borrow_mut();
+                    *n += 1;
+                    *n
+                };
+                *pending.borrow_mut() = Some((ev.clone(), ptr, id));
+                let guard = expire_pending_on_next_input(pending.clone(), id);
+                // Replacing the old guard unregisters its listeners.
+                *expiry.borrow_mut() = guard;
             }
             onedit.emit(ev);
         })
@@ -115,6 +257,7 @@ pub fn odrl_prose_view(props: &OdrlProseViewProps) -> Html {
 
     {
         let pending = pending.clone();
+        let expiry = expiry.clone();
         let doc = props.doc.clone();
         let root = root.clone();
         let live = live.clone();
@@ -123,11 +266,13 @@ pub fn odrl_prose_view(props: &OdrlProseViewProps) -> Html {
             let taken = {
                 let mut p = pending.borrow_mut();
                 match p.as_ref() {
-                    Some((_, old)) if old != ptr => p.take(),
+                    Some((_, old, _)) if old != ptr => p.take(),
                     _ => None,
                 }
             };
-            if let Some((ev, _)) = taken {
+            if let Some((ev, _, _)) = taken {
+                // Answered: nothing is left to expire.
+                expiry.borrow_mut().take();
                 let mut done = false;
                 if let Some(el) = root.cast::<web_sys::Element>() {
                     if let Some(t) = focus_after(&ev, &doc) {
@@ -262,7 +407,9 @@ fn collect_segment_keys(seg: &Segment, keys: &mut Vec<String>) {
                 }
             }
         }
-        Segment::Text(_) | Segment::RuleKind(_) => {}
+        // Text and rule-kind segments have no issue key, and neither does a
+        // segment kind this version does not know.
+        _ => {}
     }
 }
 
@@ -298,6 +445,11 @@ impl Rend<'_> {
 
     /// The issues at the given keys, as blocks after the sentence.
     fn issue_block(&self, keys: &[String]) -> Html {
+        html! { <>{ for self.issue_items(keys) }</> }
+    }
+
+    /// One element per issue at the given keys.
+    fn issue_items(&self, keys: &[String]) -> Vec<Html> {
         let cfg = self.cfg();
         let mut out = vec![];
         for key in keys {
@@ -331,7 +483,7 @@ impl Rend<'_> {
                 });
             }
         }
-        html! { <>{ for out }</> }
+        out
     }
 
     fn node_key(path: &NodePath) -> String {
@@ -374,7 +526,7 @@ impl Rend<'_> {
         let l = &cfg.labels;
         let noun = noun.map(str::to_string).unwrap_or_else(|| match item {
             NewItem::Logical(_) => l.nouns.group.to_string(),
-            NewItem::Default => l.nouns.list(list.kind).to_string(),
+            _ => l.nouns.list(list.kind).to_string(),
         });
         let owner = l.describe_list_owner(list);
         let name = l.button_name(&l.add, &noun, None, &owner);
@@ -384,6 +536,7 @@ impl Rend<'_> {
             ButtonContent::SymbolAndText => format!("{} {}", l.add_symbol, noun),
         };
         let ev = EditEvent::Add {
+            expect: self.doc.list_owner_id(list),
             list: list.clone(),
             index,
             item,
@@ -582,7 +735,13 @@ impl Rend<'_> {
             }
             Segment::RuleKind(k) => {
                 if self.edit && k.changeable && cfg.rules.allow_rule_kind_change {
-                    html! { <RuleKindSelect slot={k.clone()} env={EnvRef(self.env.clone())} /> }
+                    html! {
+                        <RuleKindSelect
+                            slot={k.clone()}
+                            env={EnvRef(self.env.clone())}
+                            kinds={self.offered_kinds(k)}
+                        />
+                    }
                 } else {
                     let l = &cfg.labels;
                     html! {
@@ -595,7 +754,32 @@ impl Rend<'_> {
                 }
             }
             Segment::List(l) => self.slot_list(l),
+            // A segment kind this version does not know renders nothing.
+            _ => Html::default(),
         }
+    }
+
+    /// The kinds a rule can change to: its own, and every other top-level
+    /// kind whose list the rules let the reducer move it into (the same
+    /// checks as the + and - buttons, so an option is never offered that the
+    /// reducer would refuse).
+    fn offered_kinds(&self, k: &prose_core::edit::RuleKindSlot) -> Vec<RuleList> {
+        let owner = k.rule.parent().unwrap_or_else(|| k.rule.clone());
+        let rules = &self.cfg().rules;
+        let can_leave =
+            rules.can_remove(self.doc, &ListPath::of(&owner, ListKind::Rules(k.current)));
+        [
+            RuleList::Permission,
+            RuleList::Prohibition,
+            RuleList::Obligation,
+        ]
+        .into_iter()
+        .filter(|to| {
+            *to == k.current
+                || (can_leave
+                    && rules.can_add(self.doc, &ListPath::of(&owner, ListKind::Rules(*to))))
+        })
+        .collect()
     }
 
     fn sentence(&self, s: &Sentence) -> Html {
@@ -624,6 +808,12 @@ impl Rend<'_> {
             </>
         });
         let data_node = it.node.map(|_| it.slot.path.node.to_string());
+        // Issues the host put on the item's node (an action or an entity).
+        let node_issues = if it.node.is_some() && !self.issues.is_empty() {
+            self.issue_block(&[Self::node_key(&it.slot.path.node)])
+        } else {
+            Html::default()
+        };
         let body = match &it.locked {
             Some(locked) => self.locked(locked),
             None => html! {
@@ -643,6 +833,7 @@ impl Rend<'_> {
             >
                 { body }
                 { controls }
+                { node_issues }
             </span>
         }
     }
@@ -867,10 +1058,13 @@ impl Rend<'_> {
         };
         if let Some(locked) = &r.locked {
             return li(html! {
-                <p class={cls!(cfg, sentence, "prose-rule-sentence")} style={cfg.styles.sentence.clone()}>
-                    { self.locked(locked) }
-                    { controls }
-                </p>
+                <>
+                    <p class={cls!(cfg, sentence, "prose-rule-sentence")} style={cfg.styles.sentence.clone()}>
+                        { self.locked(locked) }
+                        { controls }
+                    </p>
+                    { self.issues_for(&r.path, &[]) }
+                </>
             });
         }
         let cond_label = if r.conditions.in_duty {
@@ -902,8 +1096,10 @@ impl Rend<'_> {
         let mut label = match f.kind {
             RuleList::Duty if f.in_odrl_position => l.follow_up_duty.to_string(),
             RuleList::Duty => l.follow_up_duty_elsewhere.to_string(),
-            RuleList::Remedy => l.follow_up_remedy.to_string(),
-            _ => l.follow_up_consequence.to_string(),
+            RuleList::Remedy if f.in_odrl_position => l.follow_up_remedy.to_string(),
+            RuleList::Remedy => l.follow_up_remedy_elsewhere.to_string(),
+            _ if f.in_odrl_position => l.follow_up_consequence.to_string(),
+            _ => l.follow_up_consequence_elsewhere.to_string(),
         };
         if !f.in_odrl_position && !l.carried_note.is_empty() {
             label = format!("{label} {}", l.carried_note);
@@ -959,6 +1155,23 @@ impl Rend<'_> {
         })
     }
 
+    /// The policy heading. The toolbar sits beside the `<h3>`, not in it: a
+    /// heading's accessible name is made from its content, and the buttons'
+    /// names would otherwise be read in every list of headings. In Read mode
+    /// there is no toolbar and the bare `<h3>` is kept.
+    fn heading_row(&self, inner: Html, controls: Html) -> Html {
+        let cfg = self.cfg();
+        let h3 = html! {
+            <h3 class={cls!(cfg, heading, "prose-heading")} style={cfg.styles.heading.clone()}>
+                { inner }
+            </h3>
+        };
+        if !self.edit {
+            return h3;
+        }
+        html! { <div class="prose-heading-row">{ h3 }{ controls }</div> }
+    }
+
     fn policy(&self, p: &PolicyProse) -> Html {
         let cfg = self.cfg();
         let list = ListPath::policies();
@@ -985,10 +1198,10 @@ impl Rend<'_> {
         };
         if let Some(locked) = &p.locked {
             return section(html! {
-                <h3 class={cls!(cfg, heading, "prose-heading")} style={cfg.styles.heading.clone()}>
-                    { self.locked(locked) }
-                    { controls }
-                </h3>
+                <>
+                    { self.heading_row(self.locked(locked), controls) }
+                    { self.issues_for(&p.path, &[]) }
+                </>
             });
         }
         let notes: Vec<&Sentence> = p
@@ -1012,11 +1225,15 @@ impl Rend<'_> {
         });
         section(html! {
             <>
-                <h3 class={cls!(cfg, heading, "prose-heading")} style={cfg.styles.heading.clone()}>
-                    { self.sentence(&p.heading) }
-                    { self.decoration(DecorationAt::Policy, &p.path, p.node) }
-                    { controls }
-                </h3>
+                { self.heading_row(
+                    html! {
+                        <>
+                            { self.sentence(&p.heading) }
+                            { self.decoration(DecorationAt::Policy, &p.path, p.node) }
+                        </>
+                    },
+                    controls,
+                ) }
                 { self.issues_for(&p.path, &[&p.heading, &p.intro]) }
                 <p class={cls!(cfg, intro, "prose-intro")} style={cfg.styles.intro.clone()}>
                     { self.sentence(&p.intro) }
@@ -1081,7 +1298,7 @@ impl Rend<'_> {
                 </p>
                 <ul>
                     { for self.doc.warnings.iter().map(|w| html! { <li>{ w.clone() }</li> }) }
-                    { self.issue_block(&["doc".to_string()]) }
+                    { for self.issue_items(&["doc".to_string()]).into_iter().map(|i| html! { <li>{ i }</li> }) }
                 </ul>
             </aside>
         }

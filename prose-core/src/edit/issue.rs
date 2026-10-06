@@ -10,6 +10,7 @@ pub enum Severity {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum IssueTarget {
     Doc,
     Node(NodePath),

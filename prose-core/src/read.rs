@@ -117,6 +117,17 @@ pub(crate) fn get<'a>(o: &'a Obj, keys: &[&str]) -> Option<&'a Value> {
     keys.iter().find_map(|k| o.get(*k))
 }
 
+/// The identifier of a node object that carries nothing else but `@id`: a
+/// rule written as `{"@id": "urn:rule:1"}` is a reference, like the bare
+/// string. `uid` and `id` are not: an editor writes a rule whose other
+/// properties were all removed as `{"uid": ..}`, and that is still a rule.
+pub(crate) fn bare_reference(o: &Obj) -> Option<String> {
+    if o.len() != 1 {
+        return None;
+    }
+    o.get("@id").and_then(|x| x.as_str().map(String::from))
+}
+
 /// The identifier of a node: a bare string, or `uid`/`@id`/`id`.
 pub(crate) fn ident(v: &Value) -> Option<String> {
     match v {
@@ -131,6 +142,8 @@ pub(crate) fn ident(v: &Value) -> Option<String> {
 #[derive(Default)]
 struct Reader {
     warnings: Vec<String>,
+    /// The same messages, for de-duplication in constant time.
+    seen: std::collections::HashSet<String>,
 }
 
 /// What a rule inherits from its policy when it states none of its own.
@@ -145,7 +158,7 @@ struct Inherited {
 impl Reader {
     fn warn(&mut self, msg: impl Into<String>) {
         let msg = msg.into();
-        if !self.warnings.contains(&msg) {
+        if self.seen.insert(msg.clone()) {
             self.warnings.push(msg);
         }
     }
@@ -272,16 +285,19 @@ impl Reader {
     }
 
     fn rule(&mut self, v: &Value, kind: RuleKind, inh: &Inherited) -> Rule {
-        let Value::Object(o) = v else {
-            let id = ident(v).unwrap_or_else(|| "(unnamed)".into());
-            return Rule {
-                kind,
-                uid: Some(id.clone()),
-                sentence: format!("The rule {id} is referenced here but not defined."),
-                refinements: vec![],
-                conditions: vec![],
-                follow_ups: vec![],
-            };
+        let o = match v {
+            Value::Object(o) if bare_reference(o).is_none() => o,
+            _ => {
+                let id = ident(v).unwrap_or_else(|| "(unnamed)".into());
+                return Rule {
+                    kind,
+                    uid: Some(id.clone()),
+                    sentence: format!("The rule {id} is referenced here but not defined."),
+                    refinements: vec![],
+                    conditions: vec![],
+                    follow_ups: vec![],
+                };
+            }
         };
         self.unknown_keys(o, RULE_KEYS, "a rule");
         let uid = get(o, &["uid", "@id", "id"]).and_then(ident);
@@ -387,8 +403,20 @@ impl Reader {
                     _ => "Duties attached to this rule",
                 },
             ),
-            ("remedy", "Remedies if this prohibition is breached"),
-            ("consequence", "Consequences if this duty is not fulfilled"),
+            (
+                "remedy",
+                match kind {
+                    RuleKind::Prohibition => "Remedies if this prohibition is breached",
+                    _ => "Remedies attached to this rule",
+                },
+            ),
+            (
+                "consequence",
+                match kind {
+                    RuleKind::Obligation => "Consequences if this duty is not fulfilled",
+                    _ => "Consequences attached to this rule",
+                },
+            ),
         ] {
             if let Some(v) = o.get(key) {
                 let rules: Vec<Rule> = items(v)
@@ -554,7 +582,8 @@ impl Reader {
                     return match inner {
                         Value::String(s) if typed => s.clone(),
                         Value::String(s) => fmt_str(s),
-                        other => other.to_string(),
+                        // Sorted keys, as v0.1 printed them (it had no `preserve_order`).
+                        other => sorted(other).to_string(),
                     };
                 }
                 match ident(v) {
@@ -570,6 +599,23 @@ impl Reader {
                 "an unreadable value".to_string()
             }
         }
+    }
+}
+
+/// The value with every object's keys in sorted order.
+fn sorted(v: &Value) -> Value {
+    match v {
+        Value::Object(o) => {
+            let mut keys: Vec<&String> = o.keys().collect();
+            keys.sort();
+            Value::Object(
+                keys.into_iter()
+                    .map(|k| (k.clone(), sorted(&o[k])))
+                    .collect(),
+            )
+        }
+        Value::Array(a) => Value::Array(a.iter().map(sorted).collect()),
+        other => other.clone(),
     }
 }
 

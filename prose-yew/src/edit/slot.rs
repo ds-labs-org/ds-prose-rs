@@ -123,6 +123,8 @@ pub(crate) fn issue_key(t: &IssueTarget) -> String {
         IssueTarget::Node(p) => format!("node:{p}"),
         IssueTarget::Slot(s) => format!("slot:{s}"),
         IssueTarget::List(l) => format!("list:{l}"),
+        // A target this version does not know still gets a distinct key.
+        other => format!("other:{other:?}"),
     }
 }
 
@@ -175,6 +177,8 @@ fn placeholder(env: &Env, kind: SlotKind) -> AttrValue {
         SlotKind::Profile => &p.profile,
         SlotKind::PolicyRef => &p.policy_ref,
         SlotKind::Reference => &p.reference,
+        // A kind this version has no placeholder for shows none.
+        _ => return AttrValue::from(""),
     }
     .clone()
 }
@@ -198,6 +202,26 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
     let navigated = use_mut_ref(|| false);
     let reverting = use_mut_ref(|| false);
     let refocus = use_mut_ref(|| false);
+    // The raw text of the previous render, to notice the host changing the
+    // value under a slot that is being typed in; the text typed so far is
+    // kept in `restore` across the remount that follows, and `epoch` is the
+    // part of the key that remounts it.
+    let last_raw = use_mut_ref(|| slot.raw.clone());
+    let restore = use_mut_ref(|| None::<String>);
+    let epoch = use_mut_ref(|| 0u32);
+    if *dirty.borrow() && *last_raw.borrow() != slot.raw {
+        // Yew has not touched the DOM yet: what is in the span is what the
+        // user typed. Without a remount Yew would overwrite that text node
+        // with the host's new value, and the edit would be lost silently.
+        let typed = node_ref
+            .cast::<web_sys::Element>()
+            .and_then(|e| e.text_content());
+        if let Some(t) = typed {
+            *restore.borrow_mut() = Some(t);
+            *epoch.borrow_mut() += 1;
+        }
+    }
+    *last_raw.borrow_mut() = slot.raw.clone();
     let query = use_state(String::new);
     let open = use_state(|| false);
     let active = use_state(|| 0usize);
@@ -432,11 +456,21 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         let refocus = refocus.clone();
         let reverting = reverting.clone();
         let node_ref = node_ref.clone();
+        let restore = restore.clone();
         use_effect(move || {
-            let want = std::mem::take(&mut *refocus.borrow_mut());
+            let mut want = std::mem::take(&mut *refocus.borrow_mut());
             *reverting.borrow_mut() = false;
-            if want && let Some(el) = node_ref.cast::<web_sys::Element>() {
-                focus_end(&el);
+            let typed = restore.borrow_mut().take();
+            if let Some(el) = node_ref.cast::<web_sys::Element>() {
+                if let Some(t) = typed {
+                    // The slot was remounted under the user's typing: put the
+                    // typed text back; it is committed on blur as usual.
+                    el.set_text_content(Some(&t));
+                    want = true;
+                }
+                if want {
+                    focus_end(&el);
+                }
             }
             || ()
         });
@@ -466,7 +500,13 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         styles.push(&cfg.styles.slot_whitespace);
     }
     let style = merge_styles(&styles);
-    let key = format!("{}:{:?}:{}", slot.owner.0, slot.path.field, rev.0);
+    let key = format!(
+        "{}:{:?}:{}:{}",
+        slot.owner.0,
+        slot.path.field,
+        rev.0,
+        *epoch.borrow()
+    );
     let label = cfg.labels.slot_name(&slot.path);
     let invalid = matches!(severity, Some(Severity::Error)).then_some("true");
     // aria-expanded and the popup relationship belong to a combobox, not a
@@ -537,6 +577,19 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                             e.prevent_default();
                             accept.emit(value.clone());
                         });
+                        // The pointer highlights an option (the stylesheet does
+                        // it for `:hover`); the active descendant follows, so
+                        // what is shown and what is announced agree. Enter
+                        // still commits the typed text unless an arrow key was
+                        // used.
+                        let onmousemove = {
+                            let active = active.clone();
+                            Callback::from(move |_: MouseEvent| {
+                                if *active != i {
+                                    active.set(i);
+                                }
+                            })
+                        };
                         let mut class = cls!(cfg, suggestion, "prose-suggestion");
                         let mut styles = vec![&cfg.styles.suggestion];
                         if i == active_idx {
@@ -552,6 +605,7 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                                 style={style}
                                 aria-selected={(i == active_idx).to_string()}
                                 onmousedown={onmousedown}
+                                onmousemove={onmousemove}
                             >
                                 { s.label.clone() }
                                 if let Some(h) = &s.hint {

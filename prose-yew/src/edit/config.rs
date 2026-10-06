@@ -182,6 +182,8 @@ impl EmptyTexts {
             EmptyText::NoAssigner => self.no_assigner.clone(),
             EmptyText::NoParent => self.no_parent.clone(),
             EmptyText::NoProfile => self.no_profile.clone(),
+            // A text this version has no wording for is shown as nothing.
+            _ => AttrValue::from(""),
         }
     }
 }
@@ -271,6 +273,9 @@ pub struct Labels {
     pub follow_up_duty_elsewhere: AttrValue,
     pub follow_up_remedy: AttrValue,
     pub follow_up_consequence: AttrValue,
+    /// A remedy outside a prohibition, a consequence outside a duty.
+    pub follow_up_remedy_elsewhere: AttrValue,
+    pub follow_up_consequence_elsewhere: AttrValue,
     /// Appended to follow-up labels outside ODRL's own positions.
     pub carried_note: AttrValue,
     pub notes_heading: AttrValue,
@@ -322,6 +327,8 @@ impl Default for Labels {
             follow_up_duty_elsewhere: a("Duties attached to this rule"),
             follow_up_remedy: a("Remedies if this prohibition is breached"),
             follow_up_consequence: a("Consequences if this duty is not fulfilled"),
+            follow_up_remedy_elsewhere: a("Remedies attached to this rule"),
+            follow_up_consequence_elsewhere: a("Consequences attached to this rule"),
             carried_note: a(""),
             notes_heading: a("Not rendered"),
             may: a("may"),
@@ -409,7 +416,10 @@ impl Nouns {
             Step::Rule(l, _) => self.rule(l),
             Step::Entity(r, _) => self.entity(r),
             Step::Action(_) => &self.action,
-            Step::Refinement(_) | Step::Constraint(_) | Step::Child(_) => &self.condition,
+            Step::Refinement(_) => &self.refinement,
+            Step::Constraint(_) | Step::Child(_) => &self.condition,
+            // No noun for a step this version does not know: the generic one.
+            _ => &self.value,
         }
     }
 
@@ -420,10 +430,13 @@ impl Nouns {
             ListKind::Rules(l) => self.rule(l),
             ListKind::Entities(r) => self.entity(r),
             ListKind::Actions => &self.action,
-            ListKind::Refinements | ListKind::Constraints | ListKind::Children => &self.condition,
+            ListKind::Refinements => &self.refinement,
+            ListKind::Constraints | ListKind::Children => &self.condition,
             ListKind::RightOperand => &self.value,
             ListKind::Profile => &self.profile,
             ListKind::InheritFrom => &self.parent,
+            // No noun for a list this version does not know: the generic one.
+            _ => &self.value,
         }
     }
 }
@@ -436,6 +449,8 @@ fn step_index(step: Step) -> usize {
         | Step::Refinement(i)
         | Step::Constraint(i)
         | Step::Child(i) => i,
+        // Unknown steps are not numbered.
+        _ => 0,
     }
 }
 
@@ -477,6 +492,8 @@ impl Labels {
             Field::OperandReference => f.operand_reference.to_string(),
             Field::Unit => f.unit.to_string(),
             Field::LogicalOp => f.logical_op.to_string(),
+            // A field this version has no name for is announced by its raw name.
+            other => other.to_string(),
         }
     }
 
@@ -585,6 +602,12 @@ pub struct EditConfig {
     pub show_raw_terms: bool,
     pub suggestions: bool,
     pub max_suggestions: usize,
+    /// The host translates an operator switch the reducer would refuse (it
+    /// joins the values into one before a switch from a set operator to a
+    /// single-value one, as `bridge::plan` of the ds42 playground does), so
+    /// the operator select offers every operator. Off: only the switches the
+    /// reducer accepts as they are.
+    pub host_plans_operator_switches: bool,
 }
 
 impl Default for EditConfig {
@@ -602,6 +625,7 @@ impl Default for EditConfig {
             show_raw_terms: true,
             suggestions: true,
             max_suggestions: 8,
+            host_plans_operator_switches: false,
         }
     }
 }

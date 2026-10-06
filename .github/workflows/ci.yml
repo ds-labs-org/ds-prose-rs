@@ -27,12 +27,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.96.1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@f50ab1ce44b2f120b2531407517fcbfb1d610fa5 # 1.96.1
         with:
           components: rustfmt, clippy
           targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Format
         run: cargo fmt --all --check
@@ -66,16 +66,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.96.1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@f50ab1ce44b2f120b2531407517fcbfb1d610fa5 # 1.96.1
         with:
           targets: wasm32-unknown-unknown
           components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # One source of truth: the runner must match the wasm-bindgen in
+      # Cargo.lock, so read it from there (a Dependabot lockfile bump cannot
+      # desynchronise it).
+      - name: Read wasm-bindgen version from Cargo.lock
+        id: wb
+        run: |
+          set -euo pipefail
+          v="$(awk '$0 == "name = \"wasm-bindgen\"" { getline; gsub(/[^0-9.]/, ""); print; exit }' Cargo.lock)"
+          [ -n "$v" ] || { echo "wasm-bindgen not found in Cargo.lock" >&2; exit 1; }
+          echo "wasm-bindgen in Cargo.lock: $v"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2.87.24
         with:
-          # Must match the wasm-bindgen version in Cargo.lock.
-          tool: wasm-bindgen-cli@0.2.129
+          tool: wasm-bindgen-cli@${{ steps.wb.outputs.version }}
 
       - name: Clippy (wasm32)
         run: cargo clippy -p prose-yew -p demo --target wasm32-unknown-unknown --features csr --all-targets --locked -- -D warnings
@@ -94,6 +104,7 @@ jobs:
           fi
           echo "chromedriver: ${CHROMEDRIVER}"
           cargo test -p prose-yew --target wasm32-unknown-unknown --features csr --locked --test '*'
+          cargo test -p demo --target wasm32-unknown-unknown --locked --test '*'
 
   # The release demo build, served under the Pages sub-path and booted in a
   # browser. Catches a build or boot failure before the deploy workflow does.
@@ -101,12 +112,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.96.1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@f50ab1ce44b2f120b2531407517fcbfb1d610fa5 # 1.96.1
         with:
           targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2.87.24
         with:
           tool: trunk@0.22.0-beta.2
 
@@ -122,8 +133,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: taiki-e/install-action@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2.87.24
         with:
-          tool: cargo-deny
+          tool: cargo-deny@0.20.2
       - run: cargo deny check

@@ -268,7 +268,7 @@ async fn plus_and_minus_emit_events_and_move_focus() {
     settle().await;
     assert!(matches!(
         log.borrow().last(),
-        Some(EditEvent::Add { list: l, index: 1, .. }) if *l == list
+        Some(EditEvent::Add { list: l, index: 1, expect: Some(_), .. }) if *l == list
     ));
     assert_eq!(
         active_attr("data-slot").as_deref(),
@@ -520,5 +520,480 @@ async fn changing_a_rule_kind_leaves_focus_on_its_select() {
     assert_eq!(
         active.get_attribute("data-node").as_deref(),
         Some("policy[0].prohibition[0]")
+    );
+}
+
+// --- audit findings -------------------------------------------------------------
+
+use prose_yew::ProseEditor;
+use web_sys::{MouseEvent, MouseEventInit, MutationObserver, MutationObserverInit};
+
+type Handle = Rc<RefCell<Option<ProseEditor>>>;
+
+#[derive(Properties, PartialEq, Clone)]
+struct HostBheProps {
+    json: AttrValue,
+    log: Log,
+    handle: Handle,
+    /// Events of this kind never reach the hook (a host that refuses them).
+    drop_remove: bool,
+}
+
+/// The README host: `use_prose_editor`, an Undo button beside the view, and
+/// an `onedit` wrapper that can drop events. Exposes the editor to the test.
+#[function_component(HostB)]
+fn host_b(p: &HostBheProps) -> Html {
+    let json = p.json.clone();
+    let editor = use_prose_editor(
+        move || read_model(&json).expect("a readable fixture"),
+        Rc::new(EditRules::default()),
+    );
+    *p.handle.borrow_mut() = Some(editor.clone());
+    let onedit = {
+        let log = p.log.clone();
+        let inner = editor.onedit.clone();
+        let drop_remove = p.drop_remove;
+        Callback::from(move |ev: EditEvent| {
+            log.borrow_mut().push(ev.clone());
+            if drop_remove && matches!(ev, EditEvent::Remove { .. }) {
+                return;
+            }
+            inner.emit(ev);
+        })
+    };
+    let undo = {
+        let undo = editor.undo.clone();
+        Callback::from(move |_| undo.emit(()))
+    };
+    html! {
+        <>
+            <button id="host-undo" type="button" disabled={!editor.can_undo} onclick={undo}>{ "Undo" }</button>
+            <OdrlProseView
+                doc={editor.doc.clone()}
+                mode={EditMode::Edit}
+                config={Rc::new(EditConfig::default())}
+                onedit={onedit}
+            />
+        </>
+    }
+}
+
+async fn mount_b(json: &str, drop_remove: bool) -> (Element, Log, Handle) {
+    let container = document().create_element("div").unwrap();
+    document().body().unwrap().append_child(&container).unwrap();
+    let log: Log = Rc::new(RefCell::new(vec![]));
+    let handle: Handle = Rc::new(RefCell::new(None));
+    let props = HostBheProps {
+        json: json.to_string().into(),
+        log: log.clone(),
+        handle: handle.clone(),
+        drop_remove,
+    };
+    std::mem::forget(
+        yew::Renderer::<HostB>::with_root_and_props(container.clone(), props).render(),
+    );
+    settle().await;
+    (container, log, handle)
+}
+
+fn click(el: &Element) {
+    el.clone().dyn_into::<HtmlElement>().unwrap().click();
+}
+
+#[wasm_bindgen_test]
+async fn a_refused_structural_event_has_no_later_effect() {
+    let (c, _log, _h) = mount_b(OFFER, true).await;
+    // Something to undo, so the host's Undo button can take focus.
+    for v in ["neq", "gt"] {
+        let select: HtmlSelectElement = slot(&c, "policy[0].permission[0].constraint[0]#operator")
+            .dyn_into()
+            .unwrap();
+        select.set_value(v);
+        select
+            .dispatch_event(&Event::new_with_event_init_dict("change", &bubbling()).unwrap())
+            .unwrap();
+        settle().await;
+    }
+    // The host drops this Remove: nothing changes.
+    click(&q(
+        &c,
+        "[aria-label=\"Remove condition 1 of permission 1 of policy 1\"]",
+    ));
+    settle().await;
+    assert!(
+        c.query_selector("[data-node=\"policy[0].permission[0].constraint[0]\"]")
+            .unwrap()
+            .is_some()
+    );
+    // A later, unrelated change of the document (Undo) must not run the
+    // dropped event's focus move or announcement.
+    let undo = q(&c, "#host-undo").dyn_into::<HtmlElement>().unwrap();
+    undo.focus().unwrap();
+    undo.click();
+    settle().await;
+    assert_eq!(
+        document()
+            .active_element()
+            .and_then(|e| e.get_attribute("id"))
+            .as_deref(),
+        Some("host-undo"),
+        "focus stays on the button the user pressed"
+    );
+    assert_eq!(q(&c, ".prose-live").text_content().unwrap(), "");
+}
+
+#[wasm_bindgen_test]
+async fn a_host_change_under_a_dirty_slot_does_not_lose_the_typed_text() {
+    let (c, log, h) = mount_b(OFFER, false).await;
+    let path = "policy[0]#uid";
+    let el = slot(&c, path);
+    el.focus().unwrap();
+    el.first_child()
+        .unwrap()
+        .set_node_value(Some("urn:typed-by-user"));
+    fire_input(&el);
+    settle().await;
+    let editor = h.borrow().clone().unwrap();
+    editor.onedit.emit(EditEvent::SetText {
+        slot: path.parse::<SlotPath>().unwrap(),
+        expect: id_of(OFFER, "policy[0]"),
+        value: "urn:changed-externally".into(),
+    });
+    settle().await;
+    settle().await;
+    assert_eq!(
+        slot(&c, path).text_content().unwrap(),
+        "urn:typed-by-user",
+        "the user's text is still there"
+    );
+    fire_focusout(&slot(&c, path));
+    settle().await;
+    assert_eq!(
+        set_texts(&log),
+        vec![(path.to_string(), "urn:typed-by-user".to_string())],
+        "and is committed on blur"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn the_same_announcement_twice_changes_the_live_region_twice() {
+    let (c, _log, _h) = mount_b(OFFER, false).await;
+    let live = q(&c, ".prose-live");
+    // The observer's callback runs in a microtask, so it is the one that counts.
+    let batches = Rc::new(std::cell::Cell::new(0u32));
+    let observer = {
+        let batches = batches.clone();
+        let cb = wasm_bindgen::closure::Closure::<
+            dyn FnMut(wasm_bindgen::JsValue, wasm_bindgen::JsValue),
+        >::new(move |_, _| batches.set(batches.get() + 1));
+        let o = MutationObserver::new(cb.as_ref().unchecked_ref()).unwrap();
+        std::mem::forget(cb);
+        o
+    };
+    let init = MutationObserverInit::new();
+    init.set_child_list(true);
+    init.set_character_data(true);
+    init.set_subtree(true);
+    observer.observe_with_options(&live, &init).unwrap();
+    let add = "[data-add=\"policy[0].permission[0]@constraint\"]";
+    for round in 1..=2 {
+        batches.set(0);
+        click(&q(&c, add));
+        settle().await;
+        settle().await;
+        assert_eq!(live.text_content().unwrap(), "condition added");
+        assert!(
+            batches.get() > 0,
+            "round {round}: assistive technology saw a change"
+        );
+    }
+}
+
+#[wasm_bindgen_test]
+async fn hovering_an_option_moves_the_active_descendant() {
+    let (c, _log) = mount(TWO_PERMISSIONS).await;
+    let el = slot(&c, ACTION);
+    type_into(&el, "d");
+    settle().await;
+    let options = c.query_selector_all("[role=option]").unwrap();
+    assert!(options.length() >= 3);
+    let third = options.item(2).unwrap().dyn_into::<Element>().unwrap();
+    let init = MouseEventInit::new();
+    init.set_bubbles(true);
+    third
+        .dispatch_event(&MouseEvent::new_with_mouse_event_init_dict("mousemove", &init).unwrap())
+        .unwrap();
+    settle().await;
+    let want = third.id();
+    assert_eq!(
+        slot(&c, ACTION)
+            .get_attribute("aria-activedescendant")
+            .as_deref(),
+        Some(want.as_str())
+    );
+    let third = q(&c, &format!("[id=\"{want}\"]"));
+    assert_eq!(
+        third.get_attribute("aria-selected").as_deref(),
+        Some("true")
+    );
+    assert!(third.class_name().contains("prose-suggestion-active"));
+}
+
+#[wasm_bindgen_test]
+async fn the_rule_kind_select_does_not_offer_a_kind_the_rules_forbid() {
+    use prose_core::edit::Limit;
+    let container = document().create_element("div").unwrap();
+    document().body().unwrap().append_child(&container).unwrap();
+    let mut cfg = EditConfig::default();
+    cfg.rules.prohibition = Limit::NONE;
+    let cfg = Rc::new(cfg);
+    let doc = Rc::new(read_model(TWO_PERMISSIONS).unwrap());
+    let props = yew::props!(prose_yew::OdrlProseViewProps {
+        doc: doc,
+        mode: EditMode::Edit,
+        config: cfg,
+    });
+    std::mem::forget(
+        yew::Renderer::<OdrlProseView>::with_root_and_props(container.clone(), props).render(),
+    );
+    settle().await;
+    let select: HtmlSelectElement = q(
+        &container,
+        "select.prose-rule-kind[data-node=\"policy[0].permission[0]\"]",
+    )
+    .dyn_into()
+    .unwrap();
+    assert_eq!(
+        select.query_selector_all("option").unwrap().length(),
+        2,
+        "{}",
+        select.outer_html()
+    );
+    assert!(
+        container
+            .query_selector("option[value=\"prohibition\"]")
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[derive(Properties, PartialEq)]
+struct SpinProps {
+    tick: usize,
+}
+
+/// A slow sibling: more than Yew's 16 ms budget per scheduler run, so the
+/// scheduler yields to the browser (a task boundary) before the view renders.
+#[function_component(Spin)]
+fn spin(_: &SpinProps) -> Html {
+    let t = web_sys::js_sys::Date::now();
+    while web_sys::js_sys::Date::now() - t < 40.0 {}
+    html! {}
+}
+
+#[function_component(SlowHost)]
+fn slow_host(p: &HostProps) -> Html {
+    let json = p.json.clone();
+    let editor = use_prose_editor(
+        move || read_model(&json).expect("a readable fixture"),
+        Rc::new(EditRules::default()),
+    );
+    let ticks = use_mut_ref(|| 0usize);
+    *ticks.borrow_mut() += 1;
+    let tick = *ticks.borrow();
+    html! {
+        <>
+            <Spin tick={tick} />
+            <OdrlProseView
+                doc={editor.doc.clone()}
+                mode={EditMode::Edit}
+                config={Rc::new(EditConfig::default())}
+                onedit={editor.onedit.clone()}
+            />
+        </>
+    }
+}
+
+#[wasm_bindgen_test]
+async fn a_slow_render_does_not_lose_the_focus_move_or_the_announcement() {
+    let container = document().create_element("div").unwrap();
+    document().body().unwrap().append_child(&container).unwrap();
+    let props = HostProps {
+        json: OFFER.into(),
+        log: Rc::new(RefCell::new(vec![])),
+    };
+    std::mem::forget(
+        yew::Renderer::<SlowHost>::with_root_and_props(container.clone(), props).render(),
+    );
+    settle().await;
+    click(&q(
+        &container,
+        "[data-add=\"policy[0].permission[0]@constraint\"]",
+    ));
+    // The slow render is split by a task boundary; wait it out.
+    TimeoutFuture::new(200).await;
+    assert_eq!(
+        active_attr("data-slot").as_deref(),
+        Some("policy[0].permission[0].constraint[1]#leftOperand")
+    );
+    assert_eq!(
+        q(&container, ".prose-live").text_content().unwrap(),
+        "condition added"
+    );
+}
+
+// --- audit round 4 ---------------------------------------------------------------
+
+#[wasm_bindgen_test]
+async fn a_refused_event_expires_without_any_user_input() {
+    let (c, _log, h) = mount_b(OFFER, true).await;
+    click(&q(
+        &c,
+        "[aria-label=\"Remove condition 1 of permission 1 of policy 1\"]",
+    ));
+    settle().await;
+    // No user input at all; the pending event must lapse by itself.
+    TimeoutFuture::new(900).await;
+    let before = document().active_element().map(|e| e.tag_name());
+    // A collaborator, autosave or host timer changes the document.
+    let editor = h.borrow().clone().unwrap();
+    editor.onedit.emit(EditEvent::SetText {
+        slot: "policy[0]#uid".parse::<SlotPath>().unwrap(),
+        expect: id_of(OFFER, "policy[0]"),
+        value: "urn:changed-externally".into(),
+    });
+    settle().await;
+    settle().await;
+    assert_eq!(
+        q(&c, ".prose-live").text_content().unwrap(),
+        "",
+        "a removal that never happened is not announced"
+    );
+    assert_eq!(
+        document().active_element().map(|e| e.tag_name()),
+        before,
+        "focus stays where it was"
+    );
+    assert!(
+        c.query_selector("[data-node=\"policy[0].permission[0].constraint[0]\"]")
+            .unwrap()
+            .is_some()
+    );
+}
+
+/// Wrap `document.addEventListener` and `removeEventListener` so the test can
+/// count the capture-phase pointer, mouse, key and click listeners that are
+/// registered right now. `window.__live()` returns that number.
+fn count_document_listeners() {
+    web_sys::js_sys::eval(
+        r#"
+        (function () {
+          if (window.__live) { window.__reset(); return; }
+          const live = new Map();
+          const kinds = ["pointerdown", "mousedown", "keydown", "click"];
+          const key = (t, f, o) => t + (o === true || (o && o.capture) ? "/c" : "/b");
+          const add = document.addEventListener.bind(document);
+          const rm = document.removeEventListener.bind(document);
+          document.addEventListener = function (t, f, o) {
+            if (kinds.includes(t)) {
+              const k = key(t, f, o);
+              if (!live.has(k)) live.set(k, new Set());
+              live.get(k).add(f);
+              if (o && o.once) {
+                // A once-listener unregisters itself when it fires.
+                return add(t, function (e) { live.get(k).delete(f); return f.call(this, e); }, o);
+              }
+            }
+            return add(t, f, o);
+          };
+          document.removeEventListener = function (t, f, o) {
+            if (kinds.includes(t)) {
+              const s = live.get(key(t, f, o));
+              if (s) s.delete(f);
+            }
+            return rm(t, f, o);
+          };
+          window.__live = () => { let n = 0; for (const [k, s] of live) if (k.endsWith("/c")) n += s.size; return n; };
+          window.__reset = () => live.clear();
+        })()
+        "#,
+    )
+    .unwrap();
+}
+
+fn live_listeners() -> u32 {
+    web_sys::js_sys::eval("window.__live()")
+        .unwrap()
+        .as_f64()
+        .unwrap() as u32
+}
+
+fn keydown_on_document() {
+    let init = KeyboardEventInit::new();
+    init.set_bubbles(true);
+    init.set_key("Tab");
+    document()
+        .dispatch_event(
+            &KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init).unwrap(),
+        )
+        .unwrap();
+}
+
+#[wasm_bindgen_test]
+async fn a_keydown_removes_every_expiry_listener() {
+    count_document_listeners();
+    let (c, _log, _h) = mount_b(OFFER, true).await;
+    click(&q(
+        &c,
+        "[aria-label=\"Remove condition 1 of permission 1 of policy 1\"]",
+    ));
+    settle().await;
+    assert!(
+        live_listeners() > 0,
+        "a refused event waits for the next input"
+    );
+    keydown_on_document();
+    assert_eq!(live_listeners(), 0, "no expiry listener is left behind");
+}
+
+#[wasm_bindgen_test]
+async fn unmounting_removes_the_expiry_listeners() {
+    count_document_listeners();
+    let container = document().create_element("div").unwrap();
+    document().body().unwrap().append_child(&container).unwrap();
+    let props = HostBheProps {
+        json: OFFER.into(),
+        log: Rc::new(RefCell::new(vec![])),
+        handle: Rc::new(RefCell::new(None)),
+        drop_remove: true,
+    };
+    let app = yew::Renderer::<HostB>::with_root_and_props(container.clone(), props).render();
+    settle().await;
+    click(&q(
+        &container,
+        "[aria-label=\"Remove condition 1 of permission 1 of policy 1\"]",
+    ));
+    settle().await;
+    assert!(live_listeners() > 0);
+    app.destroy();
+    settle().await;
+    assert_eq!(live_listeners(), 0, "the view's listeners die with it");
+}
+
+#[wasm_bindgen_test]
+async fn an_answered_event_removes_its_expiry_listeners() {
+    count_document_listeners();
+    let (c, _log, _h) = mount_b(OFFER, false).await;
+    click(&q(&c, "[data-add=\"policy[0].permission[0]@constraint\"]"));
+    settle().await;
+    settle().await;
+    assert_eq!(
+        q(&c, ".prose-live").text_content().unwrap(),
+        "condition added"
+    );
+    assert_eq!(
+        live_listeners(),
+        0,
+        "the host answered; nothing waits any more"
     );
 }

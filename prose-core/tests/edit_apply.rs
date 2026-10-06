@@ -37,15 +37,8 @@ fn add_then_remove_is_the_identity_for_every_list_kind() {
         let mut doc = rich();
         let before = doc.normalized();
         let len = list_len(&doc, &list);
-        doc.apply(
-            &EditEvent::Add {
-                list: list.clone(),
-                index: len,
-                item: NewItem::Default,
-            },
-            &rules(),
-        )
-        .unwrap_or_else(|e| panic!("add {l}: {e}"));
+        doc.apply(&add_ev(&doc, list.clone(), len, NewItem::Default), &rules())
+            .unwrap_or_else(|e| panic!("add {l}: {e}"));
         assert_eq!(list_len(&doc, &list), len + 1, "{l}");
         assert_ne!(doc.normalized(), before, "{l}");
         let expect = item_id(&doc, &list, len);
@@ -67,11 +60,7 @@ fn add_in_the_middle_and_the_new_node_is_numbered_without_disturbing_others() {
     let mut doc = rich();
     let old_id = id_of(&doc, "policy[0].permission[0]");
     doc.apply(
-        &EditEvent::Add {
-            list: lp("policy[0]@permission"),
-            index: 0,
-            item: NewItem::Default,
-        },
+        &add_ev(&doc, lp("policy[0]@permission"), 0, NewItem::Default),
         &rules(),
     )
     .unwrap();
@@ -146,11 +135,7 @@ fn stale_and_missing_paths_leave_the_document_unchanged() {
             expect: id,
             value: "x".into(),
         },
-        EditEvent::Add {
-            list: lp("policy[0]@permission"),
-            index: 9,
-            item: NewItem::Default,
-        },
+        add_ev(&doc, lp("policy[0]@permission"), 9, NewItem::Default),
         EditEvent::Remove {
             list: lp("policy[0]@permission"),
             index: 9,
@@ -193,11 +178,7 @@ fn limits_are_enforced_at_max_and_min() {
     // At max.
     let e = doc
         .apply(
-            &EditEvent::Add {
-                list: lp("policy[0]@assigner"),
-                index: 1,
-                item: NewItem::Default,
-            },
+            &add_ev(&doc, lp("policy[0]@assigner"), 1, NewItem::Default),
             &r,
         )
         .unwrap_err();
@@ -259,14 +240,7 @@ fn follow_ups_are_only_allowed_in_odrl_positions() {
     ] {
         let l = lp(list);
         assert_eq!(r.can_add(&doc, &l), ok, "{list}");
-        let res = doc.apply(
-            &EditEvent::Add {
-                list: l,
-                index: 0,
-                item: NewItem::Default,
-            },
-            &r,
-        );
+        let res = doc.apply(&add_ev(&doc, l, 0, NewItem::Default), &r);
         assert_eq!(res.is_ok(), ok, "{list}: {res:?}");
         if !ok {
             assert!(matches!(res, Err(EditError::NotAllowed(_))));
@@ -290,11 +264,12 @@ fn locked_nodes_refuse_edits_but_can_be_removed_or_moved() {
     let locked_rule = id_of(&doc, "policy[0].permission[0]");
     let e = doc
         .apply(
-            &EditEvent::Add {
-                list: lp("policy[0].permission[0]@constraint"),
-                index: 0,
-                item: NewItem::Default,
-            },
+            &add_ev(
+                &doc,
+                lp("policy[0].permission[0]@constraint"),
+                0,
+                NewItem::Default,
+            ),
             &r,
         )
         .unwrap_err();
@@ -359,15 +334,8 @@ fn new_nodes_carry_the_defaults_and_unique_uids() {
     }]);
     let add_policy = |doc: &mut EditDoc| {
         let n = doc.policies.len();
-        doc.apply(
-            &EditEvent::Add {
-                list: ListPath::policies(),
-                index: n,
-                item: NewItem::Default,
-            },
-            &r,
-        )
-        .unwrap();
+        doc.apply(&add_ev(doc, ListPath::policies(), n, NewItem::Default), &r)
+            .unwrap();
     };
     add_policy(&mut doc);
     add_policy(&mut doc);
@@ -375,11 +343,7 @@ fn new_nodes_carry_the_defaults_and_unique_uids() {
     assert_eq!(doc.policies[2].uid.as_deref(), Some("urn:p:3"));
     assert_eq!(doc.policies[1].kind, "Offer");
     doc.apply(
-        &EditEvent::Add {
-            list: lp("policy[0]@permission"),
-            index: 0,
-            item: NewItem::Default,
-        },
+        &add_ev(&doc, lp("policy[0]@permission"), 0, NewItem::Default),
         &r,
     )
     .unwrap();
@@ -387,11 +351,12 @@ fn new_nodes_carry_the_defaults_and_unique_uids() {
     assert_eq!(rule.action.len(), 1);
     assert_eq!(rule.action[0].name, "display");
     doc.apply(
-        &EditEvent::Add {
-            list: lp("policy[0].permission[0]@constraint"),
-            index: 0,
-            item: NewItem::Default,
-        },
+        &add_ev(
+            &doc,
+            lp("policy[0].permission[0]@constraint"),
+            0,
+            NewItem::Default,
+        ),
         &r,
     )
     .unwrap();
@@ -417,23 +382,12 @@ fn minimums_are_filled_in_for_a_new_node() {
     r.duty = Limit::at_least(1);
     r.consequence = Limit::at_least(1);
     let mut doc = EditDoc::new(vec![]);
-    doc.apply(
-        &EditEvent::Add {
-            list: ListPath::policies(),
-            index: 0,
-            item: NewItem::Default,
-        },
-        &r,
-    )
-    .unwrap();
+    doc.apply(&add_ev(&doc, ListPath::policies(), 0, NewItem::Default), &r)
+        .unwrap();
     assert_eq!(doc.policies[0].assigner.len(), 1);
     assert_eq!(doc.policies[0].assigner[0].iri.as_deref(), Some(""));
     doc.apply(
-        &EditEvent::Add {
-            list: lp("policy[0]@permission"),
-            index: 0,
-            item: NewItem::Default,
-        },
+        &add_ev(&doc, lp("policy[0]@permission"), 0, NewItem::Default),
         &r,
     )
     .unwrap();
@@ -589,11 +543,7 @@ fn wrap_unwrap_and_move() {
     for _ in 0..2 {
         let n = doc.policies[0].profile.len();
         doc.apply(
-            &EditEvent::Add {
-                list: lp("policy[0]@profile"),
-                index: n,
-                item: NewItem::Default,
-            },
+            &add_ev(&doc, lp("policy[0]@profile"), n, NewItem::Default),
             &rules(),
         )
         .unwrap();
@@ -776,11 +726,7 @@ fn focus_after_every_variant() {
     ];
     for (list, index, slot) in cases {
         let mut d = rich();
-        let ev = EditEvent::Add {
-            list: lp(list),
-            index,
-            item: NewItem::Default,
-        };
+        let ev = add_ev(&d, lp(list), index, NewItem::Default);
         d.apply(&ev, &r).unwrap_or_else(|e| panic!("{list}: {e}"));
         assert_eq!(
             focus_after(&ev, &d),
@@ -790,11 +736,12 @@ fn focus_after_every_variant() {
     }
     // A logical group focuses its operator.
     let mut d = rich();
-    let ev = EditEvent::Add {
-        list: lp("policy[0].permission[0]@constraint"),
-        index: 1,
-        item: NewItem::Logical(LogicalOp::Or),
-    };
+    let ev = add_ev(
+        &d,
+        lp("policy[0].permission[0]@constraint"),
+        1,
+        NewItem::Logical(LogicalOp::Or),
+    );
     d.apply(&ev, &r).unwrap();
     assert_eq!(
         focus_after(&ev, &d),
@@ -810,11 +757,7 @@ fn focus_after_every_variant() {
     for _ in 0..2 {
         let n = d.policies[0].obligation.len();
         d.apply(
-            &EditEvent::Add {
-                list: lp("policy[0]@obligation"),
-                index: n,
-                item: NewItem::Default,
-            },
+            &add_ev(&d, lp("policy[0]@obligation"), n, NewItem::Default),
             &r,
         )
         .unwrap();
@@ -864,11 +807,7 @@ fn focus_after_every_variant() {
     // Move, ChangeRuleKind, Wrap, Unwrap.
     let mut d = rich();
     d.apply(
-        &EditEvent::Add {
-            list: lp("policy[0]@permission"),
-            index: 1,
-            item: NewItem::Default,
-        },
+        &add_ev(&d, lp("policy[0]@permission"), 1, NewItem::Default),
         &r,
     )
     .unwrap();
@@ -931,11 +870,12 @@ fn apply_is_atomic_when_an_add_fails_midway() {
     let before = doc.clone();
     let e = doc
         .apply(
-            &EditEvent::Add {
-                list: lp("policy[0].permission[0]@action"),
-                index: 0,
-                item: NewItem::Default,
-            },
+            &add_ev(
+                &doc,
+                lp("policy[0].permission[0]@action"),
+                0,
+                NewItem::Default,
+            ),
             &r,
         )
         .unwrap_err();

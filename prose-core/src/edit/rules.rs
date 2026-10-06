@@ -142,6 +142,15 @@ impl EditRules {
         self.set_operators.iter().any(|s| local_name(s) == local)
     }
 
+    /// Whether an operator may be switched from `from` to `to` on a
+    /// constraint holding `values` right operands. A set operator may be
+    /// switched to a single-value one only down to one value; a constraint
+    /// that already holds several values under a single-value operator
+    /// loses nothing by another single-value one.
+    pub fn operator_switch_allowed(&self, from: &str, to: &str, values: usize) -> bool {
+        values <= 1 || self.is_set_operator(to) || !self.is_set_operator(from)
+    }
+
     pub fn limit(&self, doc: &EditDoc, list: &ListPath) -> Limit {
         let owner_is_policy = list.owner.as_ref().is_some_and(|o| o.steps.is_empty());
         match list.kind {
@@ -212,6 +221,9 @@ impl EditRules {
                 None => return Some("no such list".into()),
                 Some((_, Some(reason))) => return Some(format!("locked: {reason}")),
                 Some((node, None)) => {
+                    if matches!(node, NodeRef::Rule(r) if r.reference.is_some()) {
+                        return Some("a rule given only by reference has nothing to add to".into());
+                    }
                     if let ListKind::Rules(kind) = list.kind {
                         let parent = owner.rule_chain().last().copied();
                         if !kind.is_top_level() && !odrl_position(parent, kind) {

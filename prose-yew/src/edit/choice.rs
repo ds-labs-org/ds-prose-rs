@@ -51,6 +51,8 @@ fn options(env: &Env, c: &ChoiceSlot, severity: Option<Severity>) -> (Vec<Opt>, 
                 label: label.to_string(),
             })
             .collect(),
+        // A choice this version has no vocabulary for offers only its value.
+        _ => Vec::new(),
     };
     // A compact IRI or full term for a listed one selects that option, unless
     // the host flagged the value as an error: then it is shown as it is, so
@@ -67,6 +69,15 @@ fn options(env: &Env, c: &ChoiceSlot, severity: Option<Severity>) -> (Vec<Opt>, 
                 .flatten()
         })
         .map(|o| o.value.clone());
+    // An operator the reducer would refuse is not offered, unless the host
+    // translates the switch itself.
+    if c.kind == ChoiceKind::Operator && !env.cfg.host_plans_operator_switches {
+        let rules = &env.cfg.rules;
+        opts.retain(|o| {
+            Some(&o.value) == selected.as_ref()
+                || rules.operator_switch_allowed(&c.raw, &o.value, c.values)
+        });
+    }
     let selected = match selected {
         Some(v) => v,
         None => {
@@ -75,6 +86,7 @@ fn options(env: &Env, c: &ChoiceSlot, severity: Option<Severity>) -> (Vec<Opt>, 
                     ChoiceKind::Operator => labels.fields.operator.to_string(),
                     ChoiceKind::LogicalOp => labels.fields.logical_op.to_string(),
                     ChoiceKind::Conflict => labels.fields.conflict.to_string(),
+                    _ => String::new(),
                 }
             } else {
                 fill(&labels.unknown_option, &[("raw", &c.raw)])
@@ -213,6 +225,8 @@ fn focus_callback(env: &Env, slot: SlotPath, kind: FocusKind, raw: String) -> Ca
 pub(crate) struct RuleKindSelectProps {
     pub slot: RuleKindSlot,
     pub env: EnvRef,
+    /// The kinds to offer; the rule's own is always among them.
+    pub kinds: Vec<RuleList>,
 }
 
 #[function_component(RuleKindSelect)]
@@ -227,11 +241,14 @@ pub(crate) fn rule_kind_select(props: &RuleKindSelectProps) -> Html {
         _ => RuleList::Obligation,
     };
     use_select_in_step(&node_ref, current.as_str().to_string());
-    let kinds = [
+    let kinds: Vec<(RuleList, AttrValue)> = [
         (RuleList::Permission, cfg.labels.may.clone()),
         (RuleList::Prohibition, cfg.labels.must_not.clone()),
         (RuleList::Obligation, cfg.labels.must.clone()),
-    ];
+    ]
+    .into_iter()
+    .filter(|(kind, _)| *kind == current || props.kinds.contains(kind))
+    .collect();
     let onchange = {
         let onedit = env.onedit.clone();
         let rule = k.rule.clone();

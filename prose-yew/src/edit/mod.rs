@@ -9,7 +9,7 @@
 //!
 //! Classes (each added to, never replacing, the built-in name; see
 //! [`ProseClasses`]): `ds-prose`, `prose-view`, `prose-edit`,
-//! `prose-reveal-hover`, `prose-policy`, `prose-heading`, `prose-intro`,
+//! `prose-reveal-hover`, `prose-policy`, `prose-heading-row`, `prose-heading`, `prose-intro`,
 //! `prose-notes`, `prose-rules`, `prose-rule` with `prose-permission` /
 //! `prose-prohibition` / `prose-obligation`, `prose-rule-sentence`,
 //! `prose-term`, `prose-slot` (`-empty`, `-invalid`, `-warning`,
@@ -64,6 +64,7 @@ pub enum EditMode {
 
 /// What a slot or select is, reported with the focus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FocusKind {
     Slot(SlotKind),
     Choice(ChoiceKind),
@@ -81,6 +82,7 @@ pub struct SlotFocus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DecorationAt {
     Policy,
     Rule,

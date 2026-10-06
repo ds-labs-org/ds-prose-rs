@@ -118,3 +118,13 @@ pub fn list_len(doc: &EditDoc, list: &ListPath) -> usize {
     }
     n
 }
+
+/// An `Add` carrying the owner expectation the document currently implies.
+pub fn add_ev(doc: &EditDoc, list: ListPath, index: usize, item: NewItem) -> EditEvent {
+    EditEvent::Add {
+        expect: doc.list_owner_id(&list),
+        list,
+        index,
+        item,
+    }
+}

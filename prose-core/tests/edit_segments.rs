@@ -255,6 +255,8 @@ fn check_segments(doc: &EditDoc, segs: &[Segment]) {
                 }
                 l.inherited.iter().for_each(|s| check_slot(doc, s));
             }
+            // `Segment` is non_exhaustive: a new variant needs its own check.
+            other => panic!("no ownership check for {other:?}"),
         }
     }
 }

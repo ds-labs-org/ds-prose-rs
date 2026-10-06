@@ -422,3 +422,226 @@ async fn empty_notes_the_host_cannot_fill_are_not_shown_in_edit_mode() {
     // The ones the host still allows stay.
     assert!(html.contains("Inherits the rules of "), "{html}");
 }
+
+// --- audit findings -------------------------------------------------------------
+
+fn node_issue(path: &str, message: &str) -> Issue {
+    Issue {
+        target: IssueTarget::Node(path.parse().unwrap()),
+        severity: Severity::Error,
+        message: message.into(),
+    }
+}
+
+#[tokio::test]
+async fn issue_on_a_locked_rule_is_rendered() {
+    let doc = Rc::new(read_model(r#"{"@type":"Set","permission":[42]}"#).unwrap());
+    let mut p = props(doc, EditMode::Edit, EditConfig::default());
+    p.issues = Rc::new(vec![node_issue("policy[0].permission[0]", "RULE-ISSUE-X")]);
+    let html = render_view(p).await;
+    assert!(html.contains("RULE-ISSUE-X"), "{html}");
+    assert!(html.contains("prose-issue"), "{html}");
+}
+
+#[tokio::test]
+async fn issue_on_a_locked_policy_is_rendered() {
+    let doc = Rc::new(read_model(r#"[42,{"@type":"Set","uid":"urn:q"}]"#).unwrap());
+    let mut p = props(doc, EditMode::Edit, EditConfig::default());
+    p.issues = Rc::new(vec![node_issue("policy[0]", "POLICY-ISSUE-X")]);
+    let html = render_view(p).await;
+    assert!(html.contains("POLICY-ISSUE-X"), "{html}");
+}
+
+#[tokio::test]
+async fn rule_kind_select_does_not_offer_a_kind_the_rules_forbid() {
+    let doc = Rc::new(
+        read_model(
+            r#"{"@type":"Set","uid":"urn:p","permission":[{"action":"use","target":"urn:a"}]}"#,
+        )
+        .unwrap(),
+    );
+    let mut cfg = EditConfig::default();
+    cfg.rules.prohibition = Limit::NONE;
+    let html = render_view(props(doc.clone(), EditMode::Edit, cfg)).await;
+    assert!(
+        !html.contains("data-add=\"policy[0]@prohibition\""),
+        "{html}"
+    );
+    assert!(
+        !html.contains("<option value=\"prohibition\""),
+        "the + is hidden, so the kind is not offered either: {html}"
+    );
+    assert!(html.contains("<option value=\"permission\""), "{html}");
+    assert!(html.contains("<option value=\"obligation\""), "{html}");
+    // With the default rules all three are offered.
+    let html = render_view(props(doc, EditMode::Edit, EditConfig::default())).await;
+    assert!(html.contains("<option value=\"prohibition\""), "{html}");
+}
+
+#[tokio::test]
+async fn issues_on_action_and_entity_nodes_are_rendered() {
+    let doc = Rc::new(
+        read_model(r#"{"@type":"Set","permission":[{"action":"use","target":"urn:a"}]}"#).unwrap(),
+    );
+    for mode in [EditMode::Edit, EditMode::Read] {
+        let mut p = props(doc.clone(), mode, EditConfig::default());
+        p.issues = Rc::new(vec![
+            node_issue("policy[0].permission[0].action[0]", "ACTION-NODE-ISSUE"),
+            node_issue("policy[0].permission[0].target[0]", "TARGET-NODE-ISSUE"),
+        ]);
+        let html = render_view(p).await;
+        assert!(html.contains("ACTION-NODE-ISSUE"), "{mode:?}: {html}");
+        assert!(html.contains("TARGET-NODE-ISSUE"), "{mode:?}: {html}");
+    }
+}
+
+#[tokio::test]
+async fn doc_issues_are_list_items() {
+    let mut p = props(doc_of("offer"), EditMode::Edit, EditConfig::default());
+    p.issues = Rc::new(vec![Issue {
+        target: IssueTarget::Doc,
+        severity: Severity::Info,
+        message: "DOC-NOTE".into(),
+    }]);
+    let html = render_view(p).await;
+    let aside = &html[html.find("<aside").expect("the notes block")..];
+    let ul = &aside[aside.find("<ul>").unwrap()..aside.find("</ul>").unwrap()];
+    assert!(
+        ul.starts_with("<ul><li><span id=\"prose-issue-doc-0\""),
+        "{ul}"
+    );
+    assert!(ul.contains("DOC-NOTE"), "{ul}");
+}
+
+#[tokio::test]
+async fn toolbar_is_outside_the_policy_heading() {
+    let mut p = props(doc_of("graph-two"), EditMode::Edit, EditConfig::default());
+    p.issues = Rc::new(vec![]);
+    let html = render_view(p).await;
+    let mut rest = html.as_str();
+    let mut n = 0;
+    while let Some(at) = rest.find("<h3") {
+        let end = rest[at..].find("</h3>").unwrap();
+        let heading = &rest[at..at + end];
+        assert!(
+            !heading.contains("<button"),
+            "buttons inside a heading: {heading}"
+        );
+        n += 1;
+        rest = &rest[at + end..];
+    }
+    assert!(n >= 2, "{html}");
+    assert!(
+        html.contains("Remove policy 2"),
+        "the buttons are still there"
+    );
+}
+
+#[test]
+fn refinement_noun_is_used() {
+    use prose_core::edit::{ListKind, Step};
+    let mut cfg = EditConfig::default();
+    assert_eq!(
+        cfg.labels.nouns.list(ListKind::Refinements).as_str(),
+        "limit"
+    );
+    cfg.labels.nouns.refinement = "LIMITNOUN".into();
+    assert_eq!(
+        cfg.labels.nouns.list(ListKind::Refinements).as_str(),
+        "LIMITNOUN"
+    );
+    assert_eq!(
+        cfg.labels.nouns.step(Step::Refinement(0)).as_str(),
+        "LIMITNOUN"
+    );
+    // Constraints and children stay "condition".
+    assert_eq!(
+        cfg.labels.nouns.list(ListKind::Constraints).as_str(),
+        "condition"
+    );
+    assert_eq!(cfg.labels.nouns.step(Step::Child(0)).as_str(), "condition");
+}
+
+// R4: the view labels follow-ups outside ODRL's own positions without
+// naming the wrong kind of rule, in Read and Edit mode alike.
+#[tokio::test]
+async fn follow_up_labels_outside_odrl_positions_do_not_misname_the_rule() {
+    let doc = Rc::new(
+        read_model(
+            r#"{"@type":"Set","permission":[{"action":"use","remedy":[{"action":"delete"}],"consequence":[{"action":"delete"}]}]}"#,
+        )
+        .unwrap(),
+    );
+    for mode in [EditMode::Read, EditMode::Edit] {
+        let html = render_view(props(doc.clone(), mode, EditConfig::default())).await;
+        assert!(!html.contains("if this prohibition is breached"), "{html}");
+        // A remedy is a duty, so in Edit mode its own empty consequence slot
+        // is correctly labelled; only Read mode has none.
+        if mode == EditMode::Read {
+            assert!(!html.contains("if this duty is not fulfilled"), "{html}");
+        }
+        assert!(html.contains("Remedies attached to this rule"), "{html}");
+        assert!(
+            html.contains("Consequences attached to this rule"),
+            "{html}"
+        );
+    }
+    let on_prohibition = Rc::new(
+        read_model(
+            r#"{"@type":"Set","prohibition":[{"action":"use","remedy":[{"action":"delete"}]}]}"#,
+        )
+        .unwrap(),
+    );
+    let html = render_view(props(on_prohibition, EditMode::Read, EditConfig::default())).await;
+    assert!(
+        html.contains("Remedies if this prohibition is breached"),
+        "{html}"
+    );
+}
+
+// R5: the operator select does not offer a switch the reducer refuses.
+#[tokio::test]
+async fn operator_select_does_not_offer_a_switch_the_reducer_refuses() {
+    let many = Rc::new(
+        read_model(
+            r#"{"@type":"Set","permission":[{"action":"use","constraint":[{"leftOperand":"count","operator":"isAnyOf","rightOperand":[1,2,3]}]}]}"#,
+        )
+        .unwrap(),
+    );
+    let html = render_view(props(many, EditMode::Edit, EditConfig::default())).await;
+    assert!(!html.contains("<option value=\"eq\""), "{html}");
+    assert!(html.contains("<option value=\"isAllOf\""), "{html}");
+    assert!(
+        html.contains("<option value=\"isAnyOf\" selected"),
+        "{html}"
+    );
+    // Single-valued, or already several values under a single-value
+    // operator: nothing is lost by a switch among single-value operators.
+    for json in [
+        r#"{"@type":"Set","permission":[{"action":"use","constraint":[{"leftOperand":"count","operator":"isAnyOf","rightOperand":[1]}]}]}"#,
+        r#"{"@type":"Set","permission":[{"action":"use","constraint":[{"leftOperand":"count","operator":"eq","rightOperand":[1,2]}]}]}"#,
+    ] {
+        let doc = Rc::new(read_model(json).unwrap());
+        let html = render_view(props(doc, EditMode::Edit, EditConfig::default())).await;
+        assert!(html.contains("<option value=\"eq\""), "{html}");
+        assert!(html.contains("<option value=\"neq\""), "{html}");
+    }
+}
+
+// D4: a host that plans the switch itself offers every operator.
+#[tokio::test]
+async fn a_host_that_plans_operator_switches_gets_every_operator_offered() {
+    let many = Rc::new(
+        read_model(
+            r#"{"@type":"Set","permission":[{"action":"use","constraint":[{"leftOperand":"count","operator":"isAnyOf","rightOperand":[1,2,3]}]}]}"#,
+        )
+        .unwrap(),
+    );
+    let cfg = EditConfig {
+        host_plans_operator_switches: true,
+        ..EditConfig::default()
+    };
+    let html = render_view(props(many, EditMode::Edit, cfg)).await;
+    assert!(html.contains("<option value=\"eq\""), "{html}");
+    assert!(html.contains("<option value=\"neq\""), "{html}");
+}

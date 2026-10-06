@@ -6,6 +6,7 @@ use super::path::*;
 use super::rules::{EditRules, odrl_position};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum NewItem {
     #[default]
     Default,
@@ -16,10 +17,12 @@ pub enum NewItem {
 /// the editor saw when it made the event; a mismatch means the document has
 /// moved on and the event is refused as [`EditError::Stale`].
 ///
+/// For `Add` it is the id of the list's owner (see [`EditEvent::Add`]).
 /// For `Remove` and `Move` on lists of nodes, `expect` is the id of the
 /// item; on lists of plain values (right operand values, profiles,
 /// `inheritFrom`) it is the id of the list's owner.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum EditEvent {
     /// Committed free text, stored verbatim (never trimmed).
     SetText {
@@ -34,9 +37,20 @@ pub enum EditEvent {
         value: String,
     },
     /// Insert at `index`, 0..=len.
+    ///
+    /// `expect` is the id of the list's owner node, taken from
+    /// [`EditDoc::list_owner_id`]. It is an `Option` because the top-level
+    /// policies list has no owner node: for it `expect` must be `None`, and
+    /// for every other list it must be `Some`. A missing or surplus
+    /// expectation is [`EditError::Invalid`], never silently skipped, so an
+    /// `Add` cannot opt out of the staleness check. The expectation guards
+    /// the path, not the position: it catches an owner that was removed,
+    /// moved or replaced, but not a sibling inserted or removed in the same
+    /// list, because items of a list are addressed by index.
     Add {
         list: ListPath,
         index: usize,
+        expect: Option<NodeId>,
         item: NewItem,
     },
     Remove {
@@ -69,6 +83,7 @@ pub enum EditEvent {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum EditError {
     NoSuchPath(String),
     Stale { expected: NodeId, found: NodeId },
@@ -150,8 +165,13 @@ pub(crate) fn apply_event(
             slot,
             expect,
             value,
-        } => set_choice(doc, slot, *expect, value),
-        EditEvent::Add { list, index, item } => add(doc, rules, list, *index, *item),
+        } => set_choice(doc, rules, slot, *expect, value),
+        EditEvent::Add {
+            list,
+            index,
+            expect,
+            item,
+        } => add(doc, rules, list, *index, *expect, *item),
         EditEvent::Remove {
             list,
             index,
@@ -189,15 +209,30 @@ fn set_text(
     let bad = || EditError::NoSuchPath(slot.to_string());
     let node = resolve_mut(doc, &slot.node).ok_or_else(|| no_node(&slot.node))?;
     match (node, slot.field) {
+        (NodeMut::Policy(_), Field::Kind) if value.is_empty() => {
+            return Err(EditError::Invalid(
+                "a policy needs a type, or it cannot be read back".into(),
+            ));
+        }
         (NodeMut::Policy(p), Field::Kind) => p.kind = value.to_string(),
         (NodeMut::Policy(p), Field::Uid) => p.uid = Some(value.to_string()),
         (NodeMut::Rule(r), Field::Uid) => r.uid = Some(value.to_string()),
-        (NodeMut::Rule(r), Field::Reference) => r.reference = Some(value.to_string()),
+        (NodeMut::Rule(r), Field::Reference) if r.reference.is_some() => {
+            r.reference = Some(value.to_string())
+        }
         (NodeMut::Constraint(ConstraintNode::Reference { iri, .. }), Field::Reference) => {
             *iri = value.to_string()
         }
         (NodeMut::Entity(e), Field::Iri) => e.iri = Some(value.to_string()),
-        (NodeMut::Entity(e), Field::PartOf) => e.part_of = opt(value),
+        (NodeMut::Entity(e), Field::PartOf) => {
+            let part_of = opt(value);
+            if part_of.is_none() && e.iri.is_none() {
+                return Err(EditError::Invalid(
+                    "an entity needs an identifier or a collection".into(),
+                ));
+            }
+            e.part_of = part_of
+        }
         (NodeMut::Action(a), Field::Name) => a.name = value.to_string(),
         (NodeMut::Constraint(ConstraintNode::Atomic(a)), Field::LeftOperand) => {
             a.left = value.to_string()
@@ -228,6 +263,7 @@ fn set_text(
 
 fn set_choice(
     doc: &mut EditDoc,
+    rules: &EditRules,
     slot: &SlotPath,
     expect: NodeId,
     value: &str,
@@ -237,6 +273,14 @@ fn set_choice(
     let node = resolve_mut(doc, &slot.node).ok_or_else(|| no_node(&slot.node))?;
     match (node, slot.field) {
         (NodeMut::Constraint(ConstraintNode::Atomic(a)), Field::Operator) => {
+            if let RightOperand::Values(v) = &a.right
+                && !rules.operator_switch_allowed(&a.operator, value, v.len())
+            {
+                return Err(EditError::NotAllowed(format!(
+                    "{} values, but this operator takes one; remove the extra values first",
+                    v.len()
+                )));
+            }
             a.operator = value.to_string()
         }
         (NodeMut::Constraint(ConstraintNode::Logical(l)), Field::LogicalOp) => {
@@ -439,9 +483,29 @@ fn add(
     rules: &EditRules,
     list: &ListPath,
     index: usize,
+    expect: Option<NodeId>,
     item: NewItem,
 ) -> Result<(), EditError> {
-    let (_, len) = list_info(doc, list).ok_or_else(|| no_list(list))?;
+    let (owner_id, len) = list_info(doc, list).ok_or_else(|| no_list(list))?;
+    match (&list.owner, expect) {
+        (Some(_), Some(e)) if e != owner_id => {
+            return Err(EditError::Stale {
+                expected: e,
+                found: owner_id,
+            });
+        }
+        (Some(_), None) => {
+            return Err(EditError::Invalid(format!(
+                "adding to {list} must name the id of its owner"
+            )));
+        }
+        (None, Some(_)) => {
+            return Err(EditError::Invalid(format!(
+                "{list} has no owner node to expect"
+            )));
+        }
+        _ => {}
+    }
     check_owner_unlocked(doc, list)?;
     if index > len {
         return Err(no_list(list));
@@ -558,6 +622,9 @@ fn change_rule_kind(
         return Err(EditError::NotAllowed(why));
     }
     let src = ListPath::of(&owner, ListKind::Rules(from));
+    if let Some(why) = rules.remove_refusal(doc, &src) {
+        return Err(EditError::NotAllowed(why));
+    }
     let Some(ListMut::Rules(v)) = list_mut(doc, &src) else {
         return Err(no_node(rule));
     };
@@ -590,6 +657,7 @@ fn wrap(
                 op,
                 children: vec![old],
             });
+            fill_min(doc, rules, path, 0);
             Ok(())
         }
         Some(_) => Err(EditError::Invalid(
@@ -624,6 +692,7 @@ fn unwrap_constraint(doc: &mut EditDoc, path: &NodePath, expect: NodeId) -> Resu
 // --- focus --------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum FocusTarget {
     Slot(SlotPath),
     AddButton(ListPath),

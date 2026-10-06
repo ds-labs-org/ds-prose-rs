@@ -3,7 +3,7 @@
 //! order, key spelling, unknown keys and all.
 use serde_json::{Map, Value};
 
-use super::jsonld_read::{LOGICAL_KEYS, Reader};
+use super::jsonld_read::{LOGICAL_KEYS, Reader, literal};
 use super::model::*;
 use crate::read::{items, policy_nodes};
 
@@ -65,14 +65,28 @@ pub fn write_jsonld(doc: &EditDoc) -> Value {
         }
         (DocShape::Array, _) => match &doc.origin {
             Some(o) if same(&policy_nodes(o.value()), &written) => o.value().clone(),
-            _ => Value::Array(written),
+            Some(o) => rebuild_array(o.value(), written, &doc.policies),
+            None => Value::Array(written),
         },
         _ => {
+            let mut written = written;
             let mut base = match doc.origin.as_ref().map(|o| o.value()) {
                 Some(Value::Object(o)) if doc.shape == DocShape::Graph => o.clone(),
                 _ => {
+                    // A single policy promoted to a graph: its own `@context`
+                    // moves up to the wrapper instead of being repeated.
+                    let read = doc.policies.iter().position(|p| p.origin.is_some());
+                    let own = match (doc.shape, read.and_then(|i| written.get_mut(i))) {
+                        (DocShape::Single, Some(Value::Object(first))) => {
+                            first.shift_remove("@context")
+                        }
+                        _ => None,
+                    };
                     let mut m = Map::new();
-                    m.insert("@context".into(), Value::String(CONTEXT.into()));
+                    m.insert(
+                        "@context".into(),
+                        own.unwrap_or_else(|| Value::String(CONTEXT.into())),
+                    );
                     m
                 }
             };
@@ -80,11 +94,277 @@ pub fn write_jsonld(doc: &EditDoc) -> Value {
                 .get("@graph")
                 .is_some_and(|g| same(&policy_nodes(g), &written));
             if !unchanged {
-                set_property(&mut base, &["@graph"], Some(Value::Array(written)));
+                // Nested `@graph` wrappers (and their `@context`) stay around
+                // the policies they were read around.
+                let rebuilt = match base.get("@graph") {
+                    Some(g @ Value::Array(_)) if doc.shape == DocShape::Graph => {
+                        rebuild_array(g, written, &doc.policies)
+                    }
+                    _ => Value::Array(written),
+                };
+                set_property(&mut base, &["@graph"], Some(rebuilt));
             }
             Value::Object(base)
         }
     }
+}
+
+/// The shape of an array document: `@graph` wrappers (with their `@context`)
+/// around runs of policy nodes, nested to any depth. Policy nodes are
+/// numbered in document order, so what a node holds is a range of numbers.
+struct Tree<'a> {
+    orig: &'a Value,
+    lo: usize,
+    hi: usize,
+    kind: Kind<'a>,
+}
+
+enum Kind<'a> {
+    Leaf,
+    Array(Vec<Tree<'a>>),
+    Wrapper {
+        obj: &'a Obj,
+        graph_is_array: bool,
+        kids: Vec<Tree<'a>>,
+    },
+}
+
+impl<'a> Tree<'a> {
+    fn parse(v: &'a Value, leaves: &mut Vec<&'a Value>) -> Tree<'a> {
+        let lo = leaves.len();
+        let kind = match v {
+            Value::Array(a) => Kind::Array(a.iter().map(|x| Tree::parse(x, leaves)).collect()),
+            Value::Object(o) if o.contains_key("@graph") => {
+                let (graph_is_array, kids) = match &o["@graph"] {
+                    Value::Array(a) => (true, a.iter().map(|x| Tree::parse(x, leaves)).collect()),
+                    one => (false, vec![Tree::parse(one, leaves)]),
+                };
+                Kind::Wrapper {
+                    obj: o,
+                    graph_is_array,
+                    kids,
+                }
+            }
+            _ => {
+                leaves.push(v);
+                Kind::Leaf
+            }
+        };
+        Tree {
+            orig: v,
+            lo,
+            hi: leaves.len(),
+            kind,
+        }
+    }
+}
+
+/// A written policy and the original leaf it belongs beside: the one it was
+/// read from, or, for a new one, its neighbour's.
+struct Placed {
+    at: usize,
+    value: Value,
+}
+
+/// Rebuild an array document with its policies replaced by `written`. Each
+/// policy goes back under the `@graph` wrapper (and `@context`) it was read
+/// from; a new one goes beside the policy before it (or, first in the
+/// document, the one after it); a wrapper left with none of its policies is
+/// dropped.
+fn rebuild_array(orig: &Value, written: Vec<Value>, policies: &[PolicyNode]) -> Value {
+    let mut leaves = Vec::new();
+    let tree = Tree::parse(orig, &mut leaves);
+    let mut taken = vec![false; leaves.len()];
+    // Searching on from the last match keeps the usual, in-order case linear.
+    let mut cursor = 0;
+    let home: Vec<Option<usize>> = policies
+        .iter()
+        .map(|p| {
+            let o = p.origin.as_ref()?.value();
+            let n = leaves.len();
+            let k = (cursor..n)
+                .chain(0..cursor.min(n))
+                .find(|k| !taken[*k] && leaves[*k] == o)?;
+            taken[k] = true;
+            cursor = k + 1;
+            Some(k)
+        })
+        .collect();
+    let last = leaves.len().saturating_sub(1);
+    let placed: Vec<(usize, Placed)> = written
+        .into_iter()
+        .enumerate()
+        .map(|(i, value)| {
+            let at = home[i]
+                .or_else(|| home[..i].iter().rev().find_map(|h| *h))
+                .or_else(|| home[i..].iter().find_map(|h| *h))
+                .unwrap_or(last);
+            (i, Placed { at, value })
+        })
+        .collect();
+    let order: Vec<(usize, Value)> = placed
+        .iter()
+        .map(|(_, p)| (p.at, p.value.clone()))
+        .collect();
+    let built = match emit(&tree, placed) {
+        Some((_, Value::Array(a))) => Value::Array(a),
+        Some((_, other)) => Value::Array(vec![other]),
+        None => Value::Array(vec![]),
+    };
+    // A policy moved from one wrapper to another cannot keep both its own
+    // wrapper and its place: the document must read back in the model's order.
+    let mut after = Vec::new();
+    Tree::parse(&built, &mut after);
+    if after.len() == order.len() && after.iter().zip(&order).all(|(a, (_, b))| *a == b) {
+        return built;
+    }
+    let items: Vec<(Value, Vec<&Tree>)> = order
+        .into_iter()
+        .map(|(at, v)| {
+            let mut chain = Vec::new();
+            containers(&tree, at, &mut chain);
+            (v, chain)
+        })
+        .collect();
+    match runs(&items, 0, &mut Vec::new()).pop() {
+        Some(Value::Array(a)) => Value::Array(a),
+        Some(other) => Value::Array(vec![other]),
+        None => Value::Array(vec![]),
+    }
+}
+
+/// The containers (arrays and `@graph` wrappers) holding leaf `at`, outermost first.
+fn containers<'t, 'a>(node: &'t Tree<'a>, at: usize, out: &mut Vec<&'t Tree<'a>>) {
+    let kids = match &node.kind {
+        Kind::Leaf => return,
+        Kind::Array(k) | Kind::Wrapper { kids: k, .. } => k,
+    };
+    out.push(node);
+    if let Some(kid) = kids.iter().find(|k| (k.lo..k.hi).contains(&at)) {
+        containers(kid, at, out);
+    }
+}
+
+/// Policies in the order given, grouped into the containers they sit in:
+/// each unbroken run under one container shares one copy of it, so a
+/// container reappears when another one's policy comes between. A container
+/// that never held a policy goes into the first copy of its parent, at the
+/// position it had among the parent's children.
+fn runs<'t>(
+    items: &[(Value, Vec<&'t Tree<'t>>)],
+    depth: usize,
+    seen: &mut Vec<*const Tree<'t>>,
+) -> Vec<Value> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < items.len() {
+        let Some(&node) = items[i].1.get(depth) else {
+            out.push(items[i].0.clone());
+            i += 1;
+            continue;
+        };
+        let mut j = i + 1;
+        while j < items.len()
+            && items[j]
+                .1
+                .get(depth)
+                .is_some_and(|n| std::ptr::eq(*n, node))
+        {
+            j += 1;
+        }
+        let mut inner = runs(&items[i..j], depth + 1, seen);
+        if !seen.contains(&std::ptr::from_ref(node)) {
+            seen.push(std::ptr::from_ref(node));
+            if let Kind::Array(kids) | Kind::Wrapper { kids, .. } = &node.kind {
+                for (at, kid) in kids.iter().enumerate() {
+                    if kid.lo == kid.hi && !matches!(kid.kind, Kind::Leaf) {
+                        inner.insert(at.min(inner.len()), kid.orig.clone());
+                    }
+                }
+            }
+        }
+        out.push(match &node.kind {
+            Kind::Wrapper {
+                obj,
+                graph_is_array,
+                ..
+            } => {
+                let mut o = (*obj).clone();
+                let g = if !graph_is_array && inner.len() == 1 {
+                    inner.remove(0)
+                } else {
+                    Value::Array(inner)
+                };
+                o.insert("@graph".into(), g);
+                Value::Object(o)
+            }
+            _ => Value::Array(inner),
+        });
+        i = j;
+    }
+    out
+}
+
+/// `node` with the policies placed under it, and the document position of
+/// its first one; `None` when none are left.
+fn emit(node: &Tree, pols: Vec<(usize, Placed)>) -> Option<(usize, Value)> {
+    let (kids, wrapper) = match &node.kind {
+        Kind::Leaf => return None,
+        Kind::Array(k) => (k, None),
+        Kind::Wrapper {
+            obj,
+            graph_is_array,
+            kids,
+        } => (kids, Some((*obj, *graph_is_array))),
+    };
+    // In document order: each policy placed on a direct leaf, each
+    // sub-container that still holds one. A container that never held a
+    // policy is kept, after as many of them as came before it.
+    let mut out: Vec<(usize, Value)> = Vec::new();
+    let mut empties: Vec<(usize, Value)> = Vec::new();
+    for kid in kids {
+        let mut mine: Vec<(usize, Placed)> = Vec::new();
+        for (i, p) in &pols {
+            if (kid.lo..kid.hi).contains(&p.at) {
+                mine.push((
+                    *i,
+                    Placed {
+                        at: p.at,
+                        value: p.value.clone(),
+                    },
+                ));
+            }
+        }
+        match kid.kind {
+            Kind::Leaf => out.extend(mine.into_iter().map(|(i, p)| (i, p.value))),
+            _ if mine.is_empty() => {
+                if kid.lo == kid.hi {
+                    empties.push((out.len(), kid.orig.clone()));
+                }
+            }
+            _ => out.extend(emit(kid, mine)),
+        }
+    }
+    out.sort_by_key(|(i, _)| *i);
+    let first = out.first().map(|(i, _)| *i)?;
+    let mut vals: Vec<Value> = out.into_iter().map(|(_, v)| v).collect();
+    for (n, (after, e)) in empties.into_iter().enumerate() {
+        vals.insert((after + n).min(vals.len()), e);
+    }
+    let value = match wrapper {
+        None => Value::Array(vals),
+        Some((o, graph_is_array)) => {
+            let mut o = o.clone();
+            let g = if !graph_is_array && vals.len() == 1 {
+                vals.remove(0)
+            } else {
+                Value::Array(vals)
+            };
+            o.insert("@graph".into(), g);
+            Value::Object(o)
+        }
+    };
+    Some((first, value))
 }
 
 fn same(orig: &[&Value], written: &[Value]) -> bool {
@@ -227,6 +507,12 @@ fn write_rule(r: &RuleNode) -> Value {
         return origin_value(&r.origin);
     }
     if let Some(reference) = &r.reference {
+        // Written as it was read, unless the reference was edited.
+        if let Some(o) = &r.origin
+            && Reader::default().rule(o.value()).reference.as_ref() == Some(reference)
+        {
+            return o.value().clone();
+        }
         return Value::String(reference.clone());
     }
     let (mut obj, before) = match origin_object(&r.origin) {
@@ -242,6 +528,13 @@ fn write_rule(r: &RuleNode) -> Value {
     put_children(&mut obj, "duty", rules(&r.duty), false);
     put_children(&mut obj, "remedy", rules(&r.remedy), false);
     put_children(&mut obj, "consequence", rules(&r.consequence), false);
+    // `{"@id": ..}` alone reads back as a reference; ODRL's own `uid` for the
+    // same identifier does not, so a rule emptied down to its id keeps it.
+    if obj.len() == 1
+        && let Some(id) = obj.shift_remove("@id")
+    {
+        obj.insert("uid".into(), id);
+    }
     Value::Object(obj)
 }
 
@@ -332,6 +625,46 @@ fn constraints(v: &[ConstraintNode]) -> Vec<Value> {
     v.iter().map(write_constraint).collect()
 }
 
+/// An edited value that replaces a value object (`{"@value": 10, "@type":
+/// "xsd:integer"}`, `{"@value": "ten", "@language": "en"}`) keeps the
+/// wrapper's other keys: the model reads such a value as a plain number,
+/// boolean or string, so the writer carries what the model dropped. The
+/// `@value` follows the model's variant, so the document re-reads as the
+/// model: a string (text a number or boolean could not hold) is never written
+/// as a native value.
+fn retyped(orig: &Value, l: &Literal) -> Value {
+    let Value::Object(o) = orig else {
+        return literal_value(l);
+    };
+    if !o.contains_key("@value") {
+        return literal_value(l);
+    }
+    let mut m = o.clone();
+    match l {
+        Literal::Num(n) => {
+            m.insert("@value".into(), Value::Number(n.clone()));
+        }
+        Literal::Bool(b) => {
+            m.insert("@value".into(), Value::Bool(*b));
+        }
+        Literal::Typed { value, datatype } => {
+            m.insert("@value".into(), Value::String(value.clone()));
+            m.insert("@type".into(), Value::String(datatype.clone()));
+        }
+        Literal::Str(s) => {
+            // A plain string carries no datatype (it would read back as
+            // `Typed`), but keeps `@language` and the like.
+            let typed = m.shift_remove("@type").is_some();
+            m.insert("@value".into(), Value::String(s.clone()));
+            if typed && m.len() == 1 {
+                return Value::String(s.clone());
+            }
+        }
+        Literal::Iri(_) => return literal_value(l),
+    }
+    Value::Object(m)
+}
+
 fn literal_value(l: &Literal) -> Value {
     match l {
         Literal::Str(s) => Value::String(s.clone()),
@@ -376,11 +709,23 @@ fn write_atomic(a: &AtomicConstraint) -> Value {
     if a.right != before.right {
         match &a.right {
             RightOperand::Values(v) => {
-                let mut vals: Vec<Value> = v.iter().map(literal_value).collect();
-                let value = if vals.len() == 1 {
-                    vals.remove(0)
-                } else {
-                    Value::Array(vals)
+                let orig = obj.get("rightOperand").cloned();
+                let orig_items: Vec<&Value> = orig.as_ref().map(items).unwrap_or_default();
+                // A value that still reads as it did is written as it was.
+                let mut vals = right_values(&orig_items, v);
+                let value = match &orig {
+                    // Same number of values: edit them where they stand, so a
+                    // bare value stays bare and a `@list` stays a list.
+                    Some(o) if orig_items.len() == vals.len() && !vals.is_empty() => {
+                        substitute(o, &mut vals.into_iter())
+                    }
+                    Some(Value::Object(w)) if w.len() == 1 && w.contains_key("@list") => {
+                        let mut w = w.clone();
+                        w.insert("@list".into(), Value::Array(vals));
+                        Value::Object(w)
+                    }
+                    _ if vals.len() == 1 => vals.remove(0),
+                    _ => Value::Array(vals),
                 };
                 set_property(&mut obj, &["rightOperand"], Some(value));
                 obj.shift_remove("rightOperandReference");
@@ -401,6 +746,34 @@ fn write_atomic(a: &AtomicConstraint) -> Value {
     }
     put_opt(&mut obj, &["unit"], &a.unit, &before.unit);
     Value::Object(obj)
+}
+
+/// The JSON for the model's right-operand values. A value that still reads as
+/// one of the original items is that item, whichever position it moved to
+/// (removing one value must not hand its wrapper to the next). An edited
+/// value takes over the wrapper of the original at its own position, unless
+/// another value already kept that original.
+fn right_values(orig_items: &[&Value], now: &[Literal]) -> Vec<Value> {
+    let mut claimed = vec![false; orig_items.len()];
+    let mut kept: Vec<Option<usize>> = Vec::with_capacity(now.len());
+    for l in now {
+        let k = (0..orig_items.len())
+            .find(|k| !claimed[*k] && literal(orig_items[*k]).as_ref() == Some(l));
+        if let Some(k) = k {
+            claimed[k] = true;
+        }
+        kept.push(k);
+    }
+    now.iter()
+        .enumerate()
+        .map(|(i, l)| match kept[i] {
+            Some(k) => orig_items[k].clone(),
+            None => match orig_items.get(i) {
+                Some(o) if !claimed[i] => retyped(o, l),
+                _ => literal_value(l),
+            },
+        })
+        .collect()
 }
 
 fn nothing() -> AtomicConstraint {
@@ -437,6 +810,15 @@ fn write_logical(l: &LogicalConstraint) -> Value {
         }
         obj = renamed;
     }
-    put_children(&mut obj, new_key, children, false);
+    if children.is_empty() {
+        // A group keeps its key when it empties; `{}` would read back as an
+        // empty atomic constraint.
+        let had = obj.get(new_key).map_or(0, |v| items(v).len());
+        if had > 0 {
+            set_property(&mut obj, &[new_key], Some(Value::Array(vec![])));
+        }
+    } else {
+        put_children(&mut obj, new_key, children, false);
+    }
     Value::Object(obj)
 }

@@ -118,3 +118,6 @@ fn condition_list(list: &[Condition]) -> Html {
         </ul>
     }
 }
+
+#[cfg(doctest)]
+mod non_exhaustive_pins;

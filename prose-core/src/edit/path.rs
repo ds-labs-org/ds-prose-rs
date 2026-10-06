@@ -79,6 +79,7 @@ impl EntityRole {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Step {
     Rule(RuleList, usize),
     Entity(EntityRole, usize),
@@ -137,6 +138,7 @@ impl NodePath {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Field {
     Kind,
     Uid,
@@ -162,6 +164,7 @@ pub struct SlotPath {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum ListKind {
     Policies,
     Rules(RuleList),

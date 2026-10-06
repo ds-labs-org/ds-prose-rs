@@ -82,6 +82,7 @@ pub struct Sentence {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum Segment {
     Text(String),
     Slot(Slot),
@@ -101,6 +102,7 @@ pub struct Slot {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum SlotKind {
     PolicyKind,
     Uid,
@@ -127,9 +129,13 @@ pub struct ChoiceSlot {
     pub display: String,
     /// The constraint's left operand, for operator wording; empty otherwise.
     pub left_operand: String,
+    /// For an operator: how many right operands the constraint holds, which
+    /// decides the operators it can be switched to; 0 otherwise.
+    pub values: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum ChoiceKind {
     Operator,
     LogicalOp,
@@ -175,6 +181,7 @@ pub enum Conj {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum EmptyText {
     Nothing,
     AnyoneSubject,
@@ -694,6 +701,7 @@ fn policy_prose(i: usize, p: &PolicyNode) -> PolicyProse {
                     raw: conflict_raw,
                     display: conflict_display,
                     left_operand: String::new(),
+                    values: 0,
                 }),
                 text("."),
             ],
@@ -1048,6 +1056,10 @@ fn cond_prose(path: NodePath, index: usize, c: &ConstraintNode, in_duty: bool) -
                     raw: a.operator.clone(),
                     display: op_display,
                     left_operand: a.left.clone(),
+                    values: match &a.right {
+                        RightOperand::Values(v) => v.len(),
+                        _ => 0,
+                    },
                 }),
                 text(" "),
             ];
@@ -1124,6 +1136,7 @@ fn cond_prose(path: NodePath, index: usize, c: &ConstraintNode, in_duty: bool) -
                     raw: l.op.as_str().to_string(),
                     display: l.op.phrase().to_string(),
                     left_operand: String::new(),
+                    values: 0,
                 })],
             };
             out.children = Some(ConditionList {

@@ -120,6 +120,12 @@ pub const BASE_CSS: &str = r#"
 .ds-prose.prose-edit.prose-reveal-hover button:focus {
   opacity: 1;
 }
+.ds-prose.prose-edit .prose-heading-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+.ds-prose.prose-edit .prose-heading-row > .prose-heading { margin-inline-end: .5em; }
 .ds-prose.prose-edit .prose-live {
   position: absolute;
   width: 1px;

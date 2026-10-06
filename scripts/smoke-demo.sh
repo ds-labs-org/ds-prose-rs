@@ -47,6 +47,11 @@ dom="$("$chrome" --headless=new --disable-gpu --no-sandbox \
   --dump-dom "http://127.0.0.1:$port$base" 2>/dev/null)"
 
 fail=0
+# Without a doctype the page renders in quirks mode, which no host test sees.
+if ! grep -qi '^<!doctype html>' <<<"$dom"; then
+  echo "boot check FAILED: no <!DOCTYPE html> (page would render in quirks mode)" >&2
+  fail=1
+fi
 for needle in 'ds-prose-rs demo' 'prose-policy'; do
   if ! grep -q "$needle" <<<"$dom"; then
     echo "boot check FAILED: '$needle' not in the rendered page" >&2

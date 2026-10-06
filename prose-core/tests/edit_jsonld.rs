@@ -204,7 +204,7 @@ fn structural_edits_round_trip_through_the_model() {
                     _ => doc.policies[0].target.len(),
                 }
             };
-            doc.apply(&EditEvent::Add { list, index, item }, &rules)
+            doc.apply(&add_ev(&doc, list, index, item), &rules)
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
         }
         let written = write_jsonld(&doc);

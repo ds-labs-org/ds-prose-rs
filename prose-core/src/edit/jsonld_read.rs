@@ -5,8 +5,8 @@ use serde_json::{Map, Value};
 use super::model::*;
 use crate::ProseError;
 use crate::read::{
-    POLICY_KEYS, QUIET_PREFIXES, RULE_KEYS, get, ident, items, looks_like_policy, policy_nodes,
-    types,
+    POLICY_KEYS, QUIET_PREFIXES, RULE_KEYS, bare_reference, get, ident, items, looks_like_policy,
+    policy_nodes, types,
 };
 use crate::words::local_name;
 
@@ -62,6 +62,8 @@ pub fn read_model_value(value: &Value) -> Result<EditDoc, ProseError> {
 #[derive(Default)]
 pub(crate) struct Reader {
     pub warnings: Vec<String>,
+    /// The same messages, for de-duplication in constant time.
+    seen: std::collections::HashSet<String>,
 }
 
 fn locked_origin(v: &Value) -> Option<Origin> {
@@ -71,7 +73,7 @@ fn locked_origin(v: &Value) -> Option<Origin> {
 impl Reader {
     fn warn(&mut self, msg: impl Into<String>) {
         let msg = msg.into();
-        if !self.warnings.contains(&msg) {
+        if self.seen.insert(msg.clone()) {
             self.warnings.push(msg);
         }
     }
@@ -134,6 +136,11 @@ impl Reader {
             Value::String(s) => RuleNode {
                 origin: locked_origin(v),
                 reference: Some(s.clone()),
+                ..RuleNode::default()
+            },
+            Value::Object(o) if bare_reference(o).is_some() => RuleNode {
+                origin: locked_origin(v),
+                reference: bare_reference(o),
                 ..RuleNode::default()
             },
             Value::Object(o) => {
@@ -330,7 +337,7 @@ fn strings(v: Option<&Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn literal(v: &Value) -> Option<Literal> {
+pub(crate) fn literal(v: &Value) -> Option<Literal> {
     match v {
         Value::String(s) => Some(Literal::Str(s.clone())),
         Value::Number(n) => Some(Literal::Num(n.clone())),

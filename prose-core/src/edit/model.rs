@@ -3,7 +3,7 @@ use serde_json::Value;
 use std::sync::Arc;
 
 use super::apply::{EditError, EditEvent};
-use super::path::{self, NodePath};
+use super::path::{self, ListPath, NodePath, list_info};
 use super::rules::EditRules;
 use crate::read::fmt_str;
 
@@ -110,6 +110,14 @@ impl EditDoc {
         path::resolve(self, p)
     }
 
+    /// The id an [`EditEvent::Add`] to `list` must carry as `expect`: the
+    /// owner node's id, or `None` for the top-level policies list (and for a
+    /// list that does not exist, which `apply` refuses as `NoSuchPath`).
+    pub fn list_owner_id(&self, list: &ListPath) -> Option<NodeId> {
+        list.owner.as_ref()?;
+        list_info(self, list).map(|(id, _)| id)
+    }
+
     /// Apply one event. Atomic: on `Err` the document is unchanged.
     pub fn apply(&mut self, ev: &EditEvent, rules: &EditRules) -> Result<(), EditError> {
         let mut work = self.clone();
@@ -120,6 +128,7 @@ impl EditDoc {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub enum NodeRef<'a> {
     Policy(&'a PolicyNode),
     Rule(&'a RuleNode),
@@ -372,9 +381,9 @@ impl Literal {
     /// fits it, otherwise it becomes a plain string.
     pub fn with_text(&self, text: &str) -> Literal {
         match self {
-            Literal::Num(_) => match text.parse::<serde_json::Number>() {
-                Ok(n) if text.trim() == text => Literal::Num(n),
-                _ => Literal::Str(text.to_string()),
+            Literal::Num(_) => match plain_number(text) {
+                Some(n) => Literal::Num(n),
+                None => Literal::Str(text.to_string()),
             },
             Literal::Bool(_) => match text {
                 "true" => Literal::Bool(true),
@@ -387,6 +396,43 @@ impl Literal {
             },
             Literal::Iri(_) => Literal::Iri(text.to_string()),
             Literal::Str(_) => Literal::Str(text.to_string()),
+        }
+    }
+}
+
+/// The number `text` spells, only when a JSON number holds it exactly:
+/// plain decimal notation, an integer that fits 64 bits, at most 15
+/// significant digits otherwise, no exponent and no negative zero.
+fn plain_number(text: &str) -> Option<serde_json::Number> {
+    let digits = text.strip_prefix('-').unwrap_or(text);
+    let (int, frac) = match digits.split_once('.') {
+        Some((i, f)) => (i, Some(f)),
+        None => (digits, None),
+    };
+    let plain = !int.is_empty()
+        && int.bytes().all(|b| b.is_ascii_digit())
+        && (int == "0" || !int.starts_with('0'))
+        && frac.is_none_or(|f| !f.is_empty() && f.bytes().all(|b| b.is_ascii_digit()));
+    if !plain {
+        return None;
+    }
+    match frac {
+        None => {
+            if text == "-0" {
+                return None;
+            }
+            text.parse::<i64>()
+                .map(serde_json::Number::from)
+                .or_else(|_| text.parse::<u64>().map(serde_json::Number::from))
+                .ok()
+        }
+        Some(f) => {
+            let significant = format!("{int}{f}");
+            let significant = significant.trim_matches('0');
+            if significant.len() > 15 {
+                return None;
+            }
+            serde_json::Number::from_f64(text.parse::<f64>().ok()?)
         }
     }
 }

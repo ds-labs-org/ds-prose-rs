@@ -64,3 +64,6 @@ pub fn render(json: &str) -> Result<Document, ProseError> {
 pub fn render_value(value: &serde_json::Value) -> Result<Document, ProseError> {
     read::document(value)
 }
+
+#[cfg(doctest)]
+mod non_exhaustive_pins;

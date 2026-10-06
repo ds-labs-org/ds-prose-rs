@@ -48,8 +48,14 @@ drive. It knows ODRL and nothing about any particular engine or wire format.
   ODRL's, for example `policy[0].permission[1].duty[0].consequence[0]#rightOperand[2]`.
 - `EditEvent` and `EditDoc::apply`: set text, set a choice, add, remove, move,
   change a rule's kind, wrap and unwrap a constraint. Each event names the id it
-  expects to find, so a stale event is refused rather than misapplied. `apply`
-  is atomic. `focus_after` says where keyboard focus belongs afterwards.
+  expects to find, so a stale event is refused rather than misapplied. For
+  `Add` that id is the owner of the list (`EditDoc::list_owner_id` gives it),
+  and `expect` is `None` exactly for the top-level policies list, which has no
+  owner node; a missing or surplus expectation is `EditError::Invalid`. An
+  `Add` therefore catches an owner that was removed, moved or replaced, but not
+  a sibling inserted or removed in the same list, because items are addressed
+  by index. `apply` is atomic. `focus_after` says where keyboard focus belongs
+  afterwards.
 - `EditRules`: how many items each list takes (`Limit`), which operators take
   several values, what a new node starts with. The reducer enforces it and an
   editor reads it, so an editor cannot offer what the reducer refuses.
@@ -60,6 +66,50 @@ drive. It knows ODRL and nothing about any particular engine or wire format.
   a host that builds the model from its own encoding.
 - `sentences`: the edit templates, as segments (text, editable slots, choices,
   lists to add to) rather than finished strings.
+
+### Compatibility
+
+The enums that grow as the editor learns more of ODRL are `#[non_exhaustive]`,
+so adding a variant is a minor release, not a breaking one. In `prose-core`:
+`EditEvent`, `EditError`, `NewItem`, `FocusTarget`, `ListKind`, `Field`, `Step`,
+`NodeRef`, `Segment`, `SlotKind`, `ChoiceKind`, `EmptyText` and `IssueTarget`.
+In `prose-yew`: `FocusKind` and `DecorationAt`. Outside the defining crate a
+`match` on one of them needs a wildcard arm with a sensible fallback. Units,
+`rightOperandReference` and `partOf` can be edited but not added today (see
+Limits); adding them is the kind of change this allows.
+
+Left exhaustive because they are closed by nature: `Conj`, `Severity`,
+`EditMode`, `ButtonContent`, `Reveal`, `LogicalOp`, `RuleList`, `EntityRole`
+and `DocShape` (ODRL or this crate fixes their members), and the data enums
+`ConstraintNode`, `RightOperand` and `Literal`, which already carry an
+`Opaque` or raw fallback for what they do not understand.
+
+Changed in 0.3 (breaking, after the tagged 0.2.0; a consumer pinned to the
+`v0.2.0` tag is unaffected until it moves the pin):
+
+- `EditEvent::Add` gained the `expect: Option<NodeId>` field described above.
+  Build one with the id from `EditDoc::list_owner_id`.
+- The enums listed above are now `#[non_exhaustive]`: a `match` on one needs a
+  wildcard arm.
+- `ChoiceSlot` gained the pub field `values: usize` (the number of right
+  operands of the constraint an operator select belongs to), so a struct
+  literal of it needs the field. Likewise `Labels` gained
+  `follow_up_remedy_elsewhere` and `follow_up_consequence_elsewhere`, and
+  `EditConfig` gained `host_plans_operator_switches`; code that builds them
+  with `..Default::default()` is unaffected.
+- The operator select offers only the switches the reducer accepts, unless
+  `EditConfig::host_plans_operator_switches` is set (see `operator_switch_allowed`).
+- A structural event's pending focus move and announcement expire at the
+  user's next input or after 500 ms, whichever comes first, so a host that
+  applies the event within a slow, multi-task render keeps them, and a
+  refused event cannot fire later on an unrelated change of the document. The
+  listeners behind this are removed as soon as the event is answered or
+  expires, and when the view unmounts.
+- Editing or removing a right-operand value keeps the `@language`,
+  `@index` and other keys of the value objects around it, and a value the model
+  holds as a string is written as a string. Moving policies keeps empty
+  `@graph` wrappers, and nested `@graph` wrappers inside a top-level `@graph`
+  object keep their `@context`.
 
 ### Using it from Yew
 
@@ -92,7 +142,7 @@ Props of `OdrlProseView`:
 | `doc: Rc<EditDoc>` | the document; the host owns it |
 | `mode: EditMode` | `Read` (same sentences, no controls) or `Edit` |
 | `config: Rc<EditConfig>` | everything below |
-| `onedit: Callback<EditEvent>` | every committed edit and structural action; not applied by the component |
+| `onedit: Callback<EditEvent>` | every committed edit and structural action; not applied by the component. Apply it before the user's next input and within 500 ms (synchronously, as `use_prose_editor` does; a slow render that spans several browser tasks is fine): a structural event whose result has not arrived by then is treated as refused, so no focus moves and nothing is announced, even if the document changes later for another reason. A host that validates asynchronously should apply the event when it is done, and expect to lose focus management and the announcement for it |
 | `on_focus_slot: Callback<Option<SlotFocus>>` | `Some` when a slot or select gets focus, `None` when it loses it, for help text |
 | `issues: Rc<Vec<Issue>>` | findings the host computed, shown inline at their targets (`aria-invalid` plus the message for errors) |
 | `decorate: Option<Callback<Decoration, Html>>` | host badges after each policy heading, rule sentence and condition |
@@ -129,9 +179,16 @@ Props of `OdrlProseView`:
 - Text is never trimmed. A leading, trailing or non-breaking space is kept
   (non-breaking spaces typed in a slot become plain spaces) and marked
   visibly.
-- Yew never reads the DOM, so a slot is remounted after every commit or revert;
-  that keeps the DOM and the document in step even when the host refuses the
-  edit.
+- A slot is remounted after every commit or revert; that keeps the DOM and the
+  document in step even when the host refuses the edit. The one place the
+  component reads the DOM is a slot being typed in: if the host changes that
+  slot's value meanwhile, the slot keeps the user's text instead of the new
+  value, and the text is committed on blur, overwriting the host's change.
+- The operator `<select>` hides the operators the reducer would refuse (a
+  single-value operator on a constraint holding several values, from a set
+  operator). `Labels` has `follow_up_remedy_elsewhere` and
+  `follow_up_consequence_elsewhere` for a remedy outside a prohibition and a
+  consequence outside a duty.
 - Operator, logical operator, conflict strategy and a top-level rule's kind are
   `<select>`s. A current value that is not among the options stays selectable.
 - Vocabulary suggestions are an ARIA listbox: type to filter, arrow keys and
@@ -185,6 +242,14 @@ only through the `"plaintext-only"` path.
   object or IRI string, and the like are kept exactly as written and shown as
   locked.
 - **Browser behaviour is verified in Chromium only** (see Verification).
+- **`prose-core` turns on `serde_json`'s `preserve_order` feature** (since 0.2;
+  the edit layer needs document key order to write back what it read). Cargo
+  unifies features across the build, so a host that depends on `prose-core`
+  gets `preserve_order` for its own `serde_json` too: `serde_json::Map` keeps
+  insertion order instead of sorting keys, and the host's own serialised JSON
+  key order changes accordingly. A host that needs sorted keys must sort them
+  itself.
+- **Minimum supported Rust is 1.88** (let-chains); `rust-version` says so.
 - **No JSON-LD processing.** A custom `@context` that renames ODRL terms is not
   followed. Terms it does not recognise are listed in `Document::warnings`
   (shown by the component), never silently dropped or guessed at.
@@ -203,13 +268,14 @@ for new advisories:
 | job | gates |
 |---|---|
 | `gates` | `cargo fmt --check`, `clippy -D warnings`, `cargo test`, `cargo doc` with warnings denied, every feature build (host, `ssr`, `csr` on wasm32) |
-| `browser` | wasm clippy, and the Edit-mode DOM tests mounted in headless Chrome |
+| `browser` | wasm clippy, and the Edit-mode DOM tests and the demo's tab tests mounted in headless Chrome; the `wasm-bindgen-cli` version is read from `Cargo.lock` |
 | `demo` | release `trunk build` under the Pages sub-path, then `scripts/smoke-demo.sh` boots it in Chrome and fails unless a policy rendered |
 | `supply-chain` | `cargo deny check` against `deny.toml`: licences, advisories, sources |
 
 `deny.toml` ignores two "unmaintained" notices that arrive only through
 `yew`, each with its reason. Dependabot proposes cargo and Actions updates
-weekly. `.github/workflows/pages.yml` deploys the demo from `main` after the
+weekly. Third-party Actions are pinned by commit SHA (Dependabot keeps them
+current) and `cargo-deny` by version. `.github/workflows/pages.yml` deploys the demo from `main` after the
 same boot check.
 
 ## Develop
