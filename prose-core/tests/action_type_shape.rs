@@ -24,7 +24,11 @@ fn policy(action: Value) -> Value {
 #[test]
 fn an_odrl_type_action_is_read() {
     let doc = render(policy(json!({"odrl:type": "odrl:use"})));
-    assert!(!sentence(&doc).contains("unspecified action"), "{}", sentence(&doc));
+    assert!(
+        !sentence(&doc).contains("unspecified action"),
+        "{}",
+        sentence(&doc)
+    );
     assert!(sentence(&doc).contains("use"), "{}", sentence(&doc));
 }
 

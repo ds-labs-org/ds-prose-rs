@@ -698,7 +698,13 @@ impl Reader {
             .filter_map(|a| match a {
                 Value::String(s) => Some((words::action(s), vec![])),
                 Value::Object(o) => {
-                    let name = get(o, &["rdf:value", "value", "@id"]).and_then(ident)?;
+                    // Pre-0.7 profiles name the action under `type`.
+                    let Some(name) =
+                        get(o, &["rdf:value", "value", "@id", "type", "odrl:type"]).and_then(ident)
+                    else {
+                        self.warn("skipped an action object that names no action");
+                        return None;
+                    };
                     let refine = o
                         .get("refinement")
                         .map(|r| items(r).into_iter().map(|c| self.constraint(c)).collect())
