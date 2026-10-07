@@ -152,11 +152,12 @@ jobs:
         working-directory: prose-angular
         run: npm run build:wasm
 
-      - name: Typecheck the wrapper
+      - name: Typecheck and test the wrapper
         working-directory: prose-angular
         run: |
           npm install --no-audit --no-fund
           npm run typecheck
+          npm test
 
       - name: Build the demo app
         working-directory: demo-angular
