@@ -27,6 +27,6 @@
     "@angular/core": "^19.2.0",
     "ng-packagr": "^19.2.0",
     "rxjs": "^7.8.0",
-    "typescript": "~5.7.0"
+    "typescript": "~7.0.2"
   }
 }
