@@ -11,9 +11,21 @@
 //! values or arrays). It does not run a JSON-LD processor, so a custom
 //! `@context` that renames ODRL terms is not followed; unknown terms are
 //! reported in [`Document::warnings`] instead of guessed at.
+pub mod edit;
 mod model;
 mod read;
 mod words;
+
+/// The wording helpers the reader uses, public so an editor can show the
+/// same phrases for the same terms.
+pub mod wording {
+    pub use crate::words::{action, humanise, join, local_name, operand, operator, operator_for};
+
+    /// The (term, phrase) table [`operand`] draws on.
+    pub fn known_left_operands() -> &'static [(&'static str, &'static str)] {
+        crate::words::OPERANDS
+    }
+}
 
 pub use model::{Condition, Document, FollowUp, Policy, PolicyKind, Rule, RuleKind};
 
@@ -52,3 +64,6 @@ pub fn render(json: &str) -> Result<Document, ProseError> {
 pub fn render_value(value: &serde_json::Value) -> Result<Document, ProseError> {
     read::document(value)
 }
+
+#[cfg(doctest)]
+mod non_exhaustive_pins;

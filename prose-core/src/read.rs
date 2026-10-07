@@ -4,9 +4,9 @@ use crate::model::*;
 use crate::words::{self, join, local_name};
 use serde_json::{Map, Value};
 
-type Obj = Map<String, Value>;
+pub(crate) type Obj = Map<String, Value>;
 
-const POLICY_KEYS: &[&str] = &[
+pub(crate) const POLICY_KEYS: &[&str] = &[
     "@context",
     "@id",
     "@type",
@@ -24,7 +24,7 @@ const POLICY_KEYS: &[&str] = &[
     "prohibition",
     "obligation",
 ];
-const RULE_KEYS: &[&str] = &[
+pub(crate) const RULE_KEYS: &[&str] = &[
     "@id",
     "@type",
     "uid",
@@ -47,7 +47,8 @@ const RULE_KEYS: &[&str] = &[
     "profile",
 ];
 /// Metadata vocabularies whose properties are descriptive, not normative.
-const QUIET_PREFIXES: &[&str] = &["dc:", "dct:", "dcterms:", "rdfs:", "skos:", "schema:"];
+pub(crate) const QUIET_PREFIXES: &[&str] =
+    &["dc:", "dct:", "dcterms:", "rdfs:", "skos:", "schema:"];
 
 pub fn document(value: &Value) -> Result<Document, ProseError> {
     let mut r = Reader::default();
@@ -65,7 +66,7 @@ pub fn document(value: &Value) -> Result<Document, ProseError> {
     Ok(doc)
 }
 
-fn policy_nodes(v: &Value) -> Vec<&Value> {
+pub(crate) fn policy_nodes(v: &Value) -> Vec<&Value> {
     match v {
         Value::Array(a) => a.iter().flat_map(policy_nodes).collect(),
         Value::Object(o) if o.contains_key("@graph") => policy_nodes(&o["@graph"]),
@@ -73,7 +74,7 @@ fn policy_nodes(v: &Value) -> Vec<&Value> {
     }
 }
 
-fn looks_like_policy(o: &Obj) -> bool {
+pub(crate) fn looks_like_policy(o: &Obj) -> bool {
     types(o).iter().any(|t| {
         matches!(
             local_name(t),
@@ -91,7 +92,7 @@ fn looks_like_policy(o: &Obj) -> bool {
         .any(|k| o.contains_key(*k))
 }
 
-fn types(o: &Obj) -> Vec<&str> {
+pub(crate) fn types(o: &Obj) -> Vec<&str> {
     ["@type", "type"]
         .iter()
         .filter_map(|k| o.get(*k))
@@ -101,7 +102,7 @@ fn types(o: &Obj) -> Vec<&str> {
 }
 
 /// Flatten arrays and `@list`/`@set` wrappers into the values they hold.
-fn items(v: &Value) -> Vec<&Value> {
+pub(crate) fn items(v: &Value) -> Vec<&Value> {
     match v {
         Value::Array(a) => a.iter().flat_map(items).collect(),
         Value::Object(o) => match o.get("@list").or_else(|| o.get("@set")) {
@@ -112,12 +113,23 @@ fn items(v: &Value) -> Vec<&Value> {
     }
 }
 
-fn get<'a>(o: &'a Obj, keys: &[&str]) -> Option<&'a Value> {
+pub(crate) fn get<'a>(o: &'a Obj, keys: &[&str]) -> Option<&'a Value> {
     keys.iter().find_map(|k| o.get(*k))
 }
 
+/// The identifier of a node object that carries nothing else but `@id`: a
+/// rule written as `{"@id": "urn:rule:1"}` is a reference, like the bare
+/// string. `uid` and `id` are not: an editor writes a rule whose other
+/// properties were all removed as `{"uid": ..}`, and that is still a rule.
+pub(crate) fn bare_reference(o: &Obj) -> Option<String> {
+    if o.len() != 1 {
+        return None;
+    }
+    o.get("@id").and_then(|x| x.as_str().map(String::from))
+}
+
 /// The identifier of a node: a bare string, or `uid`/`@id`/`id`.
-fn ident(v: &Value) -> Option<String> {
+pub(crate) fn ident(v: &Value) -> Option<String> {
     match v {
         Value::String(s) => Some(s.clone()),
         Value::Object(o) => {
@@ -130,6 +142,8 @@ fn ident(v: &Value) -> Option<String> {
 #[derive(Default)]
 struct Reader {
     warnings: Vec<String>,
+    /// The same messages, for de-duplication in constant time.
+    seen: std::collections::HashSet<String>,
 }
 
 /// What a rule inherits from its policy when it states none of its own.
@@ -144,13 +158,18 @@ struct Inherited {
 impl Reader {
     fn warn(&mut self, msg: impl Into<String>) {
         let msg = msg.into();
-        if !self.warnings.contains(&msg) {
+        if self.seen.insert(msg.clone()) {
             self.warnings.push(msg);
         }
     }
 
     fn unknown_keys(&mut self, o: &Obj, known: &[&str], what: &str) {
-        for k in o.keys() {
+        // Sorted, not in document order: `serde_json` keeps document order when
+        // its `preserve_order` feature is on (the edit module needs it), and
+        // the v0.1 warnings were always alphabetical.
+        let mut keys: Vec<&String> = o.keys().collect();
+        keys.sort();
+        for k in keys {
             if known.contains(&k.as_str()) || QUIET_PREFIXES.iter().any(|p| k.starts_with(p)) {
                 continue;
             }
@@ -266,16 +285,19 @@ impl Reader {
     }
 
     fn rule(&mut self, v: &Value, kind: RuleKind, inh: &Inherited) -> Rule {
-        let Value::Object(o) = v else {
-            let id = ident(v).unwrap_or_else(|| "(unnamed)".into());
-            return Rule {
-                kind,
-                uid: Some(id.clone()),
-                sentence: format!("The rule {id} is referenced here but not defined."),
-                refinements: vec![],
-                conditions: vec![],
-                follow_ups: vec![],
-            };
+        let o = match v {
+            Value::Object(o) if bare_reference(o).is_none() => o,
+            _ => {
+                let id = ident(v).unwrap_or_else(|| "(unnamed)".into());
+                return Rule {
+                    kind,
+                    uid: Some(id.clone()),
+                    sentence: format!("The rule {id} is referenced here but not defined."),
+                    refinements: vec![],
+                    conditions: vec![],
+                    follow_ups: vec![],
+                };
+            }
         };
         self.unknown_keys(o, RULE_KEYS, "a rule");
         let uid = get(o, &["uid", "@id", "id"]).and_then(ident);
@@ -381,8 +403,20 @@ impl Reader {
                     _ => "Duties attached to this rule",
                 },
             ),
-            ("remedy", "Remedies if this prohibition is breached"),
-            ("consequence", "Consequences if this duty is not fulfilled"),
+            (
+                "remedy",
+                match kind {
+                    RuleKind::Prohibition => "Remedies if this prohibition is breached",
+                    _ => "Remedies attached to this rule",
+                },
+            ),
+            (
+                "consequence",
+                match kind {
+                    RuleKind::Obligation => "Consequences if this duty is not fulfilled",
+                    _ => "Consequences attached to this rule",
+                },
+            ),
         ] {
             if let Some(v) = o.get(key) {
                 let rules: Vec<Rule> = items(v)
@@ -548,7 +582,8 @@ impl Reader {
                     return match inner {
                         Value::String(s) if typed => s.clone(),
                         Value::String(s) => fmt_str(s),
-                        other => other.to_string(),
+                        // Sorted keys, as v0.1 printed them (it had no `preserve_order`).
+                        other => sorted(other).to_string(),
                     };
                 }
                 match ident(v) {
@@ -567,8 +602,25 @@ impl Reader {
     }
 }
 
+/// The value with every object's keys in sorted order.
+fn sorted(v: &Value) -> Value {
+    match v {
+        Value::Object(o) => {
+            let mut keys: Vec<&String> = o.keys().collect();
+            keys.sort();
+            Value::Object(
+                keys.into_iter()
+                    .map(|k| (k.clone(), sorted(&o[k])))
+                    .collect(),
+            )
+        }
+        Value::Array(a) => Value::Array(a.iter().map(sorted).collect()),
+        other => other.clone(),
+    }
+}
+
 /// Bare when it reads as an IRI, a number or a date; quoted otherwise.
-fn fmt_str(s: &str) -> String {
+pub(crate) fn fmt_str(s: &str) -> String {
     let no_space = !s.chars().any(char::is_whitespace);
     let numeric = s.parse::<f64>().is_ok();
     let date = s.len() >= 10 && s.as_bytes()[4] == b'-' && s.as_bytes()[7] == b'-';
@@ -579,7 +631,7 @@ fn fmt_str(s: &str) -> String {
     }
 }
 
-fn join_with(items: &[String], conj: &str) -> String {
+pub(crate) fn join_with(items: &[String], conj: &str) -> String {
     match items {
         [] => String::new(),
         [one] => one.clone(),
@@ -588,7 +640,7 @@ fn join_with(items: &[String], conj: &str) -> String {
 }
 
 /// A condition on one line, for places a nested list does not fit.
-fn inline(c: &Condition) -> String {
+pub(crate) fn inline(c: &Condition) -> String {
     if c.children.is_empty() {
         return c.text.clone();
     }

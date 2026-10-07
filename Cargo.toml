@@ -12,7 +12,9 @@ resolver = "2"
 members = ["prose-core", "prose-yew", "prose-wasm", "demo"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.3.0"
 edition = "2024"
+# Let-chains (`if let ... && let ...`) are used throughout; stable since 1.88.
+rust-version = "1.88"
 license = "Apache-2.0"
 repository = "https://github.com/ds-labs-org/ds-prose-rs"

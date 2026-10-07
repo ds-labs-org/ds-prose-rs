@@ -1,0 +1,35 @@
+Ok(
+    Document {
+        policies: [
+            Policy {
+                kind: Set,
+                uid: Some(
+                    "urn:policy:opref",
+                ),
+                heading: "Policy set urn:policy:opref",
+                intro: "A set of rules.",
+                notes: [],
+                rules: [
+                    Rule {
+                        kind: Permission,
+                        uid: None,
+                        sentence: "Anyone may use urn:asset:5.",
+                        refinements: [],
+                        conditions: [
+                            Condition {
+                                text: "the payment amount is at least 10.50 euro",
+                                children: [],
+                            },
+                            Condition {
+                                text: "the number of times used is less than the value at urn:ref:limit",
+                                children: [],
+                            },
+                        ],
+                        follow_ups: [],
+                    },
+                ],
+            },
+        ],
+        warnings: [],
+    },
+)

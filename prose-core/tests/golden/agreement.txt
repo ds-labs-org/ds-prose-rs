@@ -1,0 +1,52 @@
+Ok(
+    Document {
+        policies: [
+            Policy {
+                kind: Agreement,
+                uid: Some(
+                    "http://example.com/policy:2020",
+                ),
+                heading: "Agreement http://example.com/policy:2020",
+                intro: "An agreement between http://example.com/party:alice (assigner) and http://example.com/party:bob (assignee).",
+                notes: [
+                    "If a permission and a prohibition conflict, the prohibition wins.",
+                ],
+                rules: [
+                    Rule {
+                        kind: Permission,
+                        uid: None,
+                        sentence: "http://example.com/party:bob may distribute http://example.com/data:set1, as permitted by http://example.com/party:alice.",
+                        refinements: [
+                            Condition {
+                                text: "The action \"distribute\" is limited to cases where",
+                                children: [
+                                    Condition {
+                                        text: "the number of times used is at most 5",
+                                        children: [],
+                                    },
+                                ],
+                            },
+                        ],
+                        conditions: [
+                            Condition {
+                                text: "at least one of the following holds",
+                                children: [
+                                    Condition {
+                                        text: "the purpose is any of \"research\" or \"education\"",
+                                        children: [],
+                                    },
+                                    Condition {
+                                        text: "the location is equal to https://example.com/geo/EU",
+                                        children: [],
+                                    },
+                                ],
+                            },
+                        ],
+                        follow_ups: [],
+                    },
+                ],
+            },
+        ],
+        warnings: [],
+    },
+)

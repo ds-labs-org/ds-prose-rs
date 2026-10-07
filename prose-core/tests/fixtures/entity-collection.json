@@ -1,0 +1,13 @@
+{
+  "@context": "http://www.w3.org/ns/odrl.jsonld",
+  "@type": "Set",
+  "uid": "urn:policy:coll",
+  "permission": [{
+    "action": "use",
+    "target": {
+      "partOf": "urn:collection:movies",
+      "refinement": [{ "leftOperand": "fileFormat", "operator": "eq", "rightOperand": "mp4" }]
+    },
+    "assignee": { "uid": "urn:party:bob", "partOf": "urn:collection:staff" }
+  }]
+}

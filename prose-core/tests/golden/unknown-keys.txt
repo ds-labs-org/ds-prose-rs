@@ -1,0 +1,34 @@
+Ok(
+    Document {
+        policies: [
+            Policy {
+                kind: Set,
+                uid: Some(
+                    "urn:policy:unk",
+                ),
+                heading: "Policy set urn:policy:unk",
+                intro: "A set of rules.",
+                notes: [],
+                rules: [
+                    Rule {
+                        kind: Permission,
+                        uid: None,
+                        sentence: "Anyone may use urn:asset:4.",
+                        refinements: [],
+                        conditions: [
+                            Condition {
+                                text: "the number of times used is at most 3",
+                                children: [],
+                            },
+                        ],
+                        follow_ups: [],
+                    },
+                ],
+            },
+        ],
+        warnings: [
+            "ignored unknown property \"x:policyNote\" on a policy",
+            "ignored unknown property \"x:ruleNote\" on a rule",
+        ],
+    },
+)

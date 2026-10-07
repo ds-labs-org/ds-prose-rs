@@ -1,0 +1,45 @@
+Ok(
+    Document {
+        policies: [
+            Policy {
+                kind: Set,
+                uid: Some(
+                    "urn:policy:g1",
+                ),
+                heading: "Policy set urn:policy:g1",
+                intro: "A set of rules.",
+                notes: [],
+                rules: [
+                    Rule {
+                        kind: Permission,
+                        uid: None,
+                        sentence: "Anyone may use urn:asset:a.",
+                        refinements: [],
+                        conditions: [],
+                        follow_ups: [],
+                    },
+                ],
+            },
+            Policy {
+                kind: Offer,
+                uid: Some(
+                    "urn:policy:g2",
+                ),
+                heading: "Offer urn:policy:g2",
+                intro: "An offer made by urn:party:org.",
+                notes: [],
+                rules: [
+                    Rule {
+                        kind: Prohibition,
+                        uid: None,
+                        sentence: "No one may distribute urn:asset:b, as prohibited by urn:party:org.",
+                        refinements: [],
+                        conditions: [],
+                        follow_ups: [],
+                    },
+                ],
+            },
+        ],
+        warnings: [],
+    },
+)

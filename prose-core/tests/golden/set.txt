@@ -1,0 +1,45 @@
+Ok(
+    Document {
+        policies: [
+            Policy {
+                kind: Set,
+                uid: Some(
+                    "http://example.com/policy:3030",
+                ),
+                heading: "Policy set http://example.com/policy:3030",
+                intro: "A set of rules.",
+                notes: [],
+                rules: [
+                    Rule {
+                        kind: Prohibition,
+                        uid: None,
+                        sentence: "No one may commercialize http://example.com/data:set1.",
+                        refinements: [],
+                        conditions: [],
+                        follow_ups: [
+                            FollowUp {
+                                label: "Remedies if this prohibition is breached",
+                                rules: [
+                                    Rule {
+                                        kind: Obligation,
+                                        uid: None,
+                                        sentence: "The assignee must compensate.",
+                                        refinements: [],
+                                        conditions: [
+                                            Condition {
+                                                text: "the payment amount is equal to 100.00 euro",
+                                                children: [],
+                                            },
+                                        ],
+                                        follow_ups: [],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+        warnings: [],
+    },
+)

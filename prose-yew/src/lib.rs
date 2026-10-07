@@ -7,6 +7,18 @@
 //! plus `prose-permission` / `prose-prohibition` / `prose-obligation`,
 //! `prose-rule-sentence`, `prose-label`, `prose-notes`, `prose-warnings`,
 //! `prose-error`.
+//!
+//! [`OdrlProseView`] is the editing counterpart: the same sentences, with an
+//! Edit mode (see [`edit`]).
+pub mod edit;
+pub use edit::{
+    BASE_CSS, ButtonContent, Choice, Decoration, DecorationAt, EditConfig, EditMode, EmptyTexts,
+    FieldNames, FocusKind, Labels, Nouns, OdrlProseView, OdrlProseViewProps, Placeholders,
+    ProseClasses, ProseEditor, ProseStyles, Reveal, SlotFocus, Suggestion, Vocabulary,
+    filter_suggestions, use_prose_editor,
+};
+/// The core crate, so hosts can reach `prose_yew::prose_core::edit::*`.
+pub use prose_core;
 use prose_core::{Condition, Document, Policy, ProseError, Rule, RuleKind};
 use yew::prelude::*;
 
@@ -106,3 +118,6 @@ fn condition_list(list: &[Condition]) -> Html {
         </ul>
     }
 }
+
+#[cfg(doctest)]
+mod non_exhaustive_pins;

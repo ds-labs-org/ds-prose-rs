@@ -1,0 +1,6 @@
+{
+  "@context": "http://www.w3.org/ns/odrl.jsonld",
+  "@type": "Set",
+  "uid": "urn:policy:single",
+  "permission": { "action": "use", "target": "urn:asset:7" }
+}

@@ -1,0 +1,30 @@
+Ok(
+    Document {
+        policies: [
+            Policy {
+                kind: Set,
+                uid: Some(
+                    "urn:policy:child",
+                ),
+                heading: "Policy set urn:policy:child",
+                intro: "A set of rules.",
+                notes: [
+                    "Written to the profile urn:profile:one and urn:profile:two.",
+                    "If a permission and a prohibition conflict, the permission wins.",
+                    "Inherits the rules of urn:policy:parent.",
+                ],
+                rules: [
+                    Rule {
+                        kind: Permission,
+                        uid: None,
+                        sentence: "Anyone may use urn:asset:9.",
+                        refinements: [],
+                        conditions: [],
+                        follow_ups: [],
+                    },
+                ],
+            },
+        ],
+        warnings: [],
+    },
+)
