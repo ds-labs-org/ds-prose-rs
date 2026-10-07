@@ -156,6 +156,14 @@ jobs:
       - name: Check the tarballs
         run: node scripts/check-npm-packages.mjs
 
+      # The same command shape the release workflow uses, minus the upload
+      # (needs no credentials). The leading "./" is required: npm reads
+      # "dist-npm/x" as the GitHub shorthand "user/repo".
+      - name: Dry-run the publish
+        run: |
+          npm publish ./dist-npm/prose-wasm --access public --dry-run
+          npm publish ./dist-npm/prose-angular --access public --dry-run
+
       - name: Typecheck and test the wrapper
         working-directory: prose-angular
         run: |
