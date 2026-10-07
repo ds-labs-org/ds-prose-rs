@@ -127,10 +127,12 @@ jobs:
         env:
           SMOKE_TITLE: ds-prose-rs Angular demo
 
+      # The "./" matters: npm reads "dist-npm/x" as the GitHub shorthand
+      # "user/repo" and tries to clone it, whether or not the folder exists.
       - name: Publish
         if: env.DRY_RUN != 'true'
-        run: npm publish "dist-npm/${{ steps.info.outputs.package }}" --access public --provenance
+        run: npm publish "./dist-npm/${{ steps.info.outputs.package }}" --access public --provenance
 
       - name: Dry run
         if: env.DRY_RUN == 'true'
-        run: npm publish "dist-npm/${{ steps.info.outputs.package }}" --access public --dry-run
+        run: npm publish "./dist-npm/${{ steps.info.outputs.package }}" --access public --dry-run
