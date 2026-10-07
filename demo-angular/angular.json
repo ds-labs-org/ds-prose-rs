@@ -50,7 +50,7 @@
               },
               {
                 "glob": "prose_wasm_bg.wasm",
-                "input": "../prose-angular/wasm",
+                "input": "node_modules/@ds-labs/prose-wasm",
                 "output": "/"
               }
             ],

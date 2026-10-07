@@ -16,7 +16,6 @@
     "module": "preserve",
     "baseUrl": ".",
     "paths": {
-      "@ds-labs/prose-angular": ["../prose-angular/src/index.ts"],
       "@angular/*": ["node_modules/@angular/*"],
       "rxjs": ["node_modules/rxjs"],
       "tslib": ["node_modules/tslib"]

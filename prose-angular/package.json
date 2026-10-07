@@ -1,21 +1,32 @@
 {
   "name": "@ds-labs/prose-angular",
   "version": "0.1.0",
-  "description": "Angular wrapper for ds-prose-rs: renders ODRL JSON-LD as prose via the Yew component, compiled to wasm",
+  "description": "Angular component that renders ODRL JSON-LD as plain-language prose (ds-prose-rs, compiled to WebAssembly)",
+  "keywords": ["angular", "odrl", "policy", "json-ld", "wasm", "dataspace"],
   "license": "Apache-2.0",
-  "private": true,
+  "author": "Nicolas Karageuzian",
+  "homepage": "https://github.com/ds-labs-org/ds-prose-rs#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ds-labs-org/ds-prose-rs.git",
+    "directory": "prose-angular"
+  },
+  "bugs": "https://github.com/ds-labs-org/ds-prose-rs/issues",
+  "type": "module",
   "scripts": {
-    "build:wasm": "cd ../prose-wasm && wasm-pack build --release --target web --out-dir ../prose-angular/wasm --out-name prose_wasm && rm -f ../prose-angular/wasm/.gitignore",
+    "build": "ng-packagr -p ng-package.json -c tsconfig.lib.prod.json && cp ../LICENSE ../dist-npm/prose-angular/LICENSE",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "node --test test/*.test.mjs"
   },
-  "peerDependencies": {
-    "@angular/core": ">=19.0.0"
-  },
+  "publishConfig": { "access": "public" },
+  "peerDependencies": { "@angular/core": ">=19.0.0" },
+  "dependencies": { "@ds-labs/prose-wasm": "^0.1.0", "tslib": "^2.3.0" },
   "devDependencies": {
-    "@angular/core": "^20.0.0",
+    "@angular/compiler": "^19.2.0",
+    "@angular/compiler-cli": "^19.2.0",
+    "@angular/core": "^19.2.0",
+    "ng-packagr": "^19.2.0",
     "rxjs": "^7.8.0",
-    "typescript": "~5.8.0"
-  },
-  "type": "module"
+    "typescript": "~5.7.0"
+  }
 }

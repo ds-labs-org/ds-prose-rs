@@ -1,0 +1,36 @@
+{
+  "name": "@ds-labs/prose-wasm",
+  "version": "0.1.0",
+  "description": "Renders ODRL JSON-LD as plain-language prose: the ds-prose-rs Yew component compiled to WebAssembly, mounted into any DOM element",
+  "keywords": [
+    "odrl",
+    "policy",
+    "json-ld",
+    "wasm",
+    "dataspace"
+  ],
+  "license": "Apache-2.0",
+  "author": "Nicolas Karageuzian",
+  "homepage": "https://github.com/ds-labs-org/ds-prose-rs#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ds-labs-org/ds-prose-rs.git",
+    "directory": "prose-wasm"
+  },
+  "bugs": "https://github.com/ds-labs-org/ds-prose-rs/issues",
+  "type": "module",
+  "main": "prose_wasm.js",
+  "types": "prose_wasm.d.ts",
+  "files": [
+    "prose_wasm.js",
+    "prose_wasm.d.ts",
+    "prose_wasm_bg.wasm",
+    "prose_wasm_bg.wasm.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  }
+}

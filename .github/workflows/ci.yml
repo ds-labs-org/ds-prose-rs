@@ -128,12 +128,13 @@ jobs:
       - name: Boot check
         run: scripts/smoke-demo.sh demo/dist /ds-prose-rs/
 
-  # The Angular bridge: prose-wasm built with wasm-pack, the wrapper
-  # typechecked, the demo app built, and the built app booted in a browser.
-  # v1 is read-only: it mounts <OdrlProse>, not the edit mode.
+  # The Angular bridge, built and consumed the way a downstream app does it:
+  # both npm packages are built and packed, checked, and the demo app installs
+  # only the tarballs (no path alias into this repository) and is booted in a
+  # browser. v1 is read-only: it mounts <OdrlProse>, not the edit mode.
   angular:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.96.1
@@ -145,24 +146,27 @@ jobs:
           tool: wasm-pack
       - uses: actions/setup-node@v4
         with:
-          # Angular 20 needs Node 20.19, 22.12 or newer.
+          # Angular 20 (the demo) needs Node 20.19, 22.12 or newer; the
+          # wrapper's tests use Node's built-in TypeScript stripping (22.18+).
           node-version: 22
 
-      - name: Build prose-wasm
-        working-directory: prose-angular
-        run: npm run build:wasm
+      - name: Build and pack @ds-labs/prose-wasm and @ds-labs/prose-angular
+        run: scripts/build-npm-packages.sh
+
+      - name: Check the tarballs
+        run: node scripts/check-npm-packages.mjs
 
       - name: Typecheck and test the wrapper
         working-directory: prose-angular
         run: |
-          npm install --no-audit --no-fund
           npm run typecheck
           npm test
 
-      - name: Build the demo app
+      - name: Build the demo app from the tarballs
         working-directory: demo-angular
         run: |
           npm ci --no-audit --no-fund
+          npm install --no-audit --no-fund --no-save ../dist-npm/tarballs/*.tgz
           npx ng build
 
       - name: Boot check

@@ -1,0 +1,136 @@
+# Publishes @ds-labs/prose-wasm and @ds-labs/prose-angular to npmjs.
+#
+#   git tag prose-wasm-v0.1.1    && git push origin prose-wasm-v0.1.1
+#   git tag prose-angular-v0.1.1 && git push origin prose-angular-v0.1.1
+#
+# The tag is the version. Packages are versioned independently of each other
+# and of the Rust crates. Publish prose-wasm first when prose-angular needs a
+# newer one: the angular release fails early if its wasm dependency range is
+# not on npm yet.
+#
+# Authentication is npm trusted publishing (OIDC): no token is stored in this
+# repository. It needs the trusted-publisher link on each package's npmjs
+# settings (repository ds-labs-org/ds-prose-rs, workflow release-npm.yml,
+# environment npm), which can only be set once the package exists, so the very
+# first version of each package is published by hand.
+#
+# "Run workflow" with dry_run on exercises everything except the upload.
+name: Release npm packages
+
+on:
+  push:
+    tags:
+      - "prose-wasm-v*"
+      - "prose-angular-v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to rehearse, e.g. prose-wasm-v0.1.0"
+        required: true
+      dry_run:
+        description: "Build and check, but do not publish"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-npm
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing and provenance
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      # A tag push publishes; a manual run publishes only if dry_run is off.
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read the tag
+        id: info
+        run: |
+          read -r package version < <(scripts/release-info.sh "$TAG")
+          echo "package=$package" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing $package $version (dry run: $DRY_RUN)"
+
+      # Releases come from main's history only.
+      - name: The tagged commit is on main
+        if: github.event_name == 'push'
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+      - uses: dtolnay/rust-toolchain@1.96.1
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs npm 11.5.1 or newer.
+      - name: Update npm
+        run: npm install -g npm@^11.5.1
+
+      - name: This version is not published yet
+        run: |
+          name="@ds-labs/${{ steps.info.outputs.package }}"
+          if npm view "$name@${{ steps.info.outputs.version }}" version >/dev/null 2>&1; then
+            echo "::error::$name@${{ steps.info.outputs.version }} is already on npm; bump the version"
+            exit 1
+          fi
+
+      - name: Build and pack both packages
+        env:
+          PROSE_WASM_VERSION: ${{ steps.info.outputs.package == 'prose-wasm' && steps.info.outputs.version || '' }}
+          PROSE_ANGULAR_VERSION: ${{ steps.info.outputs.package == 'prose-angular' && steps.info.outputs.version || '' }}
+        run: scripts/build-npm-packages.sh
+
+      - name: The wasm dependency of prose-angular is on npm
+        if: steps.info.outputs.package == 'prose-angular'
+        run: |
+          range="$(node -p "require('./dist-npm/prose-angular/package.json').dependencies['@ds-labs/prose-wasm']")"
+          if [ -z "$(npm view "@ds-labs/prose-wasm@$range" version 2>/dev/null)" ]; then
+            echo "::error::@ds-labs/prose-wasm@$range is not on npm: release prose-wasm first"
+            exit 1
+          fi
+
+      - name: Check the tarballs
+        run: node scripts/check-npm-packages.mjs
+
+      - name: Typecheck and test the wrapper
+        working-directory: prose-angular
+        run: |
+          npm run typecheck
+          npm test
+
+      - name: Build the demo app from the tarballs and boot it
+        run: |
+          (cd demo-angular \
+            && npm ci --no-audit --no-fund \
+            && npm install --no-audit --no-fund --no-save ../dist-npm/tarballs/*.tgz \
+            && npx ng build)
+          scripts/smoke-demo.sh demo-angular/dist/demo-angular/browser /
+        env:
+          SMOKE_TITLE: ds-prose-rs Angular demo
+
+      - name: Publish
+        if: env.DRY_RUN != 'true'
+        run: npm publish "dist-npm/${{ steps.info.outputs.package }}" --access public --provenance
+
+      - name: Dry run
+        if: env.DRY_RUN == 'true'
+        run: npm publish "dist-npm/${{ steps.info.outputs.package }}" --access public --dry-run

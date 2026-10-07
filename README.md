@@ -13,9 +13,9 @@ to accept a policy but should not have to read JSON-LD to do it.
 | `prose-core/src/edit/` | the edit layer: an addressable policy model, edit events, edit rules, a JSON-LD reader and writer, and the edit sentence templates |
 | `prose-yew/` | `<OdrlProse json={...} />`: lays a `Document` out as semantic HTML. `<OdrlProseView>`: the same sentences, read or edited |
 | `demo/` | Trunk app: paste a policy and read it, or edit the prose itself |
-| `prose-wasm/` | wasm-bindgen bridge that mounts the read-only `<OdrlProse>` into any DOM element |
-| `prose-angular/` | Angular wrapper, `<ds-odrl-prose [json]>`, over `prose-wasm` (read-only in v1; no edit mode) |
-| `demo-angular/` | Angular demo app for the wrapper |
+| `prose-wasm/` | wasm-bindgen bridge that mounts the read-only `<OdrlProse>` into any DOM element; `prose-wasm/npm/` holds the metadata of the npm package |
+| `prose-angular/` | Angular wrapper, `<ds-odrl-prose [json]>`, over `prose-wasm` (read-only in v1; no edit mode); built with ng-packagr |
+| `demo-angular/` | Angular demo app; installs the two packed npm packages, like a downstream app |
 
 ```rust
 use prose_yew::OdrlProse;
@@ -280,6 +280,31 @@ for new advisories:
 weekly. Third-party Actions are pinned by commit SHA (Dependabot keeps them
 current) and `cargo-deny` by version. `.github/workflows/pages.yml` deploys the demo from `main` after the
 same boot check.
+
+## npm packages
+
+Two packages are published to npmjs under the `@ds-labs` scope:
+
+| package | what | for |
+|---|---|---|
+| [`@ds-labs/prose-wasm`](prose-wasm/npm/README.md) | the wasm and its JavaScript glue; framework-neutral | any JavaScript host |
+| [`@ds-labs/prose-angular`](prose-angular/README.md) | `<ds-odrl-prose [json]>`, Angular 19 or newer | Angular apps; depends on the wasm package |
+
+An Angular app needs `npm i @ds-labs/prose-angular` and one `angular.json`
+asset entry pointing at the wasm file inside `node_modules`; there is nothing
+to vendor or build. Both are read-only: there is no edit mode in them.
+
+Versions are independent of each other and of the Rust crates (the Rust
+version the wasm was built from is recorded in the wasm package's
+`package.json`). Releases are tags, `prose-wasm-vX.Y.Z` and
+`prose-angular-vX.Y.Z`, published by `.github/workflows/release-npm.yml` with
+npm trusted publishing (OIDC, no token in this repository). Publish
+`prose-wasm` first when `prose-angular` needs a newer one.
+
+```bash
+scripts/build-npm-packages.sh        # build and pack both into dist-npm/tarballs
+node scripts/check-npm-packages.mjs  # check the tarballs
+```
 
 ## Develop
 
