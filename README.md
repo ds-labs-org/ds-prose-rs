@@ -298,7 +298,9 @@ Versions are independent of each other and of the Rust crates (the Rust
 version the wasm was built from is recorded in the wasm package's
 `package.json`). Releases are tags, `prose-wasm-vX.Y.Z` and
 `prose-angular-vX.Y.Z`, published by `.github/workflows/release-npm.yml` with
-npm trusted publishing (OIDC, no token in this repository). Publish
+npm trusted publishing (OIDC, no token in this repository). The workflow
+*stages* each release (`npm stage publish`); it goes live only when you approve
+it with your 2FA (on npmjs.com, or `npm stage approve <stage-id>`). Publish
 `prose-wasm` first when `prose-angular` needs a newer one.
 
 ```bash

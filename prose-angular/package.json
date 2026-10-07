@@ -1,8 +1,15 @@
 {
   "name": "@ds-labs/prose-angular",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Angular component that renders ODRL JSON-LD as plain-language prose (ds-prose-rs, compiled to WebAssembly)",
-  "keywords": ["angular", "odrl", "policy", "json-ld", "wasm", "dataspace"],
+  "keywords": [
+    "angular",
+    "odrl",
+    "policy",
+    "json-ld",
+    "wasm",
+    "dataspace"
+  ],
   "license": "Apache-2.0",
   "author": "Nicolas Karageuzian",
   "homepage": "https://github.com/ds-labs-org/ds-prose-rs#readme",
@@ -18,9 +25,16 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "node --test test/*.test.mjs"
   },
-  "publishConfig": { "access": "public" },
-  "peerDependencies": { "@angular/core": ">=19.0.0" },
-  "dependencies": { "@ds-labs/prose-wasm": "^0.1.0", "tslib": "^2.3.0" },
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "@angular/core": ">=19.0.0"
+  },
+  "dependencies": {
+    "@ds-labs/prose-wasm": "^0.1.0",
+    "tslib": "^2.3.0"
+  },
   "devDependencies": {
     "@angular/compiler": "^19.2.0",
     "@angular/compiler-cli": "^19.2.0",

@@ -8,11 +8,22 @@
 # newer one: the angular release fails early if its wasm dependency range is
 # not on npm yet.
 #
+# Staged publishing. This workflow does not make a release live: it builds,
+# checks and STAGES it (`npm stage publish`), deferring the second factor to a
+# person. Approve it with your 2FA, on npmjs.com or with
+#
+#   npm stage list @ds-labs/<package>
+#   npm stage approve <stage-id>          (or: npm stage reject <stage-id>)
+#
+# so a compromised workflow or tag cannot publish on its own.
+#
 # Authentication is npm trusted publishing (OIDC): no token is stored in this
 # repository. It needs the trusted-publisher link on each package's npmjs
 # settings (repository ds-labs-org/ds-prose-rs, workflow release-npm.yml,
-# environment npm), which can only be set once the package exists, so the very
-# first version of each package is published by hand.
+# environment npm, allowed action: stage publish), which can only be set once
+# the package exists, so the very first version of each package was published
+# by hand. Staging needs npm 12 (which needs Node 22.22.2 or newer), hence the
+# pinned Node below.
 #
 # "Run workflow" with dry_run on exercises everything except the upload.
 name: Release npm packages
@@ -78,12 +89,14 @@ jobs:
           tool: wasm-pack
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
 
-      # Trusted publishing needs npm 11.5.1 or newer.
+      # `npm stage` exists from npm 12 on; trusted publishing needs 11.5.1+.
       - name: Update npm
-        run: npm install -g npm@^11.5.1
+        run: |
+          npm install -g npm@^12.0.0
+          npm --version
 
       - name: This version is not published yet
         run: |
@@ -129,10 +142,28 @@ jobs:
 
       # The "./" matters: npm reads "dist-npm/x" as the GitHub shorthand
       # "user/repo" and tries to clone it, whether or not the folder exists.
-      - name: Publish
+      # Staging uploads the release without making it live; a person approves
+      # it with their 2FA.
+      - name: Stage the release
         if: env.DRY_RUN != 'true'
-        run: npm publish "./dist-npm/${{ steps.info.outputs.package }}" --access public --provenance
+        run: npm stage publish "./dist-npm/${{ steps.info.outputs.package }}" --access public --provenance
+
+      - name: Say how to approve it
+        if: env.DRY_RUN != 'true'
+        run: |
+          name="@ds-labs/${{ steps.info.outputs.package }}"
+          {
+            echo "### Staged $name ${{ steps.info.outputs.version }}"
+            echo
+            echo "Not live yet. Approve it with your 2FA on npmjs.com, or:"
+            echo
+            echo '```'
+            echo "npm stage list $name"
+            echo "npm stage approve <stage-id>"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          npm stage list "$name" || true
 
       - name: Dry run
         if: env.DRY_RUN == 'true'
-        run: npm publish "./dist-npm/${{ steps.info.outputs.package }}" --access public --dry-run
+        run: npm stage publish "./dist-npm/${{ steps.info.outputs.package }}" --access public --dry-run
