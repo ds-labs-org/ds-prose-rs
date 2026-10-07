@@ -6,8 +6,16 @@
   "private": true,
   "scripts": {
     "build:wasm": "cd ../prose-wasm && wasm-pack build --release --target web --out-dir ../prose-angular/wasm --out-name prose_wasm && rm -f ../prose-angular/wasm/.gitignore",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test test/*.test.mjs"
   },
-  "peerDependencies": { "@angular/core": ">=19.0.0" },
-  "devDependencies": { "@angular/core": "^20.0.0", "rxjs": "^7.8.0", "typescript": "~5.8.0" }
+  "peerDependencies": {
+    "@angular/core": ">=19.0.0"
+  },
+  "devDependencies": {
+    "@angular/core": "^20.0.0",
+    "rxjs": "^7.8.0",
+    "typescript": "~5.8.0"
+  },
+  "type": "module"
 }
