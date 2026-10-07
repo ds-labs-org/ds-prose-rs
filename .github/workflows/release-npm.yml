@@ -1,7 +1,7 @@
 # Publishes @ds-labs/prose-wasm and @ds-labs/prose-angular to npmjs.
 #
-#   git tag prose-wasm-v0.1.1    && git push origin prose-wasm-v0.1.1
-#   git tag prose-angular-v0.1.1 && git push origin prose-angular-v0.1.1
+#   git tag prose-wasm-v0.3.1    && git push origin prose-wasm-v0.3.1
+#   git tag prose-angular-v0.3.1 && git push origin prose-angular-v0.3.1
 #
 # The tag is the version. Packages are versioned independently of each other
 # and of the Rust crates. Publish prose-wasm first when prose-angular needs a
@@ -36,7 +36,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to rehearse, e.g. prose-wasm-v0.1.0"
+        description: "Release tag to rehearse, e.g. prose-wasm-v0.3.1"
         required: true
       dry_run:
         description: "Build and check, but do not publish"

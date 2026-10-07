@@ -307,9 +307,10 @@ An Angular app needs `npm i @ds-labs/prose-angular` and one `angular.json`
 asset entry pointing at the wasm file inside `node_modules`; there is nothing
 to vendor or build. Both are read-only: there is no edit mode in them.
 
-Versions are independent of each other and of the Rust crates (the Rust
-version the wasm was built from is recorded in the wasm package's
-`package.json`). Releases are tags, `prose-wasm-vX.Y.Z` and
+The two npm packages and the Rust crates share one version number (0.3.1
+at the time of writing), so a number says which reader and renderer you have.
+A release bumps them together; the Rust version the wasm was built from is
+also recorded in the wasm package's `package.json`. Releases are tags, `prose-wasm-vX.Y.Z` and
 `prose-angular-vX.Y.Z`, published by `.github/workflows/release-npm.yml` with
 npm trusted publishing (OIDC, no token in this repository). The workflow
 *stages* each release (`npm stage publish`); it goes live only when you approve
