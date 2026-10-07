@@ -7,7 +7,6 @@
     "types": []
   },
   "include": [
-    "../prose-angular/src/**/*.ts",
     "src/**/*.ts"
   ],
   "exclude": [

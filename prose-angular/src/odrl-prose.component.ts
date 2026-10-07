@@ -10,7 +10,7 @@ import {
   input,
   output,
 } from '@angular/core';
-import init, { ProseHandle } from '../wasm/prose_wasm.js';
+import init, { ProseHandle } from '@ds-labs/prose-wasm';
 import { createWasmLoader } from './wasm-loader';
 
 /**
