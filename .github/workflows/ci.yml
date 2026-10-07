@@ -128,6 +128,47 @@ jobs:
       - name: Boot check
         run: scripts/smoke-demo.sh demo/dist /ds-prose-rs/
 
+  # The Angular bridge: prose-wasm built with wasm-pack, the wrapper
+  # typechecked, the demo app built, and the built app booted in a browser.
+  # v1 is read-only: it mounts <OdrlProse>, not the edit mode.
+  angular:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.96.1
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+      - uses: actions/setup-node@v4
+        with:
+          # Angular 20 needs Node 20.19, 22.12 or newer.
+          node-version: 22
+
+      - name: Build prose-wasm
+        working-directory: prose-angular
+        run: npm run build:wasm
+
+      - name: Typecheck the wrapper
+        working-directory: prose-angular
+        run: |
+          npm install --no-audit --no-fund
+          npm run typecheck
+
+      - name: Build the demo app
+        working-directory: demo-angular
+        run: |
+          npm ci --no-audit --no-fund
+          npx ng build
+
+      - name: Boot check
+        run: scripts/smoke-demo.sh demo-angular/dist/demo-angular/browser /
+        env:
+          SMOKE_TITLE: ds-prose-rs Angular demo
+
   # Licences, advisories, banned or unknown sources: deny.toml.
   supply-chain:
     runs-on: ubuntu-latest

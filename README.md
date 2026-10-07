@@ -13,6 +13,9 @@ to accept a policy but should not have to read JSON-LD to do it.
 | `prose-core/src/edit/` | the edit layer: an addressable policy model, edit events, edit rules, a JSON-LD reader and writer, and the edit sentence templates |
 | `prose-yew/` | `<OdrlProse json={...} />`: lays a `Document` out as semantic HTML. `<OdrlProseView>`: the same sentences, read or edited |
 | `demo/` | Trunk app: paste a policy and read it, or edit the prose itself |
+| `prose-wasm/` | wasm-bindgen bridge that mounts the read-only `<OdrlProse>` into any DOM element |
+| `prose-angular/` | Angular wrapper, `<ds-odrl-prose [json]>`, over `prose-wasm` (read-only in v1; no edit mode) |
+| `demo-angular/` | Angular demo app for the wrapper |
 
 ```rust
 use prose_yew::OdrlProse;

@@ -6,11 +6,14 @@
 #
 #   scripts/smoke-demo.sh [dist-dir] [base-path]
 #   CHROME=/path/to/chrome overrides the browser lookup.
+#   SMOKE_TITLE overrides the text the page must show (default: the Trunk
+#   demo's heading); the Angular demo sets it to its own.
 set -euo pipefail
 
 dist="${1:-demo/dist}"
 base="${2:-/ds-prose-rs/}"
 port="${SMOKE_PORT:-8741}"
+title="${SMOKE_TITLE:-ds-prose-rs demo}"
 
 chrome="${CHROME:-}"
 if [ -z "$chrome" ]; then
@@ -52,7 +55,7 @@ if ! grep -qi '^<!doctype html>' <<<"$dom"; then
   echo "boot check FAILED: no <!DOCTYPE html> (page would render in quirks mode)" >&2
   fail=1
 fi
-for needle in 'ds-prose-rs demo' 'prose-policy'; do
+for needle in "$title" 'prose-policy'; do
   if ! grep -q "$needle" <<<"$dom"; then
     echo "boot check FAILED: '$needle' not in the rendered page" >&2
     fail=1

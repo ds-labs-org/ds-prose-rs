@@ -8,3 +8,11 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  - package-ecosystem: npm
+    directory: /prose-angular
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /demo-angular
+    schedule:
+      interval: weekly

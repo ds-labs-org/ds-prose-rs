@@ -1,0 +1,21 @@
+[package]
+name = "prose-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "wasm-bindgen bridge that mounts the prose-yew component into any DOM element (used by the Angular wrapper)"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+prose-yew = { path = "../prose-yew", features = ["csr"] }
+yew = { version = "0.23", features = ["csr"] }
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = ["Element"] }
+
+[package.metadata.wasm-pack.profile.release]
+# The system wasm-opt rejects rustc's default wasm features; size is not the point of this crate.
+wasm-opt = false

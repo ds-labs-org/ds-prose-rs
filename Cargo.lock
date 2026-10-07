@@ -659,6 +659,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "prose-wasm"
+version = "0.3.0"
+dependencies = [
+ "prose-yew",
+ "wasm-bindgen",
+ "web-sys",
+ "yew",
+]
+
+[[package]]
 name = "prose-yew"
 version = "0.3.0"
 dependencies = [
