@@ -100,7 +100,7 @@ dependencies = [
 
 [[package]]
 name = "demo"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "gloo-timers",
  "prose-yew",
@@ -653,14 +653,14 @@ dependencies = [
 
 [[package]]
 name = "prose-core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "prose-wasm"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "prose-yew",
  "wasm-bindgen",
@@ -670,7 +670,7 @@ dependencies = [
 
 [[package]]
 name = "prose-yew"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "gloo-timers",
  "prose-core",

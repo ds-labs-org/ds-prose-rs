@@ -1,6 +1,6 @@
 {
   "name": "@ds-labs/prose-wasm",
-  "version": "0.1.0",
+  "version": "0.3.1",
   "description": "Renders ODRL JSON-LD as plain-language prose: the ds-prose-rs Yew component compiled to WebAssembly, mounted into any DOM element",
   "keywords": [
     "odrl",

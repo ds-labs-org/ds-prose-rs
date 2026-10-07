@@ -6,8 +6,9 @@
 //
 //   node scripts/package-prose-wasm.mjs [version]
 //
-// The version is independent of the Rust workspace's. The workspace version
-// the wasm was built from is recorded in package.json as dsProse.prose-yew.
+// The version normally equals the Rust workspace's (they are released
+// together). The workspace version the wasm was built from is recorded in
+// package.json as dsProse.prose-yew.
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';

@@ -71,9 +71,9 @@ not remembered: the next change of an input tries again.
   DOM there). Use it as a leaf.
 - It renders client-side only. If your app uses SSR, guard it with
   `isPlatformBrowser` or `@defer`.
-- The package version is independent of the Rust crates. The ds-prose-rs
-  version of the wasm is recorded in `@ds-labs/prose-wasm`'s `package.json`
-  under `dsProse.prose-yew`.
+- The package version follows the Rust crates' (and `@ds-labs/prose-wasm`'s).
+  The ds-prose-rs version of the wasm is also recorded in
+  `@ds-labs/prose-wasm`'s `package.json` under `dsProse.prose-yew`.
 
 ## Replacing a vendored copy
 
