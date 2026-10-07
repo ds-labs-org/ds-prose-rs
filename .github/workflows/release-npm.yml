@@ -52,7 +52,7 @@ jobs:
       # A tag push publishes; a manual run publishes only if dry_run is off.
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'false' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
