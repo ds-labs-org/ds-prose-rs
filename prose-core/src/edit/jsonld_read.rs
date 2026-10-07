@@ -20,8 +20,11 @@ pub fn read_model(json: &str) -> Result<EditDoc, ProseError> {
     read_model_value(&value)
 }
 
-/// As [`read_model`], for a value that is already parsed. Accepts what
-/// `render_value` accepts and fails with `NoPolicy` in the same cases.
+/// As [`read_model`], for a value that is already parsed. It reads bare
+/// property keys only: `render_value` also reads ODRL properties written as
+/// `odrl:permission` or as full IRIs, so a document written that way renders
+/// there but reads here as no rules (or fails with `NoPolicy` when nothing
+/// else marks it a policy), because the writer keeps key spelling.
 pub fn read_model_value(value: &Value) -> Result<EditDoc, ProseError> {
     let (shape, origin) = match value {
         Value::Array(_) => (DocShape::Array, Some(Origin::new(value.clone()))),

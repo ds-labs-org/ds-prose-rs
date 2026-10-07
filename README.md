@@ -11,7 +11,7 @@ to accept a policy but should not have to read JSON-LD to do it.
 |---|---|
 | `prose-core/` | reads ODRL JSON-LD, builds a structured `Document`. No UI framework |
 | `prose-core/src/edit/` | the edit layer: an addressable policy model, edit events, edit rules, a JSON-LD reader and writer, and the edit sentence templates |
-| `prose-yew/` | `<OdrlProse json={...} />`: lays a `Document` out as semantic HTML. `<OdrlProseView>`: the same sentences, read or edited |
+| `prose-yew/` | `<OdrlProse json={...} />`: lays a `Document` out as semantic HTML. `<OdrlProseView>`: the same sentences for documents written with bare keys, read or edited |
 | `demo/` | Trunk app: paste a policy and read it, or edit the prose itself |
 | `prose-wasm/` | wasm-bindgen bridge that mounts the read-only `<OdrlProse>` into any DOM element; `prose-wasm/npm/` holds the metadata of the npm package |
 | `prose-angular/` | Angular wrapper, `<ds-odrl-prose [json]>`, over `prose-wasm` (read-only in v1; no edit mode); built with ng-packagr |
@@ -32,7 +32,20 @@ them; assigner, assignee and target, inherited from the policy when a rule
 states none; actions, including refinements; atomic constraints and the logical
 `and` / `or` / `xone` / `andSequence`; `profile`, `conflict`, `inheritFrom`.
 Compact IRIs (`odrl:use`), full ODRL IRIs, `@list`, `@value`/`@type`, and single
-values or arrays are all accepted.
+values or arrays are all accepted. So are ODRL property keys written as compact
+or full IRIs (`odrl:permission`, `http://www.w3.org/ns/odrl/2/action`), which
+is how a JSON-LD processor compacts ODRL against a context that declares the
+`odrl` prefix but not the terms (EDC's management API does). A bare key wins
+over its prefixed twin, on any kind of object (policy, rule, constraint,
+action, party); the twin is reported, never merged. Of two prefixed spellings
+of one term, the first in the document is read. `odrl:` keys are not read as
+ODRL when any `@context` in the document, including a term's own (type- or
+property-scoped) context or a nested node's, binds `odrl` to another IRI.
+Literal values (`@value`), extension payloads and `@context` are never
+rewritten. This applies to `render` and `OdrlProse` (and so the Angular
+bridge); the edit layer (`read_model`, and so `OdrlProseView`) still reads
+bare keys only, because its writer keeps key spelling, so a document written
+with prefixed keys renders in `OdrlProse` but reads there as no rules.
 
 Example: `{"leftOperand":"dateTime","operator":"lt","rightOperand":{"@value":"2026-12-31","@type":"xsd:date"}}`
 reads as "the date and time is before 2026-12-31".
