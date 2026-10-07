@@ -87,9 +87,19 @@ const ODRL_PROPERTIES: &[&str] = &[
     "partOf",
 ];
 
+/// How deep the reader looks into a value that is already parsed. serde_json
+/// stops a parsed document at 128 levels, so nothing parsed from text comes
+/// near this; a value built in code can be deeper, and cutting it with a note
+/// is better than overflowing the stack (a panic in wasm takes the page).
+const MAX_DEPTH: usize = 256;
+
 pub fn document(value: &Value) -> Result<Document, ProseError> {
-    let value = &bare_odrl_keys(value, odrl_prefix_is_odrl(value));
     let mut r = Reader::default();
+    let mut notes = Vec::new();
+    let value = &bare_odrl_keys(value, odrl_prefix_is_odrl(value), &mut notes);
+    for note in notes {
+        r.warn(note);
+    }
     let mut doc = Document::default();
     for v in policy_nodes(value) {
         match v {
@@ -107,61 +117,155 @@ pub fn document(value: &Value) -> Result<Document, ProseError> {
 /// `v` with ODRL property keys written as compact IRIs (`odrl:permission`)
 /// or full IRIs renamed to the bare term, as a JSON-LD processor compacting
 /// against a context that declares the `odrl` prefix but not the terms
-/// writes them (EDC does). A bare key already on the object wins: its
-/// prefixed twin keeps its name and is reported as unknown. `@context`
-/// values are left as they are.
-fn bare_odrl_keys(v: &Value, odrl_prefix: bool) -> Value {
-    match v {
-        Value::Array(a) => Value::Array(a.iter().map(|x| bare_odrl_keys(x, odrl_prefix)).collect()),
-        Value::Object(o) => {
-            let mut out = Obj::new();
-            for (k, x) in o {
-                let x = if k == "@context" {
-                    x.clone()
-                } else {
-                    bare_odrl_keys(x, odrl_prefix)
-                };
-                let term = k
-                    .strip_prefix(ODRL_NS)
-                    .or_else(|| k.strip_prefix("odrl:").filter(|_| odrl_prefix))
-                    .filter(|t| {
-                        ODRL_PROPERTIES.contains(t) && !o.contains_key(*t) && !out.contains_key(*t)
-                    });
-                out.insert(term.map_or_else(|| k.clone(), String::from), x);
-            }
-            Value::Object(out)
+/// writes them (EDC does).
+///
+/// Only the document's ODRL structure is walked: the values of ODRL
+/// properties, `@graph`, `@list`, `@set` and arrays. Everything else (an
+/// extension payload, a literal's `@value`, a `@context`) is copied as it is,
+/// to a bounded depth, so the author's own keys are never rewritten.
+///
+/// A bare key already on the object wins. Its prefixed twin is dropped from
+/// the copy and reported in `notes`, on every kind of object (policy, rule,
+/// constraint, action, party), so nothing the author wrote vanishes silently.
+/// Of two prefixed spellings of one term, the first in document order is read.
+fn bare_odrl_keys(v: &Value, odrl_prefix: bool, notes: &mut Vec<String>) -> Value {
+    Rewriter {
+        odrl_prefix,
+        notes,
+        cut: false,
+    }
+    .node(v, 0)
+}
+
+struct Rewriter<'a> {
+    odrl_prefix: bool,
+    notes: &'a mut Vec<String>,
+    cut: bool,
+}
+
+impl Rewriter<'_> {
+    /// The bare ODRL property `key` spells, if it is written as a compact IRI
+    /// (when `odrl:` means ODRL here) or as a full IRI.
+    fn bare_term(&self, key: &str) -> Option<&'static str> {
+        let term = key
+            .strip_prefix(ODRL_NS)
+            .or_else(|| key.strip_prefix("odrl:").filter(|_| self.odrl_prefix))?;
+        ODRL_PROPERTIES.iter().copied().find(|p| *p == term)
+    }
+
+    /// Whether the value under `key` can hold ODRL nodes the reader will read.
+    fn holds_odrl(key: &str) -> bool {
+        ODRL_PROPERTIES.contains(&key) || matches!(key, "@graph" | "@list" | "@set")
+    }
+
+    fn cut_off(&mut self) -> Value {
+        if !self.cut {
+            self.cut = true;
+            self.notes.push(format!(
+                "content nested deeper than {MAX_DEPTH} levels is not read"
+            ));
         }
-        _ => v.clone(),
+        Value::Null
+    }
+
+    fn node(&mut self, v: &Value, depth: usize) -> Value {
+        if depth > MAX_DEPTH {
+            return self.cut_off();
+        }
+        match v {
+            Value::Array(a) => Value::Array(a.iter().map(|x| self.node(x, depth + 1)).collect()),
+            Value::Object(o) => {
+                let mut out = Obj::new();
+                for (k, x) in o {
+                    match self.bare_term(k) {
+                        Some(term) if o.contains_key(term) || out.contains_key(term) => {
+                            self.notes.push(format!(
+                                "ignored property \"{k}\": \"{term}\" on the same object is read instead"
+                            ));
+                        }
+                        Some(term) => {
+                            out.insert(term.to_string(), self.node(x, depth + 1));
+                        }
+                        None if Self::holds_odrl(k) => {
+                            out.insert(k.clone(), self.node(x, depth + 1));
+                        }
+                        None => {
+                            out.insert(k.clone(), self.copy(x, depth + 1));
+                        }
+                    }
+                }
+                Value::Object(out)
+            }
+            _ => v.clone(),
+        }
+    }
+
+    /// `v` as it is, to the bounded depth.
+    fn copy(&mut self, v: &Value, depth: usize) -> Value {
+        if depth > MAX_DEPTH {
+            return self.cut_off();
+        }
+        match v {
+            Value::Array(a) => Value::Array(a.iter().map(|x| self.copy(x, depth + 1)).collect()),
+            Value::Object(o) => Value::Object(
+                o.iter()
+                    .map(|(k, x)| (k.clone(), self.copy(x, depth + 1)))
+                    .collect(),
+            ),
+            _ => v.clone(),
+        }
     }
 }
 
 /// Whether `odrl:` means ODRL here: no `@context` in the document binds the
-/// prefix to another IRI. There is no JSON-LD processing, so an `odrl:` key
-/// under a context that rebinds it is reported, not guessed at.
+/// prefix to another IRI, in a context, in a term definition's own (type- or
+/// property-scoped) context, or in a nested node's. There is no JSON-LD
+/// processing, so a rebinding anywhere refuses the prefix everywhere and an
+/// `odrl:` key is reported, not guessed at. Iterative: a hostile value cannot
+/// overflow the stack.
 fn odrl_prefix_is_odrl(v: &Value) -> bool {
     fn binds_elsewhere(ctx: &Value) -> bool {
-        match ctx {
-            Value::Array(a) => a.iter().any(binds_elsewhere),
-            Value::Object(c) => c.get("odrl").is_some_and(|b| {
-                let iri = match b {
-                    Value::Object(d) => d.get("@id").and_then(Value::as_str),
-                    _ => b.as_str(),
-                };
-                iri != Some(ODRL_NS)
-            }),
-            _ => false,
+        let mut stack = vec![ctx];
+        while let Some(c) = stack.pop() {
+            match c {
+                Value::Array(a) => stack.extend(a),
+                Value::Object(o) => {
+                    if let Some(b) = o.get("odrl") {
+                        let iri = match b {
+                            Value::Object(d) => d.get("@id").and_then(Value::as_str),
+                            _ => b.as_str(),
+                        };
+                        if iri != Some(ODRL_NS) {
+                            return true;
+                        }
+                    }
+                    for (k, def) in o {
+                        if k != "odrl"
+                            && let Some(inner) = def.as_object().and_then(|d| d.get("@context"))
+                        {
+                            stack.push(inner);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+    let mut stack = vec![v];
+    while let Some(v) = stack.pop() {
+        match v {
+            Value::Array(a) => stack.extend(a),
+            Value::Object(o) => {
+                if o.get("@context").is_some_and(binds_elsewhere) {
+                    return false;
+                }
+                stack.extend(o.iter().filter(|(k, _)| *k != "@context").map(|(_, x)| x));
+            }
+            _ => {}
         }
     }
-    match v {
-        Value::Array(a) => a.iter().all(odrl_prefix_is_odrl),
-        Value::Object(o) => {
-            !o.get("@context").is_some_and(binds_elsewhere)
-                && o.iter()
-                    .filter(|(k, _)| *k != "@context")
-                    .all(|(_, x)| odrl_prefix_is_odrl(x))
-        }
-        _ => true,
-    }
+    true
 }
 
 pub(crate) fn policy_nodes(v: &Value) -> Vec<&Value> {
@@ -744,4 +848,37 @@ pub(crate) fn inline(c: &Condition) -> String {
     }
     let kids: Vec<String> = c.children.iter().map(inline).collect();
     format!("{}: {}", c.text, kids.join("; "))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Deep ODRL structure (a `constraint` inside a `constraint` ...), which
+    /// is walked by `node`, not merely copied. Checked on the walk alone: the
+    /// reader proper recurses on such structure too, which is not this pass's
+    /// to fix.
+    #[test]
+    fn the_structural_walk_is_depth_bounded() {
+        std::thread::Builder::new()
+            .stack_size(1 << 20)
+            .spawn(|| {
+                let mut v = Value::String("leaf".into());
+                for _ in 0..3_000 {
+                    let mut m = Obj::new();
+                    m.insert("odrl:constraint".into(), v);
+                    v = Value::Object(m);
+                }
+                let mut notes = Vec::new();
+                let out = bare_odrl_keys(&v, true, &mut notes);
+                // serde_json's Drop recurses as deep as the value: leak the
+                // input; the output is cut at MAX_DEPTH and drops fine.
+                std::mem::forget(v);
+                assert!(notes.iter().any(|n| n.contains("deeper than")), "{notes:?}");
+                drop(out);
+            })
+            .unwrap()
+            .join()
+            .expect("the walk overflowed its stack or panicked");
+    }
 }

@@ -10,9 +10,10 @@
 //! such as `odrl:use`, full ODRL IRIs, `@list`, `@value`/`@type`, single
 //! values or arrays), and ODRL property keys written as `odrl:permission` or
 //! as full IRIs, the way a JSON-LD processor compacts them against a context
-//! that declares the `odrl` prefix but not the terms. It does not run a JSON-LD processor, so a custom
-//! `@context` that renames ODRL terms is not followed; unknown terms are
-//! reported in [`Document::warnings`] instead of guessed at.
+//! that declares the `odrl` prefix but not the terms. It does not run a
+//! JSON-LD processor, so a custom `@context` that renames ODRL terms is not
+//! followed; unknown terms are reported in [`Document::warnings`] instead of
+//! guessed at.
 pub mod edit;
 mod model;
 mod read;
