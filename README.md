@@ -32,7 +32,14 @@ them; assigner, assignee and target, inherited from the policy when a rule
 states none; actions, including refinements; atomic constraints and the logical
 `and` / `or` / `xone` / `andSequence`; `profile`, `conflict`, `inheritFrom`.
 Compact IRIs (`odrl:use`), full ODRL IRIs, `@list`, `@value`/`@type`, and single
-values or arrays are all accepted.
+values or arrays are all accepted. So are ODRL property keys written as compact
+or full IRIs (`odrl:permission`, `http://www.w3.org/ns/odrl/2/action`), which
+is how a JSON-LD processor compacts ODRL against a context that declares the
+`odrl` prefix but not the terms (EDC's management API does). A bare key wins
+over its prefixed twin, which is reported, and `odrl:` keys are not read as
+ODRL when the document's own `@context` binds `odrl` to another IRI. This
+applies to `render` and `OdrlProse`; the edit layer (`read_model`) still reads
+bare keys only, because its writer keeps key spelling.
 
 Example: `{"leftOperand":"dateTime","operator":"lt","rightOperand":{"@value":"2026-12-31","@type":"xsd:date"}}`
 reads as "the date and time is before 2026-12-31".

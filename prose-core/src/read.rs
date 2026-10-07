@@ -50,7 +50,45 @@ pub(crate) const RULE_KEYS: &[&str] = &[
 pub(crate) const QUIET_PREFIXES: &[&str] =
     &["dc:", "dct:", "dcterms:", "rdfs:", "skos:", "schema:"];
 
+/// The ODRL namespace.
+const ODRL_NS: &str = "http://www.w3.org/ns/odrl/2/";
+/// The ODRL properties the reader looks up by their bare name.
+const ODRL_PROPERTIES: &[&str] = &[
+    "uid",
+    "profile",
+    "conflict",
+    "inheritFrom",
+    "assigner",
+    "assignee",
+    "target",
+    "action",
+    "permission",
+    "prohibition",
+    "obligation",
+    "constraint",
+    "refinement",
+    "duty",
+    "consequence",
+    "remedy",
+    "relation",
+    "function",
+    "failure",
+    "output",
+    "leftOperand",
+    "operator",
+    "rightOperand",
+    "rightOperandReference",
+    "unit",
+    "and",
+    "or",
+    "xone",
+    "andSequence",
+    "source",
+    "partOf",
+];
+
 pub fn document(value: &Value) -> Result<Document, ProseError> {
+    let value = &bare_odrl_keys(value, odrl_prefix_is_odrl(value));
     let mut r = Reader::default();
     let mut doc = Document::default();
     for v in policy_nodes(value) {
@@ -64,6 +102,66 @@ pub fn document(value: &Value) -> Result<Document, ProseError> {
     }
     doc.warnings = r.warnings;
     Ok(doc)
+}
+
+/// `v` with ODRL property keys written as compact IRIs (`odrl:permission`)
+/// or full IRIs renamed to the bare term, as a JSON-LD processor compacting
+/// against a context that declares the `odrl` prefix but not the terms
+/// writes them (EDC does). A bare key already on the object wins: its
+/// prefixed twin keeps its name and is reported as unknown. `@context`
+/// values are left as they are.
+fn bare_odrl_keys(v: &Value, odrl_prefix: bool) -> Value {
+    match v {
+        Value::Array(a) => Value::Array(a.iter().map(|x| bare_odrl_keys(x, odrl_prefix)).collect()),
+        Value::Object(o) => {
+            let mut out = Obj::new();
+            for (k, x) in o {
+                let x = if k == "@context" {
+                    x.clone()
+                } else {
+                    bare_odrl_keys(x, odrl_prefix)
+                };
+                let term = k
+                    .strip_prefix(ODRL_NS)
+                    .or_else(|| k.strip_prefix("odrl:").filter(|_| odrl_prefix))
+                    .filter(|t| {
+                        ODRL_PROPERTIES.contains(t) && !o.contains_key(*t) && !out.contains_key(*t)
+                    });
+                out.insert(term.map_or_else(|| k.clone(), String::from), x);
+            }
+            Value::Object(out)
+        }
+        _ => v.clone(),
+    }
+}
+
+/// Whether `odrl:` means ODRL here: no `@context` in the document binds the
+/// prefix to another IRI. There is no JSON-LD processing, so an `odrl:` key
+/// under a context that rebinds it is reported, not guessed at.
+fn odrl_prefix_is_odrl(v: &Value) -> bool {
+    fn binds_elsewhere(ctx: &Value) -> bool {
+        match ctx {
+            Value::Array(a) => a.iter().any(binds_elsewhere),
+            Value::Object(c) => c.get("odrl").is_some_and(|b| {
+                let iri = match b {
+                    Value::Object(d) => d.get("@id").and_then(Value::as_str),
+                    _ => b.as_str(),
+                };
+                iri != Some(ODRL_NS)
+            }),
+            _ => false,
+        }
+    }
+    match v {
+        Value::Array(a) => a.iter().all(odrl_prefix_is_odrl),
+        Value::Object(o) => {
+            !o.get("@context").is_some_and(binds_elsewhere)
+                && o.iter()
+                    .filter(|(k, _)| *k != "@context")
+                    .all(|(_, x)| odrl_prefix_is_odrl(x))
+        }
+        _ => true,
+    }
 }
 
 pub(crate) fn policy_nodes(v: &Value) -> Vec<&Value> {
