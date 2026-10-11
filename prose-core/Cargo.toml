@@ -13,3 +13,7 @@ keywords = ["odrl", "json-ld", "policy", "prose"]
 # preserve_order is unified across the whole build: it also changes the host's
 # own serde_json::Map ordering. Documented in README.md (Limits).
 serde_json = { version = "1", features = ["preserve_order"] }
+
+[features]
+# Read profiles written in Turtle. Off by default.
+turtle = []

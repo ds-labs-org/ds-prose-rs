@@ -103,6 +103,9 @@ pub(crate) fn vocab(parsed: Parsed, limits: &ProfileLimits) -> Result<ProfileVoc
         if kinds.is_empty() {
             continue;
         }
+        if v.terms.len() == limits.max_terms {
+            return Err(ProfileError::LimitExceeded("max_terms"));
+        }
         let term = b.term(s, kinds);
         v.index.insert(term.iri.clone(), v.terms.len());
         v.terms.push(term);
@@ -110,6 +113,7 @@ pub(crate) fn vocab(parsed: Parsed, limits: &ProfileLimits) -> Result<ProfileVoc
     if v.terms.is_empty() {
         return Err(ProfileError::NoTerms);
     }
+    b.cycles(&mut notes);
     v.warnings = notes.list;
     Ok(v)
 }
@@ -281,6 +285,47 @@ impl Builder<'_, '_> {
         out.sort();
         out.dedup();
         out
+    }
+
+    /// One warning per cycle along includedIn and the broader links. An
+    /// iterative depth-first search, so a long chain cannot overflow the
+    /// call stack; every walk elsewhere is bounded by a visited set.
+    fn cycles(&self, notes: &mut Notes) {
+        let preds = [
+            odrl("includedIn"),
+            skos("broader"),
+            rdfs("subClassOf"),
+            rdfs("subPropertyOf"),
+        ];
+        let edges =
+            |s: &str| -> Vec<&str> { preds.iter().flat_map(|p| self.g.iris(s, p)).collect() };
+        // Present and `false`: on the current path. `true`: done.
+        let mut done: HashMap<&str, bool> = HashMap::new();
+        for &root in &self.g.order {
+            if done.contains_key(root) {
+                continue;
+            }
+            done.insert(root, false);
+            let mut stack = vec![(root, edges(root), 0)];
+            while let Some((node, out, i)) = stack.last_mut() {
+                let Some(&next) = out.get(*i) else {
+                    done.insert(node, true);
+                    stack.pop();
+                    continue;
+                };
+                *i += 1;
+                match done.get(next) {
+                    Some(false) => notes.warn(format!(
+                        "\"{next}\" is its own ancestor through odrl:includedIn or a broader link (a cycle); the cycle is not followed"
+                    )),
+                    Some(true) => {}
+                    None => {
+                        done.insert(next, false);
+                        stack.push((next, edges(next), 0));
+                    }
+                }
+            }
+        }
     }
 
     /// Every IRI reachable from `s` along `p` within the document, bounded

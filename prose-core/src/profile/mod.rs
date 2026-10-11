@@ -67,9 +67,13 @@ impl ProfileVocab {
                 limit: limits.max_bytes,
             });
         }
-        let value: Value =
-            serde_json::from_str(text).map_err(|e| ProfileError::Json(e.to_string()))?;
-        ProfileVocab::from_value(&value, limits)
+        match sniff(text)? {
+            Format::Json => {
+                let value: Value =
+                    serde_json::from_str(text).map_err(|e| ProfileError::Json(e.to_string()))?;
+                ProfileVocab::from_value(&value, limits)
+            }
+        }
     }
 
     /// As [`ProfileVocab::parse`], for a value that is already parsed.
@@ -301,8 +305,79 @@ pub enum ProfileError {
 
 impl std::fmt::Display for ProfileError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{self:?}")
+        match self {
+            ProfileError::TooLarge { bytes, limit } => write!(
+                f,
+                "the profile is {bytes} bytes, more than the limit of {limit}; load a smaller profile, or raise ProfileLimits::max_bytes for one you trust"
+            ),
+            ProfileError::Json(e) => write!(
+                f,
+                "not valid JSON: {e}. A profile is read as JSON-LD (W3C publishes ODRL itself as ODRL22.json)"
+            ),
+            ProfileError::LooksLikeHtml => write!(
+                f,
+                "this looks like an HTML page, not a profile: the server probably sent its landing page. Download the profile as JSON-LD (a .jsonld or .json file) instead"
+            ),
+            ProfileError::ContextOnly => write!(
+                f,
+                "this document holds only a @context: it maps short names to IRIs but declares no vocabulary terms. Load the profile's vocabulary, the document that declares its actions and operands, instead"
+            ),
+            ProfileError::JsonSchema => write!(
+                f,
+                "this is a JSON Schema: it checks how a policy is written, it does not declare ODRL terms. Load the profile's JSON-LD vocabulary instead"
+            ),
+            ProfileError::LooksLikePolicy => write!(
+                f,
+                "this is an ODRL policy, not a profile: read it as the policy, and load here the vocabulary its profile names"
+            ),
+            ProfileError::NoTerms => write!(
+                f,
+                "no ODRL terms found: a profile declares terms typed odrl:Action, odrl:LeftOperand, odrl:Operator, odrl:RightOperand or odrl:ConflictTerm"
+            ),
+            ProfileError::UnsupportedFormat => write!(f, "{UNSUPPORTED}"),
+            ProfileError::LimitExceeded(what) => write!(
+                f,
+                "the profile goes past the reader's limit {what}, so none of it was read; raise ProfileLimits::{what} for a profile you trust"
+            ),
+        }
     }
+}
+
+const UNSUPPORTED: &str = "this is not JSON-LD, and Turtle is not read in this build: convert the profile to JSON-LD (W3C publishes ODRL itself as ODRL22.json)";
+
+/// The syntaxes a profile text can be read in.
+enum Format {
+    Json,
+}
+
+/// Which syntax `text` is in, from its first characters. Markup is refused
+/// with a specific error; RDF/XML and other syntaxes are not read.
+fn sniff(text: &str) -> Result<Format, ProfileError> {
+    let t = text.trim_start();
+    match t.as_bytes().first() {
+        Some(b'{' | b'[') | None => Ok(Format::Json),
+        Some(b'<') if t.starts_with("<?xml") || t.starts_with("<rdf:RDF") => {
+            Err(ProfileError::UnsupportedFormat)
+        }
+        Some(b'<') if looks_like_markup(t) => Err(ProfileError::LooksLikeHtml),
+        _ => Err(ProfileError::UnsupportedFormat),
+    }
+}
+
+/// `<!doctype ..>`, `<!-- ..`, or a tag such as `<html>` or `<p class=..>`;
+/// not an IRI in angle brackets (`<https://..>`).
+fn looks_like_markup(t: &str) -> bool {
+    let rest = &t[1..];
+    if rest.starts_with('!') {
+        return true;
+    }
+    let name: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric())
+        .collect();
+    let after = rest[name.len()..].chars().next();
+    name.starts_with(|c: char| c.is_ascii_alphabetic())
+        && matches!(after, Some('>' | '/') | Some(' ' | '\t' | '\n' | '\r'))
 }
 
 impl std::error::Error for ProfileError {}

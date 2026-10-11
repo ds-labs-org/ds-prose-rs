@@ -57,6 +57,7 @@ enum Work<'a> {
 }
 
 pub(crate) fn read(v: &Value, limits: &ProfileLimits) -> Result<Parsed, ProfileError> {
+    shape(v)?;
     let mut w = Walker {
         sink: Sink::new(limits),
         max_depth: limits.max_depth,
@@ -74,6 +75,29 @@ pub(crate) fn read(v: &Value, limits: &ProfileLimits) -> Result<Parsed, ProfileE
         stack.extend(next.into_iter().rev());
     }
     Ok(w.sink.parsed)
+}
+
+/// The specific errors for documents that are something else than a
+/// profile, before the generic `NoTerms`.
+fn shape(v: &Value) -> Result<(), ProfileError> {
+    let Value::Object(o) = v else { return Ok(()) };
+    if o.contains_key("$schema") {
+        return Err(ProfileError::JsonSchema);
+    }
+    if !o.is_empty() && o.keys().all(|k| k == "@context") {
+        return Err(ProfileError::ContextOnly);
+    }
+    let rule_key = |k: &str| {
+        let local = k
+            .strip_prefix(ns::ODRL)
+            .or_else(|| k.strip_prefix("odrl:"))
+            .unwrap_or(k);
+        matches!(local, "permission" | "prohibition" | "obligation")
+    };
+    if o.keys().any(|k| rule_key(k)) {
+        return Err(ProfileError::LooksLikePolicy);
+    }
+    Ok(())
 }
 
 struct Walker<'l> {
