@@ -254,3 +254,47 @@ fn a_vocab_counts_against_the_expansion_limit() {
         ))
     );
 }
+
+/// A node whose subject and property IRIs are 60 KB each, with as many
+/// values as fit in the default 4 MiB.
+fn long_key_many_values(turtle: bool) -> String {
+    let s = format!("https://example.org/{}", "s".repeat(60_000));
+    let p = format!("https://example.org/{}", "p".repeat(60_000));
+    let n = (4 * 1024 * 1024 - 2 * 60_100) / 2;
+    let items = vec!["1"; n].join(",");
+    match turtle {
+        false => format!(r#"{{"@id":"{s}","@type":"{ODRL}Action","{p}":[{items}]}}"#),
+        true => format!("<{s}> a <{ODRL}Action> ; <{p}> {items} .\n"),
+    }
+}
+
+#[test]
+fn values_past_the_cap_on_a_long_key() {
+    // A value past max_values_per_key is not kept, but reading it still
+    // cost a copy of its subject and property: it is counted too.
+    let text = long_key_many_values(false);
+    assert!(text.len() <= 4 * 1024 * 1024);
+    let r = quick("values past the cap", move || ProfileVocab::parse(&text));
+    assert_eq!(
+        r,
+        Err(prose_core::profile::ProfileError::LimitExceeded(
+            "max_expanded_bytes"
+        ))
+    );
+}
+
+#[cfg(feature = "turtle")]
+#[test]
+fn turtle_values_past_the_cap_on_a_long_key() {
+    let text = long_key_many_values(true);
+    assert!(text.len() <= 4 * 1024 * 1024);
+    let r = quick("turtle values past the cap", move || {
+        ProfileVocab::parse(&text)
+    });
+    assert_eq!(
+        r,
+        Err(prose_core::profile::ProfileError::LimitExceeded(
+            "max_expanded_bytes"
+        ))
+    );
+}
