@@ -363,3 +363,16 @@ async fn intro_says_what_leaves_the_page() {
             .contains("Nothing leaves this page unless you load a profile from a URL.")
     );
 }
+
+#[wasm_bindgen_test]
+async fn relative_url_is_resolved_and_fetched() {
+    // The browser's own check of type="url" must not swallow a relative
+    // URL: it is resolved against the document's base URI and fetched.
+    let c = mount().await;
+    set_input(&c, "input#profile-url", "no-such-profile.jsonld");
+    settle().await;
+    click(&c, "#profile-load").await;
+    until(&c, "the answer", |c| has(c, "#profile-error")).await;
+    let msg = q(&c, "#profile-error").text_content().unwrap();
+    assert!(msg.starts_with("The server answered 404"), "{msg}");
+}
