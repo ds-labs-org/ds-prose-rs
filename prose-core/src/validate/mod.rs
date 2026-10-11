@@ -396,3 +396,36 @@ impl Report {
         self.findings.iter().map(Issue::from).collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::edit::{EditEvent, SlotPath, read_model};
+
+    #[test]
+    fn admissible_does_not_rebuild_index() {
+        let doc = read_model(
+            r#"{"@type": "Set", "uid": "urn:p",
+                "permission": [{"target": "urn:a", "action": "use"}]}"#,
+        )
+        .unwrap();
+        let slot: SlotPath = "policy[0].permission[0].action[0]#name".parse().unwrap();
+        let expect = doc.node(&slot.node).unwrap().id();
+        let before = check::index_builds();
+        let v = Validator::new(Arc::new(Wording::new()), Options::strict());
+        assert_eq!(check::index_builds(), before + 1);
+        for value in ["use", "foo:bar", "", "read"] {
+            let ev = EditEvent::SetText {
+                slot: slot.clone(),
+                expect,
+                value: value.to_string(),
+            };
+            let _ = v.admissible(&doc, &ev);
+            let mut d = doc.clone();
+            let _ = d.apply_gated(&ev, &Default::default(), Some(&v));
+            let _ = d.apply_all(std::slice::from_ref(&ev), &Default::default(), Some(&v));
+        }
+        let _ = v.clone().validate(&doc);
+        assert_eq!(check::index_builds(), before + 1);
+    }
+}

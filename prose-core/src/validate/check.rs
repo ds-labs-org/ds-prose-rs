@@ -28,8 +28,21 @@ pub(crate) struct Index {
     namespaces: HashMap<String, usize>,
 }
 
+#[cfg(test)]
+thread_local! {
+    static INDEX_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many indexes this thread has built: a test counts them.
+#[cfg(test)]
+pub(crate) fn index_builds() -> usize {
+    INDEX_BUILDS.with(|n| n.get())
+}
+
 impl Index {
     pub(crate) fn new(w: &Wording) -> Index {
+        #[cfg(test)]
+        INDEX_BUILDS.with(|n| n.set(n.get() + 1));
         let mut namespaces = HashMap::new();
         for (i, p) in w.profiles().enumerate() {
             for t in p.terms() {
