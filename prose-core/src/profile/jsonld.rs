@@ -1,7 +1,7 @@
 //! JSON-LD to triples, without a JSON-LD processor.
 //!
 //! The `@context` subset followed: string prefix and term entries, a string
-//! `@vocab` and `@base`, term definitions `{"@id": .., "@type": "@id" |
+//! `@vocab`, `@base` and `@language`, term definitions `{"@id": .., "@type": "@id" |
 //! "@vocab" | datatype}`, and arrays of these merged left to right. Anything
 //! else gets one warning naming the key. The W3C ODRL context, named as a
 //! remote context, turns on the prefixes and terms it is known to define.
@@ -44,6 +44,8 @@ struct Ctx {
     terms: HashMap<String, Option<Def>>,
     vocab: Option<String>,
     base: Option<String>,
+    /// The default language of plain strings (`@language`), lower-cased.
+    language: Option<String>,
     /// The W3C ODRL context was named.
     odrl: bool,
 }
@@ -274,7 +276,10 @@ impl Walker<'_> {
                     Coerce::Vocab => self.iri_value(ctx, s, p, text, true),
                     Coerce::Datatype(dt) => self.sink.push(s, p, literal(text, None, Some(dt))),
                     Coerce::None if iri_valued(p) => self.iri_value(ctx, s, p, text, false),
-                    Coerce::None => self.sink.push(s, p, literal(text, None, None)),
+                    Coerce::None => {
+                        self.sink
+                            .push(s, p, literal(text, ctx.language.as_deref(), None))
+                    }
                 },
                 Value::Number(n) => {
                     let dt = if n.is_f64() { "double" } else { "integer" };
@@ -441,6 +446,7 @@ impl Walker<'_> {
             terms: HashMap::new(),
             vocab: ctx.vocab.clone(),
             base: ctx.base.clone(),
+            language: ctx.language.clone(),
             odrl: ctx.odrl,
         };
         let list: Vec<&Value> = match c {
@@ -478,6 +484,8 @@ impl Walker<'_> {
                     }
                 }
                 ("@base", Value::Null) => out.base = None,
+                ("@language", Value::String(l)) => out.language = Some(l.to_ascii_lowercase()),
+                ("@language", Value::Null) => out.language = None,
                 ("@version", _) => {}
                 (k, _) => self.warn(format!("the context key \"{k}\" is not followed")),
             }

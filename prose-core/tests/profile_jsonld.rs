@@ -432,11 +432,10 @@ fn context_language_tags_plain_strings() {
         pairs("https://example.org/c", |t| &t.label),
         some("fr", "Cé")
     );
-    // A typed term is not a language string.
-    assert!(
-        v.term("https://example.org/c")
-            .unwrap()
-            .definition
-            .is_empty()
+    // A typed term (here an integer read as rdfs:comment) is not a
+    // language string: it stays untagged.
+    assert_eq!(
+        pairs("https://example.org/c", |t| &t.definition),
+        vec![(None, "3".to_string())]
     );
 }
