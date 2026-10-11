@@ -41,3 +41,6 @@ textarea { width: 100%; font-family: ui-monospace, monospace; font-size: 0.85rem
 .prose-glossary dt code { font-weight: 400; opacity: 0.75; }
 .prose-glossary dd { margin-left: 1rem; }
 .prose-glossary .prose-note, .prose-glossary .prose-kind-of, .prose-glossary .prose-implies, .prose-glossary .prose-from { opacity: 0.8; }
+.profile-url { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin: 0.5rem 0 0; }
+.profile-url input[type="url"] { flex: 1 1 18rem; min-width: 0; padding: 0.3rem 0.4rem; }
+.profile-url button { padding: 0.3rem 0.65rem; }

@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 use prose_yew::SharedWording;
 use prose_yew::prose_core::profile::{ProfileVocab, TermKind, Wording};
+use serde_json::Value;
 use yew::Reducible;
 
 /// A profile larger than this is not read (prose-core's default limit).
@@ -113,10 +114,27 @@ pub fn reduce(s: &ProfileState, m: ProfileMsg) -> ProfileState {
             n.error = Some(msg);
         }
         ProfileMsg::FileRead { .. } | ProfileMsg::Failed { .. } => {}
-        ProfileMsg::Fetched { .. } | ProfileMsg::Url(_) => {}
+        ProfileMsg::Fetched {
+            generation,
+            text,
+            content_type,
+        } if generation == s.generation => {
+            n.loading = false;
+            match content_type_problem(content_type.as_deref()) {
+                // The field still holds what was applied, so that profile stays.
+                Some(msg) => n.error = Some(msg),
+                None => {
+                    n.text = text;
+                    apply(&mut n);
+                }
+            }
+        }
+        ProfileMsg::Fetched { .. } => {}
+        ProfileMsg::Url(url) => n.url = url,
         ProfileMsg::Clear => {
             n = ProfileState {
                 generation: s.generation.wrapping_add(1),
+                url: s.url.clone(),
                 ..ProfileState::default()
             }
         }
@@ -124,19 +142,81 @@ pub fn reduce(s: &ProfileState, m: ProfileMsg) -> ProfileState {
     n
 }
 
-/// Not implemented yet.
-pub fn url_problem(_page: &str, _target: &str) -> Option<String> {
-    None
+/// Why `target` (an absolute URL) is not fetched from the page at `page`,
+/// if it is not: an http:// URL from an https page is blocked by the
+/// browser as mixed content, and only http(s) and blob: URLs are loaded.
+pub fn url_problem(page: &str, target: &str) -> Option<String> {
+    let scheme = |u: &str| u.split_once(':').map(|(s, _)| s.to_ascii_lowercase());
+    match scheme(target).as_deref() {
+        Some("https" | "blob") => None,
+        Some("http") if scheme(page).as_deref() == Some("https") => {
+            Some("The browser blocks http:// URLs from this https page.".to_string())
+        }
+        Some("http") => None,
+        _ => Some("Only http:// and https:// URLs are loaded.".to_string()),
+    }
 }
 
-/// Not implemented yet.
-pub fn content_type_problem(_content_type: Option<&str>) -> Option<String> {
-    None
+/// Why an answer with this `Content-Type` is not read as a profile, if it
+/// is not. JSON, JSON-LD and Turtle are read; so are the generic types
+/// static hosts use for any file (text/plain, octet-stream) and a missing
+/// type, since the reader tells the syntax from the text itself.
+pub fn content_type_problem(content_type: Option<&str>) -> Option<String> {
+    const READ: &[&str] = &[
+        "application/ld+json",
+        "application/json",
+        "text/turtle",
+        "application/x-turtle",
+        "text/plain",
+        "application/octet-stream",
+    ];
+    let mime = content_type?
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    if mime.is_empty() || READ.contains(&mime.as_str()) || mime.ends_with("+json") {
+        return None;
+    }
+    Some(format!(
+        "The server answered with {mime}; only JSON-LD and Turtle profiles are read."
+    ))
 }
 
-/// Not implemented yet.
-pub fn declared_profile(_policy: &str) -> Option<String> {
-    None
+/// The first profile IRI the policy declares (`profile` or
+/// `odrl:profile`): of the top-level node, else of the first node in a
+/// `@graph` or top-level array that declares one.
+pub fn declared_profile(policy: &str) -> Option<String> {
+    let v: Value = serde_json::from_str(policy).ok()?;
+    let nodes: Vec<&Value> = match &v {
+        Value::Array(a) => a.iter().collect(),
+        Value::Object(o) => match o.get("@graph") {
+            Some(Value::Array(g)) => std::iter::once(&v).chain(g.iter()).collect(),
+            _ => vec![&v],
+        },
+        _ => return None,
+    };
+    const KEYS: &[&str] = &[
+        "profile",
+        "odrl:profile",
+        "http://www.w3.org/ns/odrl/2/profile",
+    ];
+    nodes
+        .iter()
+        .filter_map(|n| n.as_object())
+        .flat_map(|o| KEYS.iter().filter_map(|k| o.get(*k)))
+        .find_map(first_iri)
+}
+
+/// A string, an `{"@id": ..}`, or the first of an array of them.
+fn first_iri(v: &Value) -> Option<String> {
+    match v {
+        Value::String(s) => Some(s.clone()),
+        Value::Object(o) => o.get("@id").and_then(Value::as_str).map(str::to_string),
+        Value::Array(a) => a.iter().find_map(first_iri),
+        _ => None,
+    }
 }
 
 /// Reads the field's text as the profile. Blank text is no profile; an

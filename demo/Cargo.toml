@@ -23,9 +23,13 @@ prose-core = { path = "../prose-core", features = ["turtle"] }
 yew = { version = "0.23", features = ["csr"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 wasm-bindgen-futures = "0.4"
+# Loading a profile from a URL (the only network access, on request).
+gloo-net = { version = "0.5", default-features = false, features = ["http"] }
+gloo-timers = "0.3"
 web-sys = { version = "0.3", features = [
     "HtmlTextAreaElement", "Window", "Document", "Element", "HtmlInputElement", "File",
-    "FileList", "Blob",
+    "FileList", "Blob", "AbortController", "AbortSignal", "RequestMode", "RequestCredentials",
+    "Url", "Location",
 ] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]

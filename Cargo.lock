@@ -102,6 +102,7 @@ dependencies = [
 name = "demo"
 version = "0.3.1"
 dependencies = [
+ "gloo-net",
  "gloo-timers",
  "js-sys",
  "prose-core",

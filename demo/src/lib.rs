@@ -2,11 +2,12 @@
 //! Edit tab where the prose itself is editable. A Profile field above both
 //! tabs loads the ODRL profile they are worded with.
 mod edit;
+mod fetch;
 mod fixtures;
 pub mod profile_field;
 
 use edit::EditDemo;
-use profile_field::{MAX_BYTES, PRESETS, ProfileMsg, ProfileState};
+use profile_field::{MAX_BYTES, PRESETS, ProfileMsg, ProfileState, declared_profile};
 use prose_yew::OdrlProse;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::{HtmlInputElement, HtmlTextAreaElement};
@@ -60,9 +61,9 @@ pub fn demo_app() -> Html {
     html! {
         <main>
             <h1>{ "ds-prose-rs demo" }</h1>
-            <p>{ "PROSE: Prose Renderer for ODRL Semantic Encoding. Paste an ODRL policy as JSON-LD and read it as prose, or edit the prose itself. Nothing leaves this page." }</p>
+            <p>{ "PROSE: Prose Renderer for ODRL Semantic Encoding. Paste an ODRL policy as JSON-LD and read it as prose, or edit the prose itself. Nothing leaves this page unless you load a profile from a URL." }</p>
             <div class="presets">{ for presets }</div>
-            { profile_section(&profile) }
+            { profile_section(&profile, &json) }
             <div class="tabs" role="tablist">
                 { tab_button(Tab::Read, "Read") }
                 { tab_button(Tab::Edit, "Edit") }
@@ -91,8 +92,9 @@ pub fn demo_app() -> Html {
 }
 
 /// The Profile field: the text, the buttons that fill or apply it, a file
-/// picker, and what is loaded or went wrong.
-fn profile_section(state: &UseReducerHandle<ProfileState>) -> Html {
+/// picker, a URL, and what is loaded or went wrong. `policy` is the current
+/// policy, whose declared profile can prefill the URL.
+fn profile_section(state: &UseReducerHandle<ProfileState>, policy: &str) -> Html {
     let send = |m: ProfileMsg| {
         let d = state.dispatcher();
         Callback::from(move |_: MouseEvent| d.dispatch(m.clone()))
@@ -144,6 +146,48 @@ fn profile_section(state: &UseReducerHandle<ProfileState>) -> Html {
             });
         })
     };
+    let onurl = {
+        let d = state.dispatcher();
+        Callback::from(move |e: InputEvent| {
+            if let Some(el) = e.target_dyn_into::<HtmlInputElement>() {
+                d.dispatch(ProfileMsg::Url(el.value()));
+            }
+        })
+    };
+    let onload = {
+        let d = state.dispatcher();
+        let url = state.url.clone();
+        let generation = state.generation.wrapping_add(1);
+        Callback::from(move |e: SubmitEvent| {
+            e.prevent_default();
+            d.dispatch(ProfileMsg::Begin);
+            let target = match fetch::target(&url) {
+                Ok(t) => t,
+                Err(msg) => return d.dispatch(ProfileMsg::Failed { generation, msg }),
+            };
+            let d = d.clone();
+            spawn_local(async move {
+                d.dispatch(match fetch::fetch(&target).await {
+                    Ok((text, content_type)) => ProfileMsg::Fetched {
+                        generation,
+                        text,
+                        content_type,
+                    },
+                    Err(msg) => ProfileMsg::Failed { generation, msg },
+                });
+            });
+        })
+    };
+    let declared = declared_profile(policy);
+    let ondeclared = {
+        let d = state.dispatcher();
+        let declared = declared.clone();
+        Callback::from(move |_: MouseEvent| {
+            if let Some(iri) = &declared {
+                d.dispatch(ProfileMsg::Url(iri.clone()));
+            }
+        })
+    };
     let presets = PRESETS.iter().map(|p| {
         html! {
             <button type="button" id={p.id} onclick={send(ProfileMsg::Use(p.text.to_string()))}>
@@ -181,6 +225,29 @@ fn profile_section(state: &UseReducerHandle<ProfileState>) -> Html {
                 </label>
                 <button type="button" id="profile-clear" onclick={send(ProfileMsg::Clear)}>{ "Clear" }</button>
             </div>
+            <form class="profile-url" onsubmit={onload}>
+                <label for="profile-url">{ "Profile URL" }</label>
+                <input
+                    type="url"
+                    id="profile-url"
+                    placeholder="https://example.org/profile.jsonld"
+                    value={state.url.clone()}
+                    oninput={onurl}
+                />
+                <button type="submit" id="profile-load">{ "Load from URL" }</button>
+                <button
+                    type="button"
+                    id="profile-declared"
+                    disabled={declared.is_none()}
+                    title={declared.clone().unwrap_or_else(|| "The policy declares no profile.".to_string())}
+                    onclick={ondeclared}
+                >
+                    { "Use the policy's declared profile" }
+                </button>
+            </form>
+            <p class="hint">
+                { "The URL is fetched without cookies, and only when you ask. The server must allow cross-origin requests (CORS)." }
+            </p>
             <p id="profile-status" role="status" aria-live="polite">{ status }</p>
             if notes > 0 {
                 <details class="profile-warnings">
