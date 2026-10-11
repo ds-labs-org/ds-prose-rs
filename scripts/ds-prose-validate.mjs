@@ -129,7 +129,10 @@ function setValued(a, arg, value) {
       if (eq < 1) throw new UsageError(`--rule needs <id>=<level>, not "${value}"`);
       const level = value.slice(eq + 1);
       if (!LEVELS.includes(level)) throw new UsageError(`--rule level must be one of ${LEVELS.join(', ')}, not "${level}"`);
-      (a.rules ??= {})[value.slice(0, eq)] = level;
+      // Defined, not assigned, so a key such as __proto__ is a rule id like
+      // any other (the engine then says no rule is called that).
+      a.rules ??= {};
+      Object.defineProperty(a.rules, value.slice(0, eq), { value: level, enumerable: true, writable: true, configurable: true });
       break;
     }
   }
@@ -247,8 +250,20 @@ export async function run(argv, io = defaultIo()) {
       exit = 2;
       continue;
     }
-    const raw = validator.validate(body);
-    const report = JSON.parse(raw);
+    let raw;
+    let report;
+    try {
+      raw = validator.validate(body);
+      report = JSON.parse(raw);
+    } catch (e) {
+      // The engine never throws on a policy; if it does, that is a fault in
+      // the tool, which must not look like violations (exit 1).
+      const error = `cannot check ${name}: ${e?.message ?? e}`;
+      io.stderr(`ds-prose-validate: ${error}\n`);
+      results.push({ file: name, report: null, error });
+      exit = 2;
+      continue;
+    }
     let code = codeOf(report);
     if (code === 3 && a.allowIncomplete) code = 0;
     if (RANK[code] > RANK[exit]) exit = code;
