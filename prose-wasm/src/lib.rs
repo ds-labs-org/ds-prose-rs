@@ -7,6 +7,7 @@
 //!
 //! `setProfile` reads an ODRL profile as JSON-LD or Turtle (prose-core's
 //! `turtle` feature is on in this crate); the host fetches it.
+pub mod validation;
 use prose_core::profile::{ProfileError, ProfileVocab, Wording};
 use prose_yew::{OdrlProse, OdrlProseProps, SharedWording};
 use serde_json::{Value, json};
