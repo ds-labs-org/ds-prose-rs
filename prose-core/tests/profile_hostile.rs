@@ -472,3 +472,23 @@ fn an_unlabelled_term_never_shows_a_bidi_control() {
                 \"@type\":\"http://www.w3.org/ns/odrl/2/Action\"}";
     assert_eq!(err(text), ProfileError::NoTerms);
 }
+
+#[test]
+fn warnings_are_capped() {
+    // Each distinct unknown keyword is a warning that quotes it; a profile
+    // can hold hundreds of thousands. A host lists them, so they stop at
+    // 100, with one line that says more were left out.
+    let keys: Vec<String> = (0..300_000).map(|i| format!(r#""@k{i}":0"#)).collect();
+    let text = format!(
+        r#"{{"@id":"https://e/x","@type":"http://www.w3.org/ns/odrl/2/Action",{}}}"#,
+        keys.join(",")
+    );
+    let v = ProfileVocab::parse(&text).unwrap();
+    assert_eq!(v.warnings().len(), 101);
+    assert_eq!(v.warnings()[0], "the key \"@k0\" is not followed");
+    assert_eq!(
+        v.warnings().last().map(String::as_str),
+        Some("more warnings were not listed")
+    );
+    assert_eq!(v.summary().warnings, 101);
+}
