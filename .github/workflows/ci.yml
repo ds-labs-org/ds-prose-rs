@@ -167,6 +167,14 @@ jobs:
       - name: Check the tarballs
         run: node scripts/check-npm-packages.mjs
 
+      # The ds-prose-validate command: its arguments and exit codes with a
+      # fake engine, then every exit code (0 to 3) through the bin npm links
+      # from the packed wasm tarball.
+      - name: Test the ds-prose-validate command
+        run: |
+          node --test scripts/test/*.test.mjs
+          node scripts/test-cli-tarball.mjs
+
       # The same command shape the release workflow uses, minus the upload
       # (needs no credentials). The leading "./" is required: npm reads
       # "dist-npm/x" as the GitHub shorthand "user/repo".

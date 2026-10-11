@@ -5,28 +5,17 @@ import {
   NgZone,
   OnChanges,
   OnDestroy,
-  InjectionToken,
   inject,
   input,
   output,
+  signal,
 } from '@angular/core';
-import init, { ProseHandle } from '@ds-labs/prose-wasm';
-import { ProfileSummary, createProfileTracker, parseSummary } from './profile-sync';
-import { createWasmLoader } from './wasm-loader';
+import { ProseHandle, ProseValidator, type ValidateOptions, type ValidationReport } from '@ds-labs/prose-wasm';
+import { ProfileSummary, parseSummary } from './profile-sync';
+import { createChangeTracker, parseReport, profileTexts, reportChanged, validationOptions } from './validation-sync';
+import { PROSE_WASM_URL, loadWasm } from './wasm-runtime';
 
-/**
- * Where the browser fetches `prose_wasm_bg.wasm` from, relative to the page's
- * base href. The build does not emit the file for you: copy it into your
- * assets (see README) or provide this token.
- */
-export const PROSE_WASM_URL = new InjectionToken<string>('PROSE_WASM_URL', {
-  providedIn: 'root',
-  factory: () => 'prose_wasm_bg.wasm',
-});
-
-// The wasm module is fetched and instantiated once per page. A failed load is
-// not remembered, so the next input change retries it.
-const loadWasm = createWasmLoader((url) => init({ module_or_path: new URL(url, document.baseURI) }));
+export { PROSE_WASM_URL };
 
 /**
  * `<ds-odrl-prose [json]="policy" />` renders ODRL JSON-LD as plain-language
@@ -40,6 +29,17 @@ const loadWasm = createWasmLoader((url) => init({ module_or_path: new URL(url, d
  * the profile's labels, and a glossary of its terms follows each policy.
  * `profileLoaded` emits the profile's summary; an unreadable profile emits
  * `profileError` and the previous profile stays.
+ *
+ * `[profiles]` takes several profiles at once (a list wins over `profile`).
+ *
+ * `[strict]="true"` validates the policy against the loaded profiles with a
+ * closed vocabulary: ODRL plus those profiles. `[validation]` takes the full
+ * options (it wins over `strict`). `validationChange` emits the report
+ * (schema `ds-prose/validation-report@1`) each time the verdict or the
+ * findings change, and the `report` signal always holds the latest. A
+ * verdict of `incomplete` is never a pass: something could not be checked,
+ * such as a declared profile that is not loaded. `[showViolations]` also
+ * shows the findings under the prose.
  *
  * If the wasm cannot be loaded, the host shows an error (`role="alert"`,
  * class `prose-error`), `loadFailed` emits the error, and the next change of
@@ -58,18 +58,39 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
   readonly articleClass = input<string>();
   /** The ODRL profile the prose is worded with, as JSON-LD or Turtle text. */
   readonly profile = input<string | null>(null);
+  /** Several ODRL profiles, as JSON-LD or Turtle text each; wins over `profile`. */
+  readonly profiles = input<string[] | null>(null);
+  /** Validate with a closed vocabulary: ODRL plus the loaded profiles. */
+  readonly strict = input(false);
+  /** The full validation options; they take precedence over `strict`. */
+  readonly validation = input<ValidateOptions | null>(null);
+  /** Show the findings and the verdict under the prose. Needs `strict` or `validation`. */
+  readonly showViolations = input(false);
   /** Emits when the wasm module could not be loaded. */
   readonly loadFailed = output<unknown>();
   /** Emits the summary of each profile loaded from the `profile` input. */
   readonly profileLoaded = output<ProfileSummary>();
   /** Emits when the `profile` input is not a readable profile; the previous one stays. */
   readonly profileError = output<unknown>();
+  /** Emits the report when the verdict or the findings change. */
+  readonly validationChange = output<ValidationReport>();
+  /** Emits when `validation` is not readable options; the previous options stay. */
+  readonly validationError = output<unknown>();
+  /** The latest report, or `null` while validation is off. */
+  readonly report = signal<ValidationReport | null>(null);
 
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
   private readonly zone = inject(NgZone);
   private readonly wasmUrl = inject(PROSE_WASM_URL);
   private handle?: ProseHandle;
-  private readonly profileChanged = createProfileTracker();
+  private readonly profilesChanged = createChangeTracker<string[]>();
+  private readonly handleOptionsChanged = createChangeTracker<ValidateOptions>();
+  // The profiles the handle holds now, and the validator built from them for
+  // a report the handle is not asked for.
+  private appliedProfiles: string[] = [];
+  private validator?: { key: string; value: ProseValidator };
+  // Whether the handle validates (it was given options, with the findings shown).
+  private handleValidates = false;
   private destroyed = false;
 
   ngOnChanges(): void {
@@ -81,6 +102,8 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
     this.handle?.destroy();
     this.handle?.free();
     this.handle = undefined;
+    this.validator?.value.free();
+    this.validator = undefined;
   }
 
   private async sync(): Promise<void> {
@@ -95,29 +118,76 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
     if (!this.handle) this.host.replaceChildren();
     const json = this.json();
     const cls = this.articleClass() ?? null;
-    const profile = this.profile();
+    const single = this.profiles() == null;
+    const texts = profileTexts(this.profile(), this.profiles());
+    const options = validationOptions(this.strict(), this.validation());
+    const show = this.showViolations() && options != null;
     // Yew schedules its own work; keep it out of Angular's change detection.
-    const loaded = this.zone.runOutsideAngular(() => {
+    const outcome = this.zone.runOutsideAngular(() => {
       const mounted = this.handle;
       const handle = mounted ?? new ProseHandle(this.host, json, cls);
       this.handle = handle;
-      let result: { summary: string } | { error: unknown } | undefined;
-      // The profile goes first, so the update below renders with it.
-      if (this.profileChanged(profile)) {
+      const out: {
+        summaries?: ProfileSummary[];
+        profileError?: unknown;
+        validationError?: unknown;
+        report?: string | null;
+      } = {};
+      // The profiles go first, so the validation and the update below use them.
+      if (this.profilesChanged(texts)) {
         try {
-          result = { summary: handle.setProfile(profile?.trim() ? profile : null) };
+          out.summaries = single
+            ? [parseSummary(handle.setProfile(texts?.[0] ?? null))].filter((x) => x != null)
+            : (JSON.parse(handle.setProfiles(texts ?? [])) as ProfileSummary[]);
+          this.appliedProfiles = texts ?? [];
         } catch (error) {
-          result = { error };
+          out.profileError = error;
+        }
+      }
+      if (this.handleOptionsChanged(show ? options : null)) {
+        try {
+          handle.setValidation(show ? options : null);
+          this.handleValidates = show;
+        } catch (error) {
+          out.validationError = error;
         }
       }
       if (mounted) handle.update(json, cls);
-      return result;
+      if (options) {
+        try {
+          out.report = this.handleValidates ? handle.report() : this.standaloneValidator(options).validate(json);
+        } catch (error) {
+          out.validationError ??= error;
+        }
+      } else {
+        out.report = null;
+      }
+      return out;
     });
-    if (loaded && 'error' in loaded) this.profileError.emit(loaded.error);
-    else if (loaded) {
-      const summary = parseSummary(loaded.summary);
-      if (summary) this.profileLoaded.emit(summary);
+    if (outcome.profileError !== undefined) this.profileError.emit(outcome.profileError);
+    for (const summary of outcome.summaries ?? []) this.profileLoaded.emit(summary);
+    if (outcome.validationError !== undefined) this.validationError.emit(outcome.validationError);
+    if (outcome.report !== undefined) this.publish(parseReport<ValidationReport>(outcome.report));
+  }
+
+  /** A validator for the profiles the handle holds, rebuilt when they or the options change. */
+  private standaloneValidator(options: ValidateOptions): ProseValidator {
+    const key = JSON.stringify([this.appliedProfiles, options]);
+    if (this.validator?.key !== key) {
+      const value = new ProseValidator(this.appliedProfiles, options);
+      this.validator?.value.free();
+      this.validator = { key, value };
     }
+    return this.validator.value;
+  }
+
+  private publish(next: ValidationReport | null): void {
+    // Signals and outputs are Angular's: back inside the zone.
+    this.zone.run(() => {
+      const prev = this.report();
+      this.report.set(next);
+      if (next && reportChanged(prev, next)) this.validationChange.emit(next);
+    });
   }
 
   private showLoadError(error: unknown): void {
