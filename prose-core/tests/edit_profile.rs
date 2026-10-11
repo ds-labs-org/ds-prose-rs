@@ -320,3 +320,484 @@ fn write_jsonld_identical_with_or_without_profile() {
     let written = write_jsonld(&doc);
     assert_eq!(written["permission"][1]["action"], json!("ex:train"));
 }
+
+// --- check_profile -------------------------------------------------------------
+
+const RESEARCH: &str = "https://example.org/odrl/profile/research";
+
+fn doc_of(v: serde_json::Value) -> EditDoc {
+    read_model(&v.to_string()).unwrap()
+}
+
+/// A Set with the research prefix bound and one permission holding `rule`.
+fn policy_with(rule: serde_json::Value) -> EditDoc {
+    doc_of(json!({
+        "@context": ["http://www.w3.org/ns/odrl.jsonld",
+                     {"ex": "https://example.org/odrl/profile/research/",
+                      "other": "https://example.com/other/"}],
+        "@type": "Set", "uid": "urn:policy:c",
+        "permission": [rule]
+    }))
+}
+
+fn at(issues: &[Issue], slot: &str) -> Vec<(Severity, String)> {
+    let want = IssueTarget::Slot(sp(slot));
+    issues
+        .iter()
+        .filter(|i| i.target == want)
+        .map(|i| (i.severity, i.message.clone()))
+        .collect()
+}
+
+fn on_slots(issues: &[Issue]) -> Vec<String> {
+    issues
+        .iter()
+        .filter_map(|i| match &i.target {
+            IssueTarget::Slot(s) => Some(s.to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn undeclared_term_warning_on_slot() {
+    let issues = check_profile(&research_doc(), &research());
+    assert_eq!(
+        at(&issues, "policy[0].permission[1].action[0]#name"),
+        [(
+            Severity::Warning,
+            format!("the action \"ex:distill\" is not declared by the loaded profile <{RESEARCH}>")
+        )]
+    );
+    // Declared and ODRL terms are fine; the research policy says nothing else.
+    assert_eq!(issues.len(), 1, "{issues:?}");
+
+    let doc = policy_with(json!({
+        "target": "urn:asset:1", "action": "ex:pseudonymise",
+        "constraint": [{"leftOperand": "ex:nope", "operator": "ex:nopeOp",
+                        "rightOperand": [{"@id": "ex:nopeVal"}, {"@id": "ex:academic"}]},
+                       {"leftOperand": "other:x", "operator": "other:op",
+                        "rightOperand": {"@id": "other:v"}}]
+    }));
+    let issues = check_profile(&doc, &research());
+    let c = "policy[0].permission[0].constraint[0]";
+    for (field, what, term) in [
+        ("leftOperand", "left operand", "ex:nope"),
+        ("operator", "operator", "ex:nopeOp"),
+        ("rightOperand[0]", "right operand", "ex:nopeVal"),
+    ] {
+        assert_eq!(
+            at(&issues, &format!("{c}#{field}")),
+            [(
+                Severity::Warning,
+                format!("the {what} \"{term}\" is not declared by the loaded profile <{RESEARCH}>")
+            )],
+            "{field}"
+        );
+    }
+    // A term in a namespace no loaded profile uses is silent: mixing
+    // profiles is legal.
+    assert_eq!(
+        on_slots(&issues),
+        [
+            format!("{c}#leftOperand"),
+            format!("{c}#operator"),
+            format!("{c}#rightOperand[0]")
+        ]
+    );
+}
+
+#[test]
+fn undeclared_terms_found_everywhere_in_the_tree() {
+    let doc = doc_of(json!({
+        "@context": ["http://www.w3.org/ns/odrl.jsonld",
+                     {"ex": "https://example.org/odrl/profile/research/"}],
+        "@type": "Set", "uid": "urn:policy:t",
+        "action": "ex:p0",
+        "permission": [{
+            "target": {"@type": "AssetCollection", "source": "urn:c",
+                       "refinement": [{"leftOperand": "ex:p1", "operator": "eq",
+                                       "rightOperand": 1}]},
+            "action": "use",
+            "constraint": [{"or": [{"leftOperand": "ex:p2", "operator": "eq",
+                                    "rightOperand": 1}]}],
+            "duty": [{"action": "ex:p3",
+                      "consequence": [{"action": "ex:p4"}]}]
+        }]
+    }));
+    let issues = check_profile(&doc, &research());
+    let slots = on_slots(&issues);
+    for s in [
+        "policy[0].action[0]#name",
+        "policy[0].permission[0].constraint[0].child[0]#leftOperand",
+        "policy[0].permission[0].duty[0].action[0]#name",
+        "policy[0].permission[0].duty[0].consequence[0].action[0]#name",
+    ] {
+        assert!(slots.iter().any(|x| x == s), "{s} not in {slots:?}");
+    }
+    assert!(
+        slots
+            .iter()
+            .any(|x| x.ends_with("refinement[0]#leftOperand") && x.contains("target[0]")),
+        "{slots:?}"
+    );
+}
+
+#[test]
+fn deprecated_term_warning() {
+    let w = Wording::new().with_profile(
+        ProfileVocab::from_value(
+            &json!({
+                "@context": {"odrl": "http://www.w3.org/ns/odrl/2/",
+                             "owl": "http://www.w3.org/2002/07/owl#",
+                             "ex": "https://example.org/odrl/profile/research/"},
+                "@graph": [
+                    {"@id": "https://example.org/odrl/profile/research", "@type": "owl:Ontology"},
+                    {"@id": "ex:old", "@type": "odrl:Action", "owl:deprecated": true}
+                ]
+            }),
+            &Default::default(),
+        )
+        .unwrap(),
+    );
+    let doc = policy_with(json!({"target": "urn:asset:1", "action": "ex:old"}));
+    assert_eq!(
+        at(
+            &check_profile(&doc, &w),
+            "policy[0].permission[0].action[0]#name"
+        ),
+        [(
+            Severity::Warning,
+            format!("\"ex:old\" is deprecated in the profile <{RESEARCH}>")
+        )]
+    );
+}
+
+#[test]
+fn declared_profile_not_loaded_on_node() {
+    let doc = doc_of(json!({
+        "@context": "http://www.w3.org/ns/odrl.jsonld",
+        "@type": "Set", "uid": "urn:policy:p",
+        "profile": ["https://example.org/other", RESEARCH,
+                    "http://www.w3.org/ns/odrl/2/core"],
+        "permission": [{"target": "urn:asset:1", "action": "use"}]
+    }));
+    let issues = check_profile(&doc, &research());
+    assert_eq!(
+        issues,
+        [Issue {
+            target: IssueTarget::Node(NodePath::policy(0)),
+            severity: Severity::Warning,
+            message:
+                "the policy declares the profile <https://example.org/other>, which is not loaded"
+                    .to_string(),
+        }]
+    );
+}
+
+#[test]
+fn operator_outside_hints_is_info() {
+    let mut doc = research_doc();
+    let op = "policy[0].permission[0].action[0].refinement[0]#operator";
+    let expect = doc.node(&sp(op).node).unwrap().id();
+    doc.apply(
+        &EditEvent::SetChoice {
+            slot: sp(op),
+            expect,
+            value: "eq".to_string(),
+        },
+        &EditRules::default(),
+    )
+    .unwrap();
+    let issues = check_profile(&doc, &research());
+    let got = at(&issues, op);
+    assert_eq!(got.len(), 1, "{issues:?}");
+    assert_eq!(got[0].0, Severity::Info);
+    assert_eq!(
+        got[0].1,
+        "the profile suggests the operators gteq or gt for \"ex:dataSubjectCount\""
+    );
+    // The same operator written as odrl:gteq or in full is a suggested one.
+    for op_text in ["odrl:gteq", "http://www.w3.org/ns/odrl/2/gteq", "gt"] {
+        let doc = policy_with(json!({
+            "target": "urn:asset:1", "action": "use",
+            "constraint": [{"leftOperand": "ex:dataSubjectCount", "operator": op_text,
+                            "rightOperand": 50}]
+        }));
+        assert!(check_profile(&doc, &research()).is_empty(), "{op_text}");
+    }
+}
+
+#[test]
+fn datatype_integer_duration_checks() {
+    // The research policy's literals fit their datatypes.
+    assert!(
+        at(
+            &check_profile(&research_doc(), &research()),
+            "policy[0].permission[0].action[0].refinement[0]#rightOperand[0]"
+        )
+        .is_empty()
+    );
+    let check = |left: &str, right: serde_json::Value| -> Vec<(Severity, String)> {
+        let doc = policy_with(json!({
+            "target": "urn:asset:1", "action": "use",
+            "constraint": [{"leftOperand": left, "operator": "eq", "rightOperand": right}]
+        }));
+        let w = research();
+        let issues = check_profile(&doc, &w);
+        at(
+            &issues,
+            "policy[0].permission[0].constraint[0]#rightOperand[0]",
+        )
+    };
+    let count = "ex:dataSubjectCount";
+    for ok in [
+        json!(50),
+        json!("50"),
+        json!("-3"),
+        json!("+7"),
+        json!({"@value": "50", "@type": "xsd:integer"}),
+    ] {
+        assert!(check(count, ok.clone()).is_empty(), "{ok}");
+    }
+    for bad in [
+        json!("fifty"),
+        json!(1.5),
+        json!(""),
+        json!("5 0"),
+        json!("-"),
+    ] {
+        assert_eq!(
+            check(count, bad.clone()),
+            [(
+                Severity::Info,
+                format!(
+                    "\"{}\" is not an integer, which the profile expects for \"ex:dataSubjectCount\"",
+                    match &bad {
+                        serde_json::Value::String(s) => s.clone(),
+                        other => other.to_string(),
+                    }
+                )
+            )],
+            "{bad}"
+        );
+    }
+    let period = "ex:retentionPeriod";
+    for ok in ["P2Y", "P1Y2M10DT2H30M", "PT0.5S", "-P3D", "PT1H"] {
+        assert!(check(period, json!(ok)).is_empty(), "{ok}");
+    }
+    for bad in ["two years", "P", "PT", "P2", "2Y", "P1H", "PT1D", "P1.5Y"] {
+        let got = check(period, json!(bad));
+        assert_eq!(got.len(), 1, "{bad}");
+        assert_eq!(got[0].0, Severity::Info);
+        assert!(got[0].1.contains("not a duration"), "{}", got[0].1);
+    }
+    // An IRI value is not checked against a datatype.
+    assert!(check(count, json!({"@id": "ex:academic"})).is_empty());
+}
+
+#[test]
+fn datatype_decimal_boolean_date_datetime_checks() {
+    let w = Wording::new().with_profile(
+        ProfileVocab::from_value(
+            &json!({
+                "@context": {"odrl": "http://www.w3.org/ns/odrl/2/",
+                             "xsd": "http://www.w3.org/2001/XMLSchema#",
+                             "prose": "https://ds-labs-org.github.io/ds-prose-rs/profile#",
+                             "ex": "https://example.org/odrl/profile/research/"},
+                "@graph": [
+                    {"@id": "ex:dec", "@type": "odrl:LeftOperand", "prose:datatype": "xsd:decimal"},
+                    {"@id": "ex:flag", "@type": "odrl:LeftOperand", "prose:datatype": "xsd:boolean"},
+                    {"@id": "ex:day", "@type": "odrl:LeftOperand", "prose:datatype": "xsd:date"},
+                    {"@id": "ex:when", "@type": "odrl:LeftOperand", "prose:datatype": "xsd:dateTime"},
+                    {"@id": "ex:any", "@type": "odrl:LeftOperand", "prose:datatype": "xsd:anyURI"}
+                ]
+            }),
+            &Default::default(),
+        )
+        .unwrap(),
+    );
+    let check = |left: &str, right: serde_json::Value| -> usize {
+        let doc = policy_with(json!({
+            "target": "urn:asset:1", "action": "use",
+            "constraint": [{"leftOperand": left, "operator": "eq", "rightOperand": right}]
+        }));
+        at(
+            &check_profile(&doc, &w),
+            "policy[0].permission[0].constraint[0]#rightOperand[0]",
+        )
+        .len()
+    };
+    for (left, ok, bad) in [
+        (
+            "ex:dec",
+            vec![
+                json!("1.5"),
+                json!(".5"),
+                json!("-2"),
+                json!(3),
+                json!(2.25),
+            ],
+            vec![json!("1,5"), json!("1e3"), json!("."), json!("abc")],
+        ),
+        (
+            "ex:flag",
+            vec![json!(true), json!("false"), json!("1"), json!("0")],
+            vec![json!("yes"), json!("True")],
+        ),
+        (
+            "ex:day",
+            vec![
+                json!("2026-01-31"),
+                json!("2026-01-31Z"),
+                json!("2026-01-31+02:00"),
+            ],
+            vec![
+                json!("2026-1-31"),
+                json!("2026-13-01"),
+                json!("2026-01-32"),
+                json!("31.01.2026"),
+            ],
+        ),
+        (
+            "ex:when",
+            vec![
+                json!("2026-01-31T10:00:00"),
+                json!("2026-01-31T10:00:00.5Z"),
+                json!("2026-01-31T10:00:00-05:00"),
+            ],
+            vec![
+                json!("2026-01-31"),
+                json!("2026-01-31 10:00:00"),
+                json!("2026-01-31T25:00:00"),
+            ],
+        ),
+        ("ex:any", vec![json!("anything at all")], vec![]),
+    ] {
+        for v in ok {
+            assert_eq!(check(left, v.clone()), 0, "{left} {v}");
+        }
+        for v in bad {
+            assert_eq!(check(left, v.clone()), 1, "{left} {v}");
+        }
+    }
+}
+
+#[test]
+fn skos_note_never_parsed() {
+    // ODRL's own elapsedTime says in prose that its value is a duration;
+    // no hint is read from that, so nothing is checked.
+    let w = Wording::new()
+        .with_profile(ProfileVocab::parse(&profile_text("odrl22-excerpt.json")).unwrap());
+    let doc = policy_with(json!({
+        "target": "urn:asset:1", "action": "use",
+        "constraint": [{"leftOperand": "elapsedTime", "operator": "isA",
+                        "rightOperand": "not a duration"}]
+    }));
+    assert_eq!(check_profile(&doc, &w), []);
+}
+
+#[test]
+fn empty_wording_no_issues() {
+    let w = Wording::default();
+    for name in FIXTURES {
+        let doc = read_model(&fixture(name)).unwrap();
+        assert_eq!(check_profile(&doc, &w), [], "{name}");
+    }
+    assert_eq!(check_profile(&research_doc(), &w), []);
+    let mut doc = research_doc();
+    set_text(
+        &mut doc,
+        "policy[0].permission[0].action[0].refinement[0]#rightOperand[0]",
+        "fifty",
+    )
+    .unwrap();
+    assert_eq!(check_profile(&doc, &w), []);
+}
+
+#[test]
+fn opaque_constraints_are_not_checked() {
+    // Two logical operators: kept as written, with no slots to flag.
+    let doc = policy_with(json!({
+        "target": "urn:asset:1", "action": "use",
+        "constraint": [{
+            "and": [{"leftOperand": "ex:nope", "operator": "eq", "rightOperand": 1}],
+            "or": [{"leftOperand": "ex:nope2", "operator": "eq", "rightOperand": 1}]
+        }]
+    }));
+    assert!(
+        doc.node(&"policy[0].permission[0].constraint[0]".parse().unwrap())
+            .unwrap()
+            .locked()
+            .is_some()
+    );
+    assert_eq!(check_profile(&doc, &research()), []);
+}
+
+#[test]
+fn picked_right_operand_writes_at_id() {
+    let mut doc = research_doc();
+    // A value picked from the profile is an IRI and is written as one.
+    if let ConstraintNode::Atomic(a) = &mut doc.policies[0].permission[0].constraint[0]
+        && let RightOperand::Values(v) = &mut a.right
+    {
+        v[1] = Literal::Iri("ex:commercialResearch".to_string());
+    } else {
+        panic!("not an atomic constraint");
+    }
+    let written = write_jsonld(&doc);
+    assert_eq!(
+        written["permission"][0]["constraint"][0]["rightOperand"],
+        json!([{"@id": "ex:clinical"}, {"@id": "ex:commercialResearch"}])
+    );
+    // Typing over an IRI value keeps it an IRI.
+    set_text(
+        &mut doc,
+        "policy[0].permission[0].constraint[0]#rightOperand[0]",
+        "ex:academic",
+    )
+    .unwrap();
+    assert_eq!(
+        write_jsonld(&doc)["permission"][0]["constraint"][0]["rightOperand"][0],
+        json!({"@id": "ex:academic"})
+    );
+}
+
+#[test]
+fn reducer_still_accepts_out_of_profile_text() {
+    let mut doc = research_doc();
+    let w = research();
+    set_text(
+        &mut doc,
+        "policy[0].permission[0].action[0]#name",
+        "ex:madeUp",
+    )
+    .unwrap();
+    set_text(
+        &mut doc,
+        "policy[0].permission[0].constraint[1]#leftOperand",
+        "ex:alsoMadeUp",
+    )
+    .unwrap();
+    let op = "policy[0].permission[0].action[0].refinement[0]#operator";
+    let expect = doc.node(&sp(op).node).unwrap().id();
+    doc.apply(
+        &EditEvent::SetChoice {
+            slot: sp(op),
+            expect,
+            value: "ex:nopeOp".to_string(),
+        },
+        &EditRules::default(),
+    )
+    .unwrap();
+    let issues = check_profile(&doc, &w);
+    assert!(
+        !at(&issues, "policy[0].permission[0].action[0]#name").is_empty(),
+        "{issues:?}"
+    );
+    let written = write_jsonld(&doc);
+    assert_eq!(
+        written["permission"][0]["constraint"][1]["leftOperand"],
+        json!("ex:alsoMadeUp")
+    );
+}

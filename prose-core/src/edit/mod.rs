@@ -62,3 +62,10 @@ pub fn left_operand_at<'d>(doc: &'d EditDoc, slot: &SlotPath) -> Option<&'d str>
         _ => None,
     }
 }
+
+/// What the loaded profiles in `wording` say about `doc`: advisory
+/// [`Issue`]s, never a refusal. Empty when no profile is loaded.
+pub fn check_profile(doc: &EditDoc, wording: &crate::profile::Wording) -> Vec<Issue> {
+    let _ = (doc, wording);
+    Vec::new()
+}
