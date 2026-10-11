@@ -655,3 +655,13 @@ fn odrl_vocabulary_is_an_option() {
     assert_eq!(core.odrl(), OdrlVocab::Core);
     assert_eq!(Options::strict().odrl(), OdrlVocab::Common);
 }
+
+/// The consequence-on-a-consequence MUST NOT is in IM 2.6.3 (Duty class);
+/// 2.6.6 only introduces the property. The catalogue cites where the
+/// sentence is.
+#[test]
+fn consequence_nesting_cites_the_section_that_states_it() {
+    let info = prose_core::validate::RuleId::OdrlConsequenceNesting.info();
+    assert!(info.source.contains("2.6.3"), "{}", info.source);
+    assert!(!info.source.contains("2.6.6"), "{}", info.source);
+}
