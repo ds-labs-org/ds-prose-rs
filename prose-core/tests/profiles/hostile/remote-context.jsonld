@@ -1,0 +1,10 @@
+{
+  "@context": "https://example.org/odrl/profile/research/context.jsonld",
+  "@graph": [
+    {
+      "@id": "https://example.org/odrl/profile/research/train",
+      "@type": "http://www.w3.org/ns/odrl/2/Action",
+      "http://www.w3.org/2000/01/rdf-schema#label": "Train"
+    }
+  ]
+}
