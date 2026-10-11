@@ -294,6 +294,11 @@ pub struct ProfileLimits {
     pub max_values_per_key: usize,
     pub max_label_chars: usize,
     pub max_text_chars: usize,
+    /// The IRIs and literals read from the text, counted in bytes after
+    /// prefixes and term definitions are expanded; past this the profile
+    /// is refused. A short prefix bound to a long namespace would otherwise
+    /// make a small text cost gigabytes.
+    pub max_expanded_bytes: usize,
 }
 
 impl Default for ProfileLimits {
@@ -305,6 +310,7 @@ impl Default for ProfileLimits {
             max_values_per_key: 256,
             max_label_chars: 200,
             max_text_chars: 4_000,
+            max_expanded_bytes: 32 * 1024 * 1024,
         }
     }
 }

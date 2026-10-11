@@ -184,3 +184,27 @@ fn many_left_operands_suggesting_a_dense_hierarchy() {
     assert!(!lo.hints.value_tree.is_empty());
     assert!(lo.hints.value_tree.len() <= 256);
 }
+
+#[test]
+fn short_prefix_bound_to_a_long_namespace() {
+    // 300 KB of text naming 300 terms through a 1 MiB namespace: 300 MB and
+    // more once expanded. Refused under the default limits, quickly.
+    let ns = format!("https://e/{}#", "a".repeat(1024 * 1024));
+    let nodes: Vec<String> = (0..300)
+        .map(|i| format!(r#"{{"@id":"p:t{i}","@type":"{ODRL}Action"}}"#))
+        .collect();
+    let text = format!(
+        r#"{{"@context":{{"p":"{ns}"}},"@graph":[{}]}}"#,
+        nodes.join(",")
+    );
+    let r = quick("long namespace", move || ProfileVocab::parse(&text));
+    assert!(
+        matches!(
+            r,
+            Err(prose_core::profile::ProfileError::LimitExceeded(
+                "max_expanded_bytes"
+            ))
+        ),
+        "{r:?}"
+    );
+}

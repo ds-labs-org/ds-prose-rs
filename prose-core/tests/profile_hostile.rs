@@ -307,3 +307,87 @@ fn values_past_max_depth_are_not_read() {
         v.warnings()
     );
 }
+
+/// `n` actions named through the prefix `p:`, bound to a namespace of
+/// `ns_len` characters: a short text that is `n * ns_len` bytes expanded.
+fn long_namespace(ns_len: usize, n: usize, extra: &str) -> String {
+    let ns = format!("https://example.org/{}#", "a".repeat(ns_len));
+    let nodes: Vec<String> = (0..n)
+        .map(|i| format!(r#"{{"@id":"p:t{i}","@type":"odrl:Action"{extra}}}"#))
+        .collect();
+    format!(
+        r#"{{"@context":{{"p":"{ns}","odrl":"http://www.w3.org/ns/odrl/2/"}},"@graph":[{}]}}"#,
+        nodes.join(",")
+    )
+}
+
+#[test]
+fn short_prefix_long_namespace_refused_not_expanded() {
+    // About 70 KB of text, 13 MB once expanded.
+    let text = long_namespace(64 * 1024, 200, "");
+    let l = limits(|l| l.max_expanded_bytes = 1024 * 1024);
+    assert_eq!(
+        ProfileVocab::parse_with(&text, &l),
+        Err(ProfileError::LimitExceeded("max_expanded_bytes"))
+    );
+    // Within a raised limit the same text reads.
+    let l = limits(|l| l.max_expanded_bytes = 64 * 1024 * 1024);
+    assert_eq!(
+        ProfileVocab::parse_with(&text, &l).unwrap().terms().count(),
+        200
+    );
+}
+
+#[test]
+fn expanded_keys_count_even_when_nothing_is_stored() {
+    // Two thousand keys with null values: no triple, but each key is
+    // expanded to 64 KiB, 128 MiB in all under the default limits.
+    let keys: String = (0..2000).map(|i| format!(r#","p:k{i}":null"#)).collect();
+    let text = long_namespace(64 * 1024, 1, &keys);
+    assert_eq!(
+        ProfileVocab::parse(&text),
+        Err(ProfileError::LimitExceeded("max_expanded_bytes"))
+    );
+}
+
+#[test]
+fn chained_term_definitions_refused_not_expanded() {
+    // Each definition extends the one before it, so 300 definitions of
+    // 4 000 characters expand to 180 MB: past the default limits.
+    let mut ctx = Map::new();
+    ctx.insert("odrl".into(), json!("http://www.w3.org/ns/odrl/2/"));
+    ctx.insert(
+        "t0".into(),
+        json!(format!("https://example.org/{}/", "a".repeat(4000))),
+    );
+    for i in 1..300 {
+        ctx.insert(
+            format!("t{i}"),
+            json!(format!("t{}:{}/", i - 1, "b".repeat(4000))),
+        );
+    }
+    let text = json!({
+        "@context": Value::Object(ctx),
+        "@id": "t299:x", "@type": "odrl:Action"
+    })
+    .to_string();
+    assert_eq!(
+        ProfileVocab::parse(&text),
+        Err(ProfileError::LimitExceeded("max_expanded_bytes"))
+    );
+}
+
+#[test]
+fn ordinary_profiles_are_far_below_the_expanded_limit() {
+    let l = limits(|l| l.max_expanded_bytes = 256 * 1024);
+    for name in [
+        "research.jsonld",
+        "research-expanded.json",
+        "odrl22-excerpt.json",
+    ] {
+        assert!(
+            ProfileVocab::parse_with(&profile_text(name), &l).is_ok(),
+            "{name}"
+        );
+    }
+}

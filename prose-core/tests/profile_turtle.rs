@@ -205,3 +205,19 @@ fn turtle_deep_nesting_does_not_overflow() {
         .join()
         .expect("the Turtle reader overflowed its stack or panicked");
 }
+
+#[test]
+fn turtle_short_prefix_long_namespace_refused() {
+    let mut text = format!(
+        "@prefix odrl: <{ODRL}> .\n@prefix p: <https://example.org/{}#> .\n",
+        "a".repeat(64 * 1024)
+    );
+    for i in 0..200 {
+        text.push_str(&format!("p:t{i} a odrl:Action .\n"));
+    }
+    let l = limits(|l| l.max_expanded_bytes = 1024 * 1024);
+    assert_eq!(
+        ProfileVocab::parse_with(&text, &l),
+        Err(ProfileError::LimitExceeded("max_expanded_bytes"))
+    );
+}
