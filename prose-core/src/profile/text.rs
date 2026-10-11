@@ -318,6 +318,47 @@ mod tests {
     }
 
     #[test]
+    fn strips_every_default_ignorable_and_format_character() {
+        // Tag characters can smuggle invisible ASCII; the others render as
+        // nothing, or as a blank that is not whitespace.
+        for c in [
+            '\u{034F}',
+            '\u{115F}',
+            '\u{1160}',
+            '\u{17B4}',
+            '\u{17B5}',
+            '\u{180B}',
+            '\u{180E}',
+            '\u{180F}',
+            '\u{2065}',
+            '\u{206A}',
+            '\u{206F}',
+            '\u{3164}',
+            '\u{FE00}',
+            '\u{FE0F}',
+            '\u{FFA0}',
+            '\u{FFF0}',
+            '\u{FFF9}',
+            '\u{FFFB}',
+            '\u{1BCA0}',
+            '\u{1D173}',
+            '\u{1D17A}',
+            '\u{E0000}',
+            '\u{E0041}',
+            '\u{E007F}',
+            '\u{E0100}',
+            '\u{E0FFF}',
+        ] {
+            assert_eq!(plain(&format!("a{c}b"), 4_000), "ab", "U+{:04X}", c as u32);
+        }
+        // Visible text around those ranges is kept.
+        assert_eq!(
+            plain("\u{17B3}\u{3165}\u{FFFC}", 4_000),
+            "\u{17B3}\u{3165}\u{FFFC}"
+        );
+    }
+
+    #[test]
     fn truncates_at_limit_with_ellipsis() {
         assert_eq!(plain("abcdef", 6), "abcdef");
         assert_eq!(plain("abcdefg", 6), "abcde\u{2026}");
