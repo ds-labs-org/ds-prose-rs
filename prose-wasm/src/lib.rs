@@ -121,6 +121,26 @@ impl ProseHandle {
         Ok(summary)
     }
 
+    #[wasm_bindgen(js_name = setProfiles)]
+    pub fn set_profiles(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "string[]")] _texts: JsValue,
+    ) -> Result<String, JsError> {
+        todo!()
+    }
+
+    #[wasm_bindgen(js_name = setValidation)]
+    pub fn set_validation(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "ValidateOptions | null")] _options: JsValue,
+    ) -> Result<(), JsError> {
+        todo!()
+    }
+
+    pub fn report(&self) -> Option<String> {
+        todo!()
+    }
+
     /// Unmount and remove the rendered DOM. Safe to call more than once.
     pub fn destroy(&mut self) {
         if let Some(app) = self.app.take() {
@@ -196,5 +216,37 @@ mod tests {
             read_profile(Some("<!doctype html><p>hi")).unwrap_err(),
             ProfileError::LooksLikeHtml
         );
+    }
+}
+
+#[wasm_bindgen]
+pub fn validate(
+    _json: &str,
+    #[wasm_bindgen(unchecked_param_type = "string | string[] | null")] _profiles: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "ValidateOptions")] _options: Option<JsValue>,
+) -> Result<String, JsError> {
+    todo!()
+}
+
+#[wasm_bindgen]
+pub fn rules() -> String {
+    todo!()
+}
+
+#[wasm_bindgen]
+pub struct ProseValidator;
+
+#[wasm_bindgen]
+impl ProseValidator {
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        #[wasm_bindgen(unchecked_param_type = "string[]")] _profiles: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "ValidateOptions")] _options: Option<JsValue>,
+    ) -> Result<ProseValidator, JsError> {
+        todo!()
+    }
+
+    pub fn validate(&self, _json: &str) -> String {
+        todo!()
     }
 }
