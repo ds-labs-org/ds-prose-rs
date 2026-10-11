@@ -235,3 +235,131 @@ async fn file_input_via_datatransfer() {
     assert_eq!(textarea_value(&c, "textarea#profile-json"), RESEARCH);
     assert!(status(&c).starts_with("Using Research Data Profile"));
 }
+
+fn set_input(c: &Element, sel: &str, value: &str) {
+    let el = q(c, sel).dyn_into::<HtmlInputElement>().unwrap();
+    el.set_value(value);
+    input(&el);
+}
+
+fn input_value(c: &Element, sel: &str) -> String {
+    q(c, sel).dyn_into::<HtmlInputElement>().unwrap().value()
+}
+
+/// A same-origin URL serving `body` as `content_type`.
+fn blob_url(body: &str, content_type: &str) -> String {
+    let parts = js_sys::Array::of1(&JsValue::from_str(body));
+    let opts = web_sys::BlobPropertyBag::new();
+    opts.set_type(content_type);
+    let blob = web_sys::Blob::new_with_str_sequence_and_options(&parts, &opts).unwrap();
+    web_sys::Url::create_object_url_with_blob(&blob).unwrap()
+}
+
+#[wasm_bindgen_test]
+async fn blob_url_loads() {
+    let c = mount().await;
+    assert_eq!(
+        q(&c, "input#profile-url").get_attribute("type").as_deref(),
+        Some("url")
+    );
+    set_input(
+        &c,
+        "input#profile-url",
+        &blob_url(RESEARCH, "application/ld+json"),
+    );
+    settle().await;
+    click(&c, "#profile-load").await;
+    until(&c, "the fetched profile", |c| has(c, ".prose-glossary")).await;
+    assert_eq!(textarea_value(&c, "textarea#profile-json"), RESEARCH);
+    assert!(status(&c).starts_with("Using Research Data Profile"));
+
+    // Turtle, served as Turtle.
+    let ttl = include_str!("../../prose-core/tests/profiles/research.ttl");
+    click(&c, "#profile-clear").await;
+    set_input(&c, "input#profile-url", &blob_url(ttl, "text/turtle"));
+    settle().await;
+    click(&c, "#profile-load").await;
+    until(&c, "the fetched Turtle profile", |c| {
+        has(c, ".prose-glossary")
+    })
+    .await;
+    assert_eq!(textarea_value(&c, "textarea#profile-json"), ttl);
+}
+
+#[wasm_bindgen_test]
+async fn html_answer_is_refused_by_content_type() {
+    let c = mount().await;
+    set_input(
+        &c,
+        "input#profile-url",
+        &blob_url("<!doctype html>", "text/html"),
+    );
+    settle().await;
+    click(&c, "#profile-load").await;
+    until(&c, "the error", |c| has(c, "#profile-error")).await;
+    let msg = q(&c, "#profile-error").text_content().unwrap();
+    assert!(msg.contains("text/html"), "{msg}");
+    assert_eq!(textarea_value(&c, "textarea#profile-json"), "");
+}
+
+#[wasm_bindgen_test]
+async fn unreachable_url_cors_or_network_message() {
+    let c = mount().await;
+    set_input(&c, "input#profile-url", "http://127.0.0.1:9/");
+    settle().await;
+    click(&c, "#profile-load").await;
+    until(&c, "the network error", |c| has(c, "#profile-error")).await;
+    assert_eq!(
+        q(&c, "#profile-error").text_content().unwrap(),
+        "Network error, or the server does not allow cross-origin requests (CORS)."
+    );
+    assert!(!status(&c).contains("Reading"), "no longer loading");
+}
+
+#[wasm_bindgen_test]
+async fn fetch_then_clear_not_applied() {
+    let c = mount().await;
+    set_input(
+        &c,
+        "input#profile-url",
+        &blob_url(RESEARCH, "application/ld+json"),
+    );
+    settle().await;
+    q(&c, "#profile-load")
+        .dyn_into::<HtmlElement>()
+        .unwrap()
+        .click();
+    // Before the fetch can answer.
+    q(&c, "#profile-clear")
+        .dyn_into::<HtmlElement>()
+        .unwrap()
+        .click();
+    for _ in 0..20 {
+        TimeoutFuture::new(20).await;
+    }
+    assert!(!has(&c, ".prose-glossary"));
+    assert_eq!(textarea_value(&c, "textarea#profile-json"), "");
+}
+
+#[wasm_bindgen_test]
+async fn declared_profile_button_prefills_url() {
+    let c = mount().await;
+    click(&c, "#profile-declared").await;
+    assert_eq!(
+        input_value(&c, "input#profile-url"),
+        "https://example.org/odrl/profile/research"
+    );
+    // Only prefilled: nothing is fetched.
+    assert!(!has(&c, ".prose-glossary"));
+    assert!(!status(&c).contains("Reading"));
+}
+
+#[wasm_bindgen_test]
+async fn intro_says_what_leaves_the_page() {
+    let c = mount().await;
+    assert!(
+        c.text_content()
+            .unwrap()
+            .contains("Nothing leaves this page unless you load a profile from a URL.")
+    );
+}

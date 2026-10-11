@@ -50,6 +50,15 @@ pub enum ProfileMsg {
     FileRead { generation: u32, text: String },
     /// The load started at `generation` failed.
     Failed { generation: u32, msg: String },
+    /// A fetch started at `generation` answered with this body and
+    /// `Content-Type`.
+    Fetched {
+        generation: u32,
+        text: String,
+        content_type: Option<String>,
+    },
+    /// The user typed in the URL field (or it was prefilled).
+    Url(String),
     /// Empty the field and use no profile.
     Clear,
 }
@@ -65,6 +74,8 @@ pub struct ProfileState {
     pub status: Option<String>,
     /// What the reader could not read, or read with a guess.
     pub warnings: Vec<String>,
+    /// The URL field's text.
+    pub url: String,
     /// Bumped by `Begin` and `Clear`: a load that started before is stale.
     pub generation: u32,
     pub loading: bool,
@@ -102,6 +113,7 @@ pub fn reduce(s: &ProfileState, m: ProfileMsg) -> ProfileState {
             n.error = Some(msg);
         }
         ProfileMsg::FileRead { .. } | ProfileMsg::Failed { .. } => {}
+        ProfileMsg::Fetched { .. } | ProfileMsg::Url(_) => {}
         ProfileMsg::Clear => {
             n = ProfileState {
                 generation: s.generation.wrapping_add(1),
@@ -110,6 +122,21 @@ pub fn reduce(s: &ProfileState, m: ProfileMsg) -> ProfileState {
         }
     }
     n
+}
+
+/// Not implemented yet.
+pub fn url_problem(_page: &str, _target: &str) -> Option<String> {
+    None
+}
+
+/// Not implemented yet.
+pub fn content_type_problem(_content_type: Option<&str>) -> Option<String> {
+    None
+}
+
+/// Not implemented yet.
+pub fn declared_profile(_policy: &str) -> Option<String> {
+    None
 }
 
 /// Reads the field's text as the profile. Blank text is no profile; an
@@ -395,5 +422,175 @@ mod tests {
         assert!(s.error.is_some());
         let s = reduce(&s, ProfileMsg::Use(sample()));
         assert_eq!(s.error, None);
+    }
+
+    fn fetched(s: &ProfileState, text: &str, content_type: Option<&str>) -> ProfileState {
+        reduce(
+            s,
+            ProfileMsg::Fetched {
+                generation: s.generation,
+                text: text.to_string(),
+                content_type: content_type.map(str::to_string),
+            },
+        )
+    }
+
+    #[test]
+    fn fetched_profile_fills_the_field_and_applies() {
+        let s = reduce(&ProfileState::default(), ProfileMsg::Begin);
+        let s = fetched(&s, &sample(), Some("application/ld+json; charset=utf-8"));
+        assert!(!s.loading);
+        assert_eq!(s.text, sample());
+        assert!(s.wording.is_some());
+        let s = reduce(&ProfileState::default(), ProfileMsg::Begin);
+        let s = fetched(&s, PRESETS[1].text, Some("text/turtle"));
+        assert!(s.wording.is_some(), "{:?}", s.error);
+        // GitHub's raw files and many static servers say text/plain.
+        let s = reduce(&ProfileState::default(), ProfileMsg::Begin);
+        let s = fetched(&s, &sample(), Some("text/plain"));
+        assert!(s.wording.is_some());
+        let s = reduce(&ProfileState::default(), ProfileMsg::Begin);
+        let s = fetched(&s, &sample(), None);
+        assert!(s.wording.is_some());
+    }
+
+    #[test]
+    fn non_json_content_type_message() {
+        assert_eq!(
+            content_type_problem(Some("text/html; charset=utf-8")).as_deref(),
+            Some("The server answered with text/html; only JSON-LD and Turtle profiles are read.")
+        );
+        assert!(content_type_problem(Some("application/rdf+xml")).is_some());
+        for ok in [
+            "application/ld+json",
+            "application/json",
+            "Application/JSON; charset=UTF-8",
+            "text/turtle",
+            "application/x-turtle",
+            "text/plain",
+            "application/octet-stream",
+            "application/vnd.example+json",
+        ] {
+            assert_eq!(content_type_problem(Some(ok)), None, "{ok}");
+        }
+        assert_eq!(content_type_problem(None), None);
+        // A fetched landing page is refused, and the applied profile stays.
+        let good = applied(&sample());
+        let s = reduce(&good, ProfileMsg::Begin);
+        let s = fetched(&s, "<!doctype html>", Some("text/html"));
+        assert!(s.error.as_deref().unwrap().contains("text/html"));
+        assert_eq!(s.text, good.text);
+        assert_eq!(s.wording, good.wording);
+        assert!(!s.loading);
+    }
+
+    #[test]
+    fn http_on_https_message() {
+        assert_eq!(
+            url_problem(
+                "https://ds-labs-org.github.io/ds-prose-rs/",
+                "http://example.org/p.jsonld"
+            )
+            .as_deref(),
+            Some("The browser blocks http:// URLs from this https page.")
+        );
+        assert_eq!(
+            url_problem("http://127.0.0.1:8080/", "http://example.org/p.jsonld"),
+            None
+        );
+        assert_eq!(
+            url_problem("https://e.org/", "https://example.org/p.jsonld"),
+            None
+        );
+        assert_eq!(
+            url_problem("https://e.org/", "blob:https://e.org/1234"),
+            None
+        );
+        assert_eq!(
+            url_problem("https://e.org/", "file:///etc/passwd").as_deref(),
+            Some("Only http:// and https:// URLs are loaded.")
+        );
+        assert_eq!(
+            url_problem("https://e.org/", "javascript:alert(1)").as_deref(),
+            Some("Only http:// and https:// URLs are loaded.")
+        );
+    }
+
+    #[test]
+    fn stale_fetch_gen_ignored() {
+        let s = reduce(&ProfileState::default(), ProfileMsg::Begin);
+        let started = s.generation;
+        let s = reduce(&s, ProfileMsg::Clear);
+        let s = reduce(
+            &s,
+            ProfileMsg::Fetched {
+                generation: started,
+                text: sample(),
+                content_type: Some("application/ld+json".into()),
+            },
+        );
+        assert_eq!(s.text, "");
+        assert_eq!(s.wording, None);
+        // A preset chosen while a fetch runs wins over it too.
+        let s = reduce(&ProfileState::default(), ProfileMsg::Begin);
+        let started = s.generation;
+        let s = reduce(&s, ProfileMsg::Use(PRESETS[2].text.into()));
+        let s = reduce(
+            &s,
+            ProfileMsg::Fetched {
+                generation: started,
+                text: sample(),
+                content_type: None,
+            },
+        );
+        assert_eq!(s.text, PRESETS[2].text);
+    }
+
+    #[test]
+    fn url_is_kept_by_clear() {
+        let s = reduce(
+            &ProfileState::default(),
+            ProfileMsg::Url("https://e.org/p.ttl".into()),
+        );
+        assert_eq!(s.url, "https://e.org/p.ttl");
+        let s = reduce(&s, ProfileMsg::Clear);
+        assert_eq!(s.url, "https://e.org/p.ttl");
+    }
+
+    #[test]
+    fn declared_profile_is_the_first_profile_iri() {
+        let policy = include_str!("../../prose-core/tests/profiles/research-policy.json");
+        assert_eq!(
+            declared_profile(policy).as_deref(),
+            Some("https://example.org/odrl/profile/research")
+        );
+        let cases = [
+            (
+                r#"{"profile": ["https://a.org/p", "https://b.org/q"]}"#,
+                Some("https://a.org/p"),
+            ),
+            (
+                r#"{"profile": {"@id": "https://a.org/p"}}"#,
+                Some("https://a.org/p"),
+            ),
+            (
+                r#"{"odrl:profile": "https://a.org/p"}"#,
+                Some("https://a.org/p"),
+            ),
+            (
+                r#"{"@graph": [{"uid": "x"}, {"profile": "https://a.org/p"}]}"#,
+                Some("https://a.org/p"),
+            ),
+            (
+                r#"[{"profile": "https://a.org/p"}]"#,
+                Some("https://a.org/p"),
+            ),
+            (r#"{"uid": "x"}"#, None),
+            (r#"{"profile": 3}"#, None),
+            ("{", None),
+        ];
+        for (json, want) in cases {
+            assert_eq!(declared_profile(json).as_deref(), want, "{json}");
+        }
     }
 }

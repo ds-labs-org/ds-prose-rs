@@ -37,4 +37,5 @@ web-sys = { version = "0.3", features = [
     "HtmlTextAreaElement", "HtmlElement", "InputEvent", "InputEventInit", "FocusEvent",
     "FocusEventInit", "EventInit", "MouseEvent", "NodeList", "HtmlInputElement",
     "DataTransfer", "DataTransferItem", "DataTransferItemList", "File", "FileList", "Event",
+    "Blob", "BlobPropertyBag", "Url",
 ] }
