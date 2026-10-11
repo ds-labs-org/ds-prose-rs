@@ -31,7 +31,7 @@ pub use rules::{EditRules, Limit, NewNodeDefaults, odrl_position};
 pub use segments::{
     ChoiceKind, ChoiceSlot, ConditionList, ConditionProse, Conj, EmptyText, FollowUpProse,
     ListItem, Locked, PolicyProse, RefinementGroup, RuleKindSlot, RuleProse, Segment, Sentence,
-    Slot, SlotKind, SlotList, sentences,
+    Slot, SlotKind, SlotList, sentences, sentences_with,
 };
 
 /// The prefixes `doc`'s JSON-LD binds: those of [`EditDoc::origin`], then of

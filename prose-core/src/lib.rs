@@ -31,7 +31,10 @@ pub mod wording {
     }
 }
 
-pub use model::{Condition, Document, FollowUp, Policy, PolicyKind, Rule, RuleKind};
+pub use model::{
+    Condition, Document, FollowUp, Gloss, Policy, PolicyGlossary, PolicyKind, Reading, Rule,
+    RuleKind,
+};
 
 /// Why a document could not be read at all.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,6 +70,23 @@ pub fn render(json: &str) -> Result<Document, ProseError> {
 /// policy, an array of policies, or an object whose `@graph` holds them.
 pub fn render_value(value: &serde_json::Value) -> Result<Document, ProseError> {
     read::document(value)
+}
+
+/// As [`render`], worded with the profiles `wording` holds: profile terms
+/// read with their labels and a glossary explains them. With no profile
+/// loaded, `document` is exactly what [`render`] returns.
+pub fn render_with(json: &str, wording: &profile::Wording) -> Result<Reading, ProseError> {
+    let _ = (json, wording);
+    Err(ProseError::NoPolicy)
+}
+
+/// As [`render_with`], for a value that is already parsed.
+pub fn render_value_with(
+    value: &serde_json::Value,
+    wording: &profile::Wording,
+) -> Result<Reading, ProseError> {
+    let _ = (value, wording);
+    Err(ProseError::NoPolicy)
 }
 
 #[cfg(doctest)]

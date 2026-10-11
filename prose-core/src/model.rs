@@ -74,3 +74,44 @@ impl Condition {
         }
     }
 }
+
+/// A reading worded with loaded profiles: the [`Document`], plus the terms
+/// the profiles explain, one glossary per policy.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Reading {
+    pub document: Document,
+    /// `glossary[i]` explains the terms of `document.policies[i]`. Empty
+    /// glossaries when no profile is loaded.
+    pub glossary: Vec<PolicyGlossary>,
+}
+
+/// The profile terms one policy uses, each once, in reading order.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct PolicyGlossary {
+    pub terms: Vec<Gloss>,
+}
+
+/// One term of a policy, as a loaded profile explains it. All text is
+/// plain text: the profile's markup was stripped when it was read.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub struct Gloss {
+    /// The term as the policy writes it, e.g. `ex:fineTune`.
+    pub written: String,
+    /// The expanded IRI.
+    pub iri: String,
+    /// What the policy uses it as.
+    pub kind: crate::profile::TermKind,
+    pub label: String,
+    pub definition: Option<String>,
+    pub note: Option<String>,
+    /// (IRI, label) of the terms it is included in or narrower than.
+    pub broader: Vec<(String, String)>,
+    /// (IRI, label) of the terms it implies.
+    pub implies: Vec<(String, String)>,
+    /// The title (else the IRI) of the profile that declares it.
+    pub profile: Option<String>,
+    pub deprecated: bool,
+}

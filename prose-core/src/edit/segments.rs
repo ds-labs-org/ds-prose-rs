@@ -279,6 +279,12 @@ pub fn sentences(doc: &EditDoc) -> Vec<PolicyProse> {
         .collect()
 }
 
+/// As [`sentences`], worded with the profiles `wording` holds.
+pub fn sentences_with(doc: &EditDoc, wording: &crate::profile::Wording) -> Vec<PolicyProse> {
+    let _ = (doc, wording);
+    Vec::new()
+}
+
 fn locked_of(reason: &Option<String>, origin: Option<&Origin>) -> Option<Locked> {
     reason.as_ref().map(|r| locked(r, origin))
 }
