@@ -1116,7 +1116,7 @@ fn cond_prose(
                                 a.id,
                                 SlotKind::Literal,
                                 &l.raw(),
-                                l.display(),
+                                literal_display(ctx, l),
                             ),
                             extra: vec![],
                         })
@@ -1205,6 +1205,15 @@ fn cond_prose(
         }
     }
     out
+}
+
+/// A right-operand value as it reads: an IRI a loaded profile declares as
+/// a value reads as its label, anything else as before.
+fn literal_display(ctx: &WordCtx, l: &Literal) -> String {
+    match l {
+        Literal::Iri(i) => ctx.value(i).unwrap_or_else(|| l.display()),
+        _ => l.display(),
+    }
 }
 
 /// A condition on one line, for places a nested list does not fit.

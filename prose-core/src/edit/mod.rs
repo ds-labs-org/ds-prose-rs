@@ -51,6 +51,14 @@ pub fn prefixes(doc: &EditDoc) -> crate::profile::Prefixes {
 /// The left operand of the constraint whose right operand, unit or operand
 /// reference `slot` addresses, as written; `None` for any other slot.
 pub fn left_operand_at<'d>(doc: &'d EditDoc, slot: &SlotPath) -> Option<&'d str> {
-    let _ = (doc, slot);
-    None
+    if !matches!(
+        slot.field,
+        Field::RightOperand(_) | Field::Unit | Field::OperandReference
+    ) {
+        return None;
+    }
+    match doc.node(&slot.node)? {
+        NodeRef::Constraint(ConstraintNode::Atomic(a)) if !a.left.is_empty() => Some(&a.left),
+        _ => None,
+    }
 }
