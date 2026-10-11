@@ -123,9 +123,12 @@ fn decode_entities(s: &str) -> String {
     while let Some(i) = rest.find('&') {
         out.push_str(&rest[..i]);
         let after = &rest[i + 1..];
+        // Only the next 11 bytes are searched, so a text of many `&` stays
+        // linear.
         let entity = after
-            .find(';')
-            .filter(|&j| j <= 10)
+            .bytes()
+            .take(11)
+            .position(|b| b == b';')
             .and_then(|j| entity(&after[..j]).map(|c| (c, j)));
         match entity {
             Some((c, j)) => {

@@ -34,11 +34,31 @@ struct Def {
 
 #[derive(Clone, Debug, Default)]
 struct Ctx {
-    terms: HashMap<String, Def>,
+    /// The enclosing context: a term not defined here is looked up there.
+    /// Shared, not copied, so many small contexts under a large one stay
+    /// cheap. The chain is as long as the node nesting, so `max_depth`
+    /// bounds it.
+    parent: Option<Rc<Ctx>>,
+    /// The terms this context defines; `None` is a `null` definition that
+    /// removes the enclosing one.
+    terms: HashMap<String, Option<Def>>,
     vocab: Option<String>,
     base: Option<String>,
     /// The W3C ODRL context was named.
     odrl: bool,
+}
+
+impl Ctx {
+    /// The definition of `k` here or in an enclosing context.
+    fn term(&self, k: &str) -> Option<&Def> {
+        let mut c = self;
+        loop {
+            if let Some(d) = c.terms.get(k) {
+                return d.as_ref();
+            }
+            c = c.parent.as_deref()?;
+        }
+    }
 }
 
 /// What a node key means here.
@@ -230,22 +250,16 @@ impl Walker<'_> {
         depth: usize,
         next: &mut Vec<Work<'a>>,
     ) {
-        // Arrays, `@list` and `@set` nest; walk them without recursion.
+        // Arrays, `@list` and `@set` nest; walk them without recursion. Items
+        // go on the stack reversed, so they are read in document order.
         let mut todo = vec![(v, depth)];
-        let mut i = 0;
-        while i < todo.len() {
-            let (v, depth) = todo[i];
-            i += 1;
+        while let Some((v, depth)) = todo.pop() {
             if !self.within(depth) {
                 continue;
             }
             match v {
                 Value::Null => {}
-                Value::Array(a) => {
-                    // Inserted in place, so the values keep document order.
-                    let at = i;
-                    todo.splice(at..at, a.iter().map(|x| (x, depth + 1)));
-                }
+                Value::Array(a) => todo.extend(a.iter().rev().map(|x| (x, depth + 1))),
                 Value::String(text) => match coerce {
                     Coerce::Id => self.iri_value(ctx, s, p, text, false),
                     Coerce::Vocab => self.iri_value(ctx, s, p, text, true),
@@ -268,8 +282,7 @@ impl Walker<'_> {
                     if let Some(inner) = m.get("@value") {
                         self.value_object(ctx, s, p, m, inner);
                     } else if let Some(inner) = m.get("@list").or_else(|| m.get("@set")) {
-                        let at = i;
-                        todo.insert(at, (inner, depth + 1));
+                        todo.push((inner, depth + 1));
                     } else {
                         let local = self.local(ctx, m);
                         let only_id = m
@@ -328,7 +341,7 @@ impl Walker<'_> {
         if k.starts_with('@') {
             return Key::Keyword(k.to_string());
         }
-        if let Some(def) = ctx.terms.get(k) {
+        if let Some(def) = ctx.term(k) {
             return match def.iri.starts_with('@') {
                 true => Key::Keyword(def.iri.clone()),
                 false => Key::Prop(def.iri.clone(), def.coerce.clone()),
@@ -352,7 +365,7 @@ impl Walker<'_> {
     /// `@base`. `None` when nothing makes it absolute.
     fn expand(&mut self, ctx: &Ctx, s: &str, vocab: bool) -> Option<String> {
         if vocab
-            && let Some(def) = ctx.terms.get(s)
+            && let Some(def) = ctx.term(s)
             && !def.iri.starts_with('@')
         {
             return Some(def.iri.clone());
@@ -378,7 +391,7 @@ impl Walker<'_> {
         if prefix == "_" || suffix.starts_with("//") {
             return s.to_string();
         }
-        if let Some(def) = ctx.terms.get(prefix)
+        if let Some(def) = ctx.term(prefix)
             && !def.iri.starts_with('@')
         {
             return format!("{}{suffix}", def.iri);
@@ -398,8 +411,14 @@ impl Walker<'_> {
     }
 
     /// `ctx` with the context value `c` applied.
-    fn context(&mut self, ctx: &Ctx, c: &Value) -> Ctx {
-        let mut out = ctx.clone();
+    fn context(&mut self, ctx: &Rc<Ctx>, c: &Value) -> Ctx {
+        let mut out = Ctx {
+            parent: Some(ctx.clone()),
+            terms: HashMap::new(),
+            vocab: ctx.vocab.clone(),
+            base: ctx.base.clone(),
+            odrl: ctx.odrl,
+        };
         let list: Vec<&Value> = match c {
             Value::Array(a) => a.iter().collect(),
             other => vec![other],
@@ -444,7 +463,7 @@ impl Walker<'_> {
         for (k, v) in o.iter().filter(|(k, _)| !k.starts_with('@')) {
             match v {
                 Value::Null => {
-                    out.terms.remove(k);
+                    out.terms.insert(k.clone(), None);
                 }
                 Value::String(s) => raw.push((k, s, None)),
                 Value::Object(d) => {
@@ -471,10 +490,10 @@ impl Walker<'_> {
         for (k, id, _) in &raw {
             out.terms.insert(
                 k.to_string(),
-                Def {
+                Some(Def {
                     iri: id.to_string(),
                     coerce: Coerce::None,
-                },
+                }),
             );
         }
         // A few passes resolve chains such as "train": "ex:train".
@@ -490,13 +509,14 @@ impl Walker<'_> {
                     Some("@vocab") => Coerce::Vocab,
                     Some(t) => Coerce::Datatype(self.def_iri(out, k, t)),
                 };
-                out.terms.insert(k.to_string(), Def { iri, coerce });
+                out.terms.insert(k.to_string(), Some(Def { iri, coerce }));
             }
         }
         for (k, _, _) in &raw {
-            let iri = &out.terms[*k].iri;
-            if iri.ends_with(['/', '#', ':']) {
-                let iri = iri.clone();
+            if let Some(Some(d)) = out.terms.get(*k)
+                && d.iri.ends_with(['/', '#', ':'])
+            {
+                let iri = d.iri.clone();
                 self.sink.bind(k, &iri);
             }
         }

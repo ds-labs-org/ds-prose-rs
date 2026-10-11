@@ -2,6 +2,7 @@
 //! policy's compact terms expand.
 use super::{ProfileVocab, Term, ns};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 /// What the prose is worded with: the loaded profiles (first loaded wins on
@@ -75,7 +76,7 @@ impl Wording {
         }
         if let Some((prefix, suffix)) = written.split_once(':') {
             for vocab in self.profiles() {
-                if let Some((_, iri)) = vocab.prefixes.iter().find(|(k, _)| k == prefix) {
+                if let Some(iri) = vocab.prefixes.get(prefix) {
                     return format!("{iri}{suffix}");
                 }
             }
@@ -120,8 +121,8 @@ fn name(p: &ProfileVocab) -> String {
 /// context, adds the prefixes it is known to bind.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Prefixes {
-    /// (prefix or term, IRI), each key once.
-    entries: Vec<(String, String)>,
+    /// Prefix or term -> IRI. A map, so a large `@context` costs its size.
+    entries: BTreeMap<String, String>,
 }
 
 impl Prefixes {
@@ -178,26 +179,18 @@ impl Prefixes {
     }
 
     fn get(&self, key: &str) -> Option<&str> {
-        self.entries
-            .iter()
-            .find(|(k, _)| k == key)
-            .map(|(_, v)| v.as_str())
+        self.entries.get(key).map(String::as_str)
     }
 
     /// Adds `other`'s keys that are not bound here yet.
     pub(crate) fn merge(&mut self, other: Prefixes) {
         for (k, v) in other.entries {
-            if self.get(&k).is_none() {
-                self.entries.push((k, v));
-            }
+            self.entries.entry(k).or_insert(v);
         }
     }
 
     fn set(&mut self, key: &str, iri: String) {
-        match self.entries.iter_mut().find(|(k, _)| k == key) {
-            Some(e) => e.1 = iri,
-            None => self.entries.push((key.to_string(), iri)),
-        }
+        self.entries.insert(key.to_string(), iri);
     }
 
     /// One `@context` value: a string, an object, or an array of them.
@@ -223,7 +216,9 @@ impl Prefixes {
                         };
                         match iri {
                             Some(i) if !i.starts_with('@') => out.set(k, i.to_string()),
-                            _ => out.entries.retain(|(e, _)| e != k),
+                            _ => {
+                                out.entries.remove(k);
+                            }
                         }
                     }
                 }
@@ -234,13 +229,13 @@ impl Prefixes {
         // passes resolve chains.
         for _ in 0..4 {
             let snapshot = out.clone();
-            for e in &mut out.entries {
-                if let Some((prefix, suffix)) = e.1.split_once(':')
-                    && prefix != e.0
+            for (k, v) in &mut out.entries {
+                if let Some((prefix, suffix)) = v.split_once(':')
+                    && prefix != k
                     && !suffix.starts_with("//")
                     && let Some(iri) = snapshot.get(prefix)
                 {
-                    e.1 = format!("{iri}{suffix}");
+                    *v = format!("{iri}{suffix}");
                 }
             }
         }

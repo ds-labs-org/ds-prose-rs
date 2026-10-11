@@ -49,6 +49,8 @@ pub(crate) struct Parsed {
 pub(crate) struct Sink<'a> {
     pub parsed: Parsed,
     counts: HashMap<(String, String), usize>,
+    /// The prefixes in `parsed.prefixes`, for a constant-time check.
+    bound: HashSet<String>,
     limits: &'a ProfileLimits,
 }
 
@@ -61,6 +63,7 @@ impl<'a> Sink<'a> {
                 notes: Notes::default(),
             },
             counts: HashMap::new(),
+            bound: HashSet::new(),
             limits,
         }
     }
@@ -90,7 +93,7 @@ impl<'a> Sink<'a> {
     }
 
     pub fn bind(&mut self, prefix: &str, ns: &str) {
-        if !self.parsed.prefixes.iter().any(|(p, _)| p == prefix) {
+        if self.bound.insert(prefix.to_string()) {
             self.parsed
                 .prefixes
                 .push((prefix.to_string(), ns.to_string()));

@@ -41,7 +41,7 @@ pub struct ProfileVocab {
     index: std::collections::HashMap<String, usize>,
     /// The prefixes the profile text bound: `Wording` expands a policy's
     /// compact terms with them when the policy does not bind the prefix.
-    prefixes: Vec<(String, String)>,
+    prefixes: std::collections::HashMap<String, String>,
     warnings: Vec<String>,
 }
 

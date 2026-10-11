@@ -39,9 +39,10 @@ impl<'t> Graph<'t> {
     /// The IRI objects of `s p ?o`, in order, each once.
     fn iris(&self, s: &str, p: &str) -> Vec<&'t str> {
         let mut out: Vec<&str> = Vec::new();
+        let mut seen: HashSet<&str> = HashSet::new();
         for o in self.objects(s, p) {
             if let Object::Iri(i) = o
-                && !out.contains(&i.as_str())
+                && seen.insert(i)
             {
                 out.push(i);
             }
@@ -71,9 +72,13 @@ pub(crate) fn vocab(parsed: Parsed, limits: &ProfileLimits) -> Result<ProfileVoc
         mut notes,
     } = parsed;
     let g = Graph::new(&triples);
-    let b = Builder { g: &g, limits };
+    let b = Builder {
+        g: &g,
+        limits,
+        derived: derived_kinds(&triples, limits.max_depth),
+    };
     let mut v = ProfileVocab {
-        prefixes,
+        prefixes: prefixes.into_iter().collect(),
         ..ProfileVocab::default()
     };
     if let Some(p) = b.profile_node() {
@@ -129,6 +134,102 @@ fn skos(local: &str) -> String {
 struct Builder<'g, 't> {
     g: &'g Graph<'t>,
     limits: &'g ProfileLimits,
+    /// The kinds each subject has through rdfs:subPropertyOf or
+    /// rdfs:subClassOf, worked out once for the whole graph.
+    derived: HashMap<&'t str, Vec<TermKind>>,
+}
+
+/// The kinds subjects have through sub-properties of `odrl:function`,
+/// `relation` and `operand`, and sub-classes of the ODRL policy, rule, asset
+/// and party classes, transitively within `max_depth` steps. Each search
+/// walks down from the ODRL terms once, so a wide hierarchy costs its size,
+/// not its size squared.
+fn derived_kinds(triples: &[Triple], max_depth: usize) -> HashMap<&str, Vec<TermKind>> {
+    let groups: [(&str, &[&str], TermKind); 7] = [
+        ("subPropertyOf", &["function"], TermKind::PartyFunction),
+        ("subPropertyOf", &["relation"], TermKind::AssetRelation),
+        ("subPropertyOf", &["operand"], TermKind::LogicalOperand),
+        (
+            "subClassOf",
+            &[
+                "Policy",
+                "Set",
+                "Offer",
+                "Agreement",
+                "Privacy",
+                "Request",
+                "Ticket",
+                "Assertion",
+            ],
+            TermKind::PolicyClass,
+        ),
+        (
+            "subClassOf",
+            &["Rule", "Permission", "Prohibition", "Duty"],
+            TermKind::RuleClass,
+        ),
+        (
+            "subClassOf",
+            &["Asset", "AssetCollection"],
+            TermKind::AssetClass,
+        ),
+        (
+            "subClassOf",
+            &["Party", "PartyCollection"],
+            TermKind::PartyClass,
+        ),
+    ];
+    if max_depth == 0 {
+        return HashMap::new();
+    }
+    // Object -> subjects, per predicate.
+    let mut down: HashMap<&str, HashMap<&str, Vec<&str>>> = HashMap::new();
+    for t in triples {
+        if let Some(local) = t.p.strip_prefix(ns::RDFS)
+            && matches!(local, "subPropertyOf" | "subClassOf")
+            && let Object::Iri(o) = &t.o
+        {
+            down.entry(local)
+                .or_default()
+                .entry(o)
+                .or_default()
+                .push(&t.s);
+        }
+    }
+    let mut out: HashMap<&str, Vec<TermKind>> = HashMap::new();
+    for (pred, names, kind) in groups {
+        let Some(edges) = down.get(pred) else {
+            continue;
+        };
+        let roots: Vec<String> = names.iter().map(|n| odrl(n)).collect();
+        let mut seen: HashSet<&str> = HashSet::new();
+        let mut frontier: Vec<&str> = Vec::new();
+        for r in &roots {
+            for &c in edges.get(r.as_str()).into_iter().flatten() {
+                if seen.insert(c) {
+                    frontier.push(c);
+                }
+            }
+        }
+        for _ in 1..max_depth {
+            let mut next = Vec::new();
+            for x in frontier {
+                for &c in edges.get(x).into_iter().flatten() {
+                    if seen.insert(c) {
+                        next.push(c);
+                    }
+                }
+            }
+            if next.is_empty() {
+                break;
+            }
+            frontier = next;
+        }
+        for s in seen {
+            out.entry(s).or_default().push(kind);
+        }
+    }
+    out
 }
 
 impl Builder<'_, '_> {
@@ -235,43 +336,7 @@ impl Builder<'_, '_> {
         .map(|(_, k)| k)
         .collect();
 
-        let props = self.ancestors(s, &rdfs("subPropertyOf"));
-        for (local, kind) in [
-            ("function", TermKind::PartyFunction),
-            ("relation", TermKind::AssetRelation),
-            ("operand", TermKind::LogicalOperand),
-        ] {
-            if props.contains(&odrl(local)) {
-                out.push(kind);
-            }
-        }
-        let classes = self.ancestors(s, &rdfs("subClassOf"));
-        let groups: [(&[&str], TermKind); 4] = [
-            (
-                &[
-                    "Policy",
-                    "Set",
-                    "Offer",
-                    "Agreement",
-                    "Privacy",
-                    "Request",
-                    "Ticket",
-                    "Assertion",
-                ],
-                TermKind::PolicyClass,
-            ),
-            (
-                &["Rule", "Permission", "Prohibition", "Duty"],
-                TermKind::RuleClass,
-            ),
-            (&["Asset", "AssetCollection"], TermKind::AssetClass),
-            (&["Party", "PartyCollection"], TermKind::PartyClass),
-        ];
-        for (names, kind) in groups {
-            if names.iter().any(|n| classes.contains(&odrl(n))) {
-                out.push(kind);
-            }
-        }
+        out.extend(self.derived.get(s).into_iter().flatten());
 
         if out.is_empty()
             && g.iris(s, ns::RDF_TYPE).is_empty()
@@ -328,28 +393,6 @@ impl Builder<'_, '_> {
         }
     }
 
-    /// Every IRI reachable from `s` along `p` within the document, bounded
-    /// by a visited set and `max_depth`.
-    fn ancestors(&self, s: &str, p: &str) -> HashSet<String> {
-        let mut seen: HashSet<String> = HashSet::new();
-        let mut frontier: Vec<&str> = vec![s];
-        for _ in 0..self.limits.max_depth {
-            let mut next = Vec::new();
-            for x in frontier {
-                for o in self.g.iris(x, p) {
-                    if seen.insert(o.to_string()) {
-                        next.push(o);
-                    }
-                }
-            }
-            if next.is_empty() {
-                break;
-            }
-            frontier = next;
-        }
-        seen
-    }
-
     /// The profile's own node: typed `owl:Ontology`, `prof:Profile` or
     /// `odrl:Profile`, else the IRI named most often in `rdfs:isDefinedBy`
     /// (the first such on a tie).
@@ -368,19 +411,22 @@ impl Builder<'_, '_> {
             return Some(s.to_string());
         }
         let defined_by = rdfs("isDefinedBy");
-        let mut counts: Vec<(&str, usize)> = Vec::new();
+        // Counted in a map, with first-seen order kept for the tie.
+        let mut order: Vec<&str> = Vec::new();
+        let mut counts: HashMap<&str, usize> = HashMap::new();
         for s in &g.order {
             for o in g.iris(s, &defined_by) {
-                match counts.iter_mut().find(|(i, _)| *i == o) {
-                    Some((_, n)) => *n += 1,
-                    None => counts.push((o, 1)),
-                }
+                let n = counts.entry(o).or_insert_with(|| {
+                    order.push(o);
+                    0
+                });
+                *n += 1;
             }
         }
-        let max = counts.iter().map(|(_, n)| *n).max()?;
-        counts
+        let max = counts.values().copied().max()?;
+        order
             .into_iter()
-            .find(|(_, n)| *n == max)
-            .map(|(i, _)| i.to_string())
+            .find(|o| counts[o] == max)
+            .map(String::from)
     }
 }
