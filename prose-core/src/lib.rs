@@ -30,6 +30,18 @@ pub mod wording {
     pub fn known_left_operands() -> &'static [(&'static str, &'static str)] {
         crate::words::OPERANDS
     }
+
+    /// How the loaded profiles explain `written`, a term as a policy whose
+    /// prefixes are `prefixes` writes it; `None` when no loaded profile
+    /// declares it.
+    pub fn gloss(
+        wording: &crate::profile::Wording,
+        prefixes: &crate::profile::Prefixes,
+        written: &str,
+    ) -> Option<crate::Gloss> {
+        let _ = (wording, prefixes, written);
+        None
+    }
 }
 
 pub use model::{
