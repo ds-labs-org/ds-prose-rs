@@ -4,6 +4,7 @@
 use crate::Gloss;
 use crate::profile::{Prefixes, ProfileVocab, Term, TermKind, Wording};
 use crate::words::{self, local_name};
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 const ODRL_NS: &str = "http://www.w3.org/ns/odrl/2/";
@@ -12,7 +13,9 @@ const ODRL_NS: &str = "http://www.w3.org/ns/odrl/2/";
 pub(crate) struct WordCtx<'a> {
     /// `None` when no profile is loaded.
     wording: Option<&'a Wording>,
-    prefixes: Prefixes,
+    /// Borrowed when a caller already holds them: a gloss per term shown
+    /// must not copy a large policy context.
+    prefixes: Cow<'a, Prefixes>,
     /// Namespace -> the first loaded profile that declares a term in it.
     /// ODRL's own namespace is left out.
     namespaces: HashMap<&'a str, &'a ProfileVocab>,
@@ -23,7 +26,7 @@ impl<'a> WordCtx<'a> {
     pub(crate) fn plain() -> WordCtx<'static> {
         WordCtx {
             wording: None,
-            prefixes: Prefixes::default(),
+            prefixes: Cow::Owned(Prefixes::default()),
             namespaces: HashMap::new(),
         }
     }
@@ -41,7 +44,7 @@ impl<'a> WordCtx<'a> {
         }
         WordCtx {
             wording: (!w.is_empty()).then_some(w),
-            prefixes,
+            prefixes: Cow::Owned(prefixes),
             namespaces,
         }
     }
@@ -52,7 +55,7 @@ impl<'a> WordCtx<'a> {
     }
 
     pub(crate) fn set_prefixes(&mut self, prefixes: Prefixes) {
-        self.prefixes = prefixes;
+        self.prefixes = Cow::Owned(prefixes);
     }
 
     fn langs(&self) -> &[String] {
@@ -263,7 +266,7 @@ fn lower_first(label: &str) -> String {
 pub(crate) fn gloss(w: &Wording, prefixes: &Prefixes, written: &str) -> Option<Gloss> {
     let ctx = WordCtx {
         wording: (!w.is_empty()).then_some(w),
-        prefixes: prefixes.clone(),
+        prefixes: Cow::Borrowed(prefixes),
         namespaces: HashMap::new(),
     };
     let (t, p) = ctx.resolve(written)?;
@@ -275,7 +278,7 @@ pub(crate) fn gloss(w: &Wording, prefixes: &Prefixes, written: &str) -> Option<G
 pub(crate) fn operator_with(w: &Wording, prefixes: &Prefixes, left: &str, op: &str) -> String {
     let ctx = WordCtx {
         wording: (!w.is_empty()).then_some(w),
-        prefixes: prefixes.clone(),
+        prefixes: Cow::Borrowed(prefixes),
         namespaces: HashMap::new(),
     };
     ctx.operator_for(left, op)

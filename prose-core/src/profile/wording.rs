@@ -3,7 +3,8 @@
 use super::{ProfileVocab, Term, ns};
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::ops::Bound;
+use std::sync::{Arc, OnceLock};
 
 /// What the prose is worded with: the loaded profiles (first loaded wins on
 /// a term two of them declare) and the preferred label languages.
@@ -135,6 +136,9 @@ pub struct Prefixes {
     /// document's): a key not bound here is looked up there. Shared, not
     /// copied, so many nodes under one large `@context` stay cheap.
     outer: Option<Arc<Prefixes>>,
+    /// Namespace -> the greatest key without a `:` bound to it, for
+    /// [`Prefixes::compact`]; built on first use, from `entries` alone.
+    by_ns: OnceLock<BTreeMap<String, String>>,
 }
 
 impl PartialEq for Prefixes {
@@ -197,15 +201,24 @@ impl Prefixes {
         {
             return Some(bare);
         }
-        // The longest bound namespace that leaves a plain local name.
-        let (prefix, ns) = self
-            .entries
-            .iter()
-            .filter(|(k, v)| {
-                !k.contains(':') && iri.strip_prefix(v.as_str()).is_some_and(is_local_name)
-            })
-            .max_by_key(|(_, v)| v.len())?;
-        fits(format!("{prefix}:{}", &iri[ns.len()..]))
+        // The longest bound namespace that leaves a plain local name. A
+        // shorter one leaves a longer name that holds this one, so only the
+        // longest namespace shorter than the IRI is looked at.
+        let by_ns = self.by_ns.get_or_init(|| {
+            let mut m = BTreeMap::new();
+            // In key order, so the greatest key bound to a namespace wins.
+            for (k, v) in self.entries.iter().filter(|(k, _)| !k.contains(':')) {
+                m.insert(v.clone(), k.clone());
+            }
+            m
+        });
+        let last = iri.chars().next_back()?;
+        let (ns, prefix) = longest_prefix(by_ns, iri, &iri[..iri.len() - last.len_utf8()])?;
+        let local = &iri[ns.len()..];
+        if !is_local_name(local) {
+            return None;
+        }
+        fits(format!("{prefix}:{local}"))
     }
 
     /// `None` for a compact IRI whose prefix nothing here binds.
@@ -260,7 +273,7 @@ impl Prefixes {
                 .into_iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
-            outer: None,
+            ..Prefixes::default()
         }
     }
 
@@ -271,11 +284,13 @@ impl Prefixes {
             None => Prefixes {
                 entries: self.entries,
                 outer: Some(outer),
+                ..Prefixes::default()
             },
             // Not built by the crate; kept correct all the same.
             Some(_) => Prefixes {
                 entries: self.flattened().entries,
                 outer: Some(outer),
+                ..Prefixes::default()
             },
         }
     }
@@ -291,6 +306,7 @@ impl Prefixes {
                 self.entries.insert(k, v);
             }
         }
+        self.by_ns = OnceLock::new();
     }
 
     fn set(&mut self, key: &str, iri: String) {
@@ -358,6 +374,33 @@ impl Prefixes {
             out.entries.extend(changed);
         }
         out
+    }
+}
+
+/// The longest key of `m` that is a prefix of `s` and no longer than
+/// `upto` (itself a prefix of `s`), with its value. Each step either finds
+/// it or shortens `upto` past where the nearest key differs from `s`, so a
+/// lookup costs a few range queries, not a scan of `m`.
+fn longest_prefix<'m>(
+    m: &'m BTreeMap<String, String>,
+    s: &str,
+    upto: &str,
+) -> Option<(&'m str, &'m str)> {
+    let mut upto = upto;
+    loop {
+        let (k, v) = m
+            .range::<str, _>((Bound::Unbounded, Bound::Included(upto)))
+            .next_back()?;
+        if s.starts_with(k.as_str()) {
+            return Some((k, v));
+        }
+        // `k` sorts before `upto` and differs from `s` within `upto`: every
+        // key still in the running is a prefix of `s` shorter than that.
+        let mut common = k.bytes().zip(s.bytes()).take_while(|(a, b)| a == b).count();
+        while !s.is_char_boundary(common) {
+            common -= 1;
+        }
+        upto = &s[..common];
     }
 }
 
