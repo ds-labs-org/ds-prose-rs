@@ -6,9 +6,9 @@
 
 use gloo_timers::future::TimeoutFuture;
 use js_sys::{Array, JSON};
-use prose_wasm::{ProseHandle, ProseValidator, rules, validate};
+use prose_wasm::{ProseHandle, ProseValidator, ValidateOptionsArg, rules, validate};
 use serde_json::Value;
-use wasm_bindgen::JsValue;
+use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_test::*;
 use web_sys::Element;
 
@@ -40,6 +40,16 @@ fn js(json: &str) -> JsValue {
     JSON::parse(json).expect("test JSON")
 }
 
+/// Options as the host passes them.
+fn opts(json: &str) -> ValidateOptionsArg {
+    js(json).unchecked_into()
+}
+
+/// The report text, if there is one (`null` is none).
+fn report_of(h: &ProseHandle) -> Option<String> {
+    h.report().as_string()
+}
+
 fn list(items: &[&str]) -> JsValue {
     items
         .iter()
@@ -69,10 +79,10 @@ fn validate_takes_a_string_a_list_or_null() {
 
 #[wasm_bindgen_test]
 fn validate_reads_options() {
-    let o = js(r#"{"strict": false}"#);
+    let o = opts(r#"{"strict": false}"#);
     let r = parsed(&validate(CLEAN, JsValue::from_str(RESEARCH), Some(o)).unwrap());
     assert_eq!(r["mode"], "advisory");
-    let o = js(r#"{"structural": true, "rules": {"odrl.no-rule": "off"}}"#);
+    let o = opts(r#"{"structural": true, "rules": {"odrl.no-rule": "off"}}"#);
     let r = parsed(&validate(CLEAN, JsValue::from_str(RESEARCH), Some(o)).unwrap());
     assert_eq!(r["mode"], "strict");
     assert!(r["tiers"].as_array().unwrap().iter().any(|t| t == "odrl"));
@@ -90,13 +100,27 @@ fn two_profiles_conform_when_both_are_loaded() {
 fn bad_input_throws_and_a_bad_policy_does_not() {
     assert!(validate(CLEAN, JsValue::from_str("<!doctype html><p>hi"), None).is_err());
     assert!(validate(CLEAN, JsValue::from_f64(3.0), None).is_err());
-    assert!(validate(CLEAN, JsValue::NULL, Some(js(r#"{"strictt": 1}"#))).is_err());
-    assert!(validate(CLEAN, JsValue::NULL, Some(JsValue::from_str("strict"))).is_err());
+    assert!(validate(CLEAN, JsValue::NULL, Some(opts(r#"{"strictt": 1}"#))).is_err());
+    assert!(
+        validate(
+            CLEAN,
+            JsValue::NULL,
+            Some(JsValue::from_str("strict").unchecked_into())
+        )
+        .is_err()
+    );
     let r = parsed(&validate("not json at all", JsValue::NULL, None).unwrap());
     assert_eq!(r["findings"][0]["rule"], "input.unreadable");
     // Undefined and null options are the defaults.
-    assert!(validate(CLEAN, JsValue::NULL, Some(JsValue::UNDEFINED)).is_ok());
-    assert!(validate(CLEAN, JsValue::NULL, Some(JsValue::NULL)).is_ok());
+    assert!(
+        validate(
+            CLEAN,
+            JsValue::NULL,
+            Some(JsValue::UNDEFINED.unchecked_into())
+        )
+        .is_ok()
+    );
+    assert!(validate(CLEAN, JsValue::NULL, Some(JsValue::NULL.unchecked_into())).is_ok());
 }
 
 #[wasm_bindgen_test]
@@ -118,7 +142,7 @@ fn validator_parses_profiles_once_and_validates_many() {
     assert_eq!(parsed(&v.validate(NOT_LOADED))["verdict"], "incomplete");
     assert_eq!(parsed(&v.validate("{")).findings_rule(), "input.unreadable");
     assert!(ProseValidator::new(list(&["{"]), None).is_err());
-    assert!(ProseValidator::new(list(&[RESEARCH]), Some(js(r#"{"ruleset": 99}"#))).is_err());
+    assert!(ProseValidator::new(list(&[RESEARCH]), Some(opts(r#"{"ruleset": 99}"#))).is_err());
     // Several profiles, and none.
     assert!(ProseValidator::new(list(&[]), None).is_ok());
     let both = ProseValidator::new(list(&[RESEARCH, OTHER]), None).unwrap();
@@ -137,16 +161,16 @@ impl FirstRule for Value {
 #[wasm_bindgen_test]
 async fn report_is_null_until_validation_is_on() {
     let (_c, mut h) = mount(CLEAN).await;
-    assert!(h.report().is_none());
+    assert!(report_of(&h).is_none());
     h.set_validation(JsValue::NULL).unwrap();
-    assert!(h.report().is_none());
+    assert!(report_of(&h).is_none());
     h.set_profiles(list(&[RESEARCH])).unwrap();
     assert!(
-        h.report().is_none(),
+        report_of(&h).is_none(),
         "profiles alone do not turn validation on"
     );
     h.set_validation(js("{}")).unwrap();
-    let r = parsed(&h.report().expect("a report"));
+    let r = parsed(&report_of(&h).expect("a report"));
     assert_eq!(r["schema"], "ds-prose/validation-report@1");
     assert_eq!(r["verdict"], "conforms");
 }
@@ -171,16 +195,16 @@ async fn set_validation_shows_the_violations_section() {
 async fn report_follows_update_and_profiles() {
     let (_c, mut h) = mount(NOT_LOADED).await;
     h.set_validation(js("{}")).unwrap();
-    assert_eq!(parsed(&h.report().unwrap())["verdict"], "incomplete");
+    assert_eq!(parsed(&report_of(&h).unwrap())["verdict"], "incomplete");
     h.set_profiles(list(&[RESEARCH])).unwrap();
-    assert_eq!(parsed(&h.report().unwrap())["verdict"], "incomplete");
+    assert_eq!(parsed(&report_of(&h).unwrap())["verdict"], "incomplete");
     h.update(CLEAN, None);
-    assert_eq!(parsed(&h.report().unwrap())["verdict"], "conforms");
+    assert_eq!(parsed(&report_of(&h).unwrap())["verdict"], "conforms");
     // The single-profile call feeds the same report.
     h.set_profile(None).unwrap();
-    assert_ne!(parsed(&h.report().unwrap())["verdict"], "conforms");
+    assert_ne!(parsed(&report_of(&h).unwrap())["verdict"], "conforms");
     h.set_profile(Some(RESEARCH.to_string())).unwrap();
-    assert_eq!(parsed(&h.report().unwrap())["verdict"], "conforms");
+    assert_eq!(parsed(&report_of(&h).unwrap())["verdict"], "conforms");
 }
 
 #[wasm_bindgen_test]
@@ -206,7 +230,7 @@ async fn bad_options_or_profiles_throw_and_keep_the_previous() {
     h.set_profiles(list(&[RESEARCH])).unwrap();
     h.set_validation(js(r#"{"structural": true}"#)).unwrap();
     settle().await;
-    let before = h.report().unwrap();
+    let before = report_of(&h).unwrap();
     assert!(has(&c, ".prose-violations"));
     assert!(h.set_validation(js(r#"{"odrl": "all"}"#)).is_err());
     assert!(h.set_validation(JsValue::from_str("strict")).is_err());
@@ -216,7 +240,11 @@ async fn bad_options_or_profiles_throw_and_keep_the_previous() {
         "a list is required"
     );
     settle().await;
-    assert_eq!(h.report().unwrap(), before, "options and profiles are kept");
+    assert_eq!(
+        report_of(&h).unwrap(),
+        before,
+        "options and profiles are kept"
+    );
     assert!(has(&c, ".prose-violations"));
 }
 
@@ -226,7 +254,7 @@ async fn destroyed_handle_stays_harmless() {
     h.destroy();
     h.set_profiles(list(&[RESEARCH])).unwrap();
     h.set_validation(js("{}")).unwrap();
-    assert!(h.report().is_some());
+    assert!(report_of(&h).is_some());
     settle().await;
     assert_eq!(c.child_element_count(), 0);
 }

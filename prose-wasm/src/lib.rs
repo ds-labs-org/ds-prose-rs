@@ -24,6 +24,14 @@ use wasm_bindgen::prelude::*;
 use web_sys::Element;
 use yew::{AttrValue, Classes, Renderer};
 
+#[wasm_bindgen]
+extern "C" {
+    /// The `ValidateOptions` object a host passes (declared in the package's
+    /// types); an imported type so that the parameter is optional in them.
+    #[wasm_bindgen(typescript_type = "ValidateOptions")]
+    pub type ValidateOptionsArg;
+}
+
 fn props(
     json: &str,
     class: Option<String>,
@@ -55,7 +63,7 @@ fn to_json(v: &JsValue, what: &str) -> Result<Option<Value>, String> {
         .map_err(|e| format!("{what} is not plain data: {e}"))
 }
 
-fn options_of(v: Option<&JsValue>) -> Result<Options, String> {
+fn options_of(v: Option<&ValidateOptionsArg>) -> Result<Options, String> {
     let value = match v {
         Some(v) => to_json(v, "options")?,
         None => None,
@@ -220,10 +228,12 @@ impl ProseHandle {
     /// The validation report for the current policy and profiles, as the
     /// JSON text of `ValidationReport`, or `null` while validation is off
     /// (see `setValidation`).
-    pub fn report(&self) -> Option<String> {
-        self.validator
-            .as_ref()
-            .map(|v| validation::validate_text(&self.json, v))
+    #[wasm_bindgen(unchecked_return_type = "string | null")]
+    pub fn report(&self) -> JsValue {
+        match &self.validator {
+            Some(v) => JsValue::from_str(&validation::validate_text(&self.json, v)),
+            None => JsValue::NULL,
+        }
     }
 
     /// Unmount and remove the rendered DOM. Safe to call more than once.
@@ -273,7 +283,7 @@ impl ProseHandle {
 pub fn validate(
     json: &str,
     #[wasm_bindgen(unchecked_param_type = "string | string[] | null")] profiles: JsValue,
-    #[wasm_bindgen(unchecked_param_type = "ValidateOptions")] options: Option<JsValue>,
+    options: Option<ValidateOptionsArg>,
 ) -> Result<String, JsError> {
     let options = options_of(options.as_ref()).map_err(throw)?;
     let texts = match to_json(&profiles, "profiles").map_err(throw)? {
@@ -304,7 +314,7 @@ impl ProseValidator {
     #[wasm_bindgen(constructor)]
     pub fn new(
         #[wasm_bindgen(unchecked_param_type = "string[]")] profiles: JsValue,
-        #[wasm_bindgen(unchecked_param_type = "ValidateOptions")] options: Option<JsValue>,
+        options: Option<ValidateOptionsArg>,
     ) -> Result<ProseValidator, JsError> {
         let options = options_of(options.as_ref()).map_err(throw)?;
         let texts = texts_of(&profiles).map_err(throw)?;
