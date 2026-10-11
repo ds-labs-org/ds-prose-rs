@@ -194,7 +194,7 @@ impl Prefixes {
     }
 
     /// One `@context` value: a string, an object, or an array of them.
-    fn of_context(c: &Value) -> Prefixes {
+    pub(crate) fn of_context(c: &Value) -> Prefixes {
         let mut out = Prefixes::default();
         let list: Vec<&Value> = match c {
             Value::Array(a) => a.iter().collect(),

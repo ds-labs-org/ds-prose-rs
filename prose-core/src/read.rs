@@ -101,27 +101,24 @@ const MAX_DEPTH: usize = 256;
 /// The reading of `value`, worded with `wording`. With no profile loaded it
 /// is the v0.1 reading and every glossary is empty.
 pub fn document_with(value: &Value, wording: &Wording) -> Result<Reading, ProseError> {
-    // Without a profile no term is expanded: the v0.1 path stays as it was.
-    let doc_prefixes = match wording.is_empty() {
-        true => Prefixes::default(),
-        false => Prefixes::of_document(value),
-    };
-    let mut r = Reader::new(WordCtx::new(wording, doc_prefixes.clone()));
+    let mut r = Reader::new(WordCtx::new(wording, Prefixes::default()));
     let mut notes = Vec::new();
     let value = &bare_odrl_keys(value, odrl_prefix_is_odrl(value), &mut notes);
     for note in notes {
         r.warn(note);
     }
+    // Without a profile no term is expanded: the v0.1 path stays as it was.
+    let scopes = match r.ctx.profiled() {
+        true => node_prefixes(value),
+        false => Vec::new(),
+    };
     let mut doc = Document::default();
     let mut glossary = Vec::new();
-    for v in policy_nodes(value) {
+    for (i, v) in policy_nodes(value).into_iter().enumerate() {
         match v {
             Value::Object(o) if looks_like_policy(o) => {
-                if r.ctx.profiled() {
-                    // The policy's own context first, then the document's.
-                    let mut p = Prefixes::of_document(v);
-                    p.merge(doc_prefixes.clone());
-                    r.ctx.set_prefixes(p);
+                if let Some(p) = scopes.get(i) {
+                    r.ctx.set_prefixes(p.clone());
                 }
                 doc.policies.push(r.policy(o));
                 r.glossed.clear();
@@ -302,6 +299,32 @@ pub(crate) fn policy_nodes(v: &Value) -> Vec<&Value> {
         Value::Object(o) if o.contains_key("@graph") => policy_nodes(&o["@graph"]),
         _ => vec![v],
     }
+}
+
+/// The prefixes of each node [`policy_nodes`] yields, in the same order:
+/// the node's own context, then those of the objects whose `@graph` holds
+/// it. A sibling's context is not in scope.
+fn node_prefixes(v: &Value) -> Vec<Prefixes> {
+    fn walk(v: &Value, outer: &Prefixes, out: &mut Vec<Prefixes>) {
+        let mut own = v
+            .get("@context")
+            .map(Prefixes::of_context)
+            .unwrap_or_default();
+        match v {
+            Value::Array(a) => a.iter().for_each(|x| walk(x, outer, out)),
+            Value::Object(o) if o.contains_key("@graph") => {
+                own.merge(outer.clone());
+                walk(&o["@graph"], &own, out);
+            }
+            _ => {
+                own.merge(outer.clone());
+                out.push(own);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(v, &Prefixes::default(), &mut out);
+    out
 }
 
 pub(crate) fn looks_like_policy(o: &Obj) -> bool {
@@ -921,11 +944,11 @@ impl<'a> Reader<'a> {
                     };
                 }
                 match ident(v) {
-                    Some(id) if o.contains_key("@id") => {
+                    // `id` and `uid` are the ODRL context's aliases of `@id`.
+                    Some(id) => {
                         self.term(&id, TermKind::RightOperand, Some("right operand"));
                         self.ctx.value(&id).unwrap_or(id)
                     }
-                    Some(id) => id,
                     None => {
                         self.warn("skipped an unreadable right operand");
                         "an unreadable value".to_string()
