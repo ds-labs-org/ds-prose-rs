@@ -47,7 +47,10 @@ pub struct OdrlProseViewProps {
 }
 
 fn is_structural(ev: &EditEvent) -> bool {
-    !matches!(ev, EditEvent::SetText { .. } | EditEvent::SetChoice { .. })
+    !matches!(
+        ev,
+        EditEvent::SetText { .. } | EditEvent::SetChoice { .. } | EditEvent::SetIri { .. }
+    )
 }
 
 /// The structural event waiting for the host's new document: the event, the

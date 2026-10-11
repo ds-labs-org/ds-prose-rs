@@ -36,6 +36,15 @@ pub enum EditEvent {
         expect: NodeId,
         value: String,
     },
+    /// An IRI picked for a right operand value (a suggestion from a
+    /// profile): stored as [`Literal::Iri`] and written `{"@id": value}`,
+    /// whatever the value held before. Only `Field::RightOperand(_)` of an
+    /// atomic constraint takes it; typing stays [`EditEvent::SetText`].
+    SetIri {
+        slot: SlotPath,
+        expect: NodeId,
+        value: String,
+    },
     /// Insert at `index`, 0..=len.
     ///
     /// `expect` is the id of the list's owner node, taken from
@@ -166,6 +175,11 @@ pub(crate) fn apply_event(
             expect,
             value,
         } => set_choice(doc, rules, slot, *expect, value),
+        EditEvent::SetIri {
+            slot,
+            expect,
+            value,
+        } => set_iri(doc, slot, *expect, value),
         EditEvent::Add {
             list,
             index,
@@ -255,6 +269,31 @@ fn set_text(
         }
         (NodeMut::Policy(p), Field::InheritFrom(k)) => {
             *p.inherit_from.get_mut(k).ok_or_else(bad)? = value.to_string()
+        }
+        _ => return Err(bad()),
+    }
+    Ok(())
+}
+
+fn set_iri(
+    doc: &mut EditDoc,
+    slot: &SlotPath,
+    expect: NodeId,
+    value: &str,
+) -> Result<(), EditError> {
+    check_node(doc, &slot.node, expect, false)?;
+    let bad = || EditError::NoSuchPath(slot.to_string());
+    let node = resolve_mut(doc, &slot.node).ok_or_else(|| no_node(&slot.node))?;
+    match (node, slot.field) {
+        (NodeMut::Constraint(ConstraintNode::Atomic(a)), Field::RightOperand(k)) => {
+            let RightOperand::Values(v) = &mut a.right else {
+                return Err(bad());
+            };
+            let lit = v.get_mut(k).ok_or_else(bad)?;
+            if value.is_empty() {
+                return Err(EditError::Invalid("an IRI cannot be empty".into()));
+            }
+            *lit = Literal::Iri(value.to_string());
         }
         _ => return Err(bad()),
     }
@@ -733,7 +772,7 @@ fn item_target(doc: &EditDoc, list: &ListPath, index: usize) -> Option<FocusTarg
 /// `doc_after`. `None` when no move is needed or the target is gone.
 pub fn focus_after(ev: &EditEvent, doc_after: &EditDoc) -> Option<FocusTarget> {
     match ev {
-        EditEvent::SetText { .. } | EditEvent::SetChoice { .. } => None,
+        EditEvent::SetText { .. } | EditEvent::SetChoice { .. } | EditEvent::SetIri { .. } => None,
         EditEvent::Add { list, index, .. } => match list.item_path(*index) {
             Some(p) => first_slot(doc_after, &p),
             None => {

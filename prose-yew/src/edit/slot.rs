@@ -12,7 +12,10 @@ use yew::prelude::*;
 
 use std::collections::{HashMap, HashSet};
 
-use prose_core::edit::{EditEvent, Field, IssueTarget, Severity, Slot, SlotKind, left_operand_at};
+use prose_core::edit::{
+    ConstraintNode, EditDoc, EditEvent, Field, IssueTarget, Literal, NodeRef, RightOperand,
+    Severity, Slot, SlotKind, SlotPath, left_operand_at,
+};
 use prose_core::profile::{Term, TermKind};
 use prose_core::wording;
 
@@ -260,6 +263,19 @@ fn profile_values(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<AttrValue
     (list, HashMap::new())
 }
 
+/// Whether the right operand value at `path` is an IRI reference.
+fn holds_iri(doc: &EditDoc, path: &SlotPath) -> bool {
+    let Field::RightOperand(k) = path.field else {
+        return false;
+    };
+    match doc.node(&path.node) {
+        Some(NodeRef::Constraint(ConstraintNode::Atomic(a))) => {
+            matches!(&a.right, RightOperand::Values(v) if matches!(v.get(k), Some(Literal::Iri(_))))
+        }
+        _ => false,
+    }
+}
+
 fn placeholder(env: &Env, slot: &Slot) -> AttrValue {
     if slot.kind == SlotKind::Literal
         && let Some(dt) = left_operand_term(env, slot).and_then(|t| t.hints.datatype.as_deref())
@@ -391,19 +407,39 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         })
     };
 
+    // A right operand's suggestions are profile values, which are IRIs. A
+    // slot that already holds an IRI keeps it through SetText; into any
+    // other (a string, a typed or new value) a pick is sent as SetIri.
+    let pick_as_iri = slot.kind == SlotKind::Literal
+        && matches!(slot.path.field, Field::RightOperand(_))
+        && !holds_iri(&env.doc, &slot.path);
     let accept: Callback<AttrValue> = {
         let node_ref = node_ref.clone();
         let dirty = dirty.clone();
         let refocus = refocus.clone();
         let commit = commit.clone();
         let open = open.clone();
+        let rev = rev.dispatcher();
+        let onedit = env.onedit.clone();
+        let path = slot.path.clone();
+        let owner = slot.owner;
         Callback::from(move |value: AttrValue| {
             if let Some(el) = node_ref.cast::<web_sys::Element>() {
                 el.set_text_content(Some(&value));
             }
-            *dirty.borrow_mut() = true;
             *refocus.borrow_mut() = true;
             open.set(false);
+            if pick_as_iri {
+                *dirty.borrow_mut() = false;
+                onedit.emit(EditEvent::SetIri {
+                    slot: path.clone(),
+                    expect: owner,
+                    value: value.to_string(),
+                });
+                rev.dispatch(());
+                return;
+            }
+            *dirty.borrow_mut() = true;
             commit.emit(());
         })
     };
