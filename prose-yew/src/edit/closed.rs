@@ -2,9 +2,19 @@
 //! component (slot.rs) decides when to ask; this module decides what typed
 //! text means against the entries a list offers, and says why it was not
 //! taken.
+// Wired into the slot editor by the next change.
+#![allow(dead_code)]
+
 use prose_core::profile::Wording;
 
 use super::config::{Labels, Suggestion, fill};
+use super::suggest::{filter_suggestions, strip};
+
+/// Typed text longer than this is never compared for nearness: the work is
+/// quadratic in the length.
+const LONGEST_COMPARED: usize = 64;
+/// At most this many entries are compared for nearness.
+const MOST_COMPARED: usize = 1000;
 
 /// The entry whose term, label or IRI is `typed`, ignoring case and a
 /// leading `odrl:`. `same_iri` says whether two written forms name one IRI.
@@ -13,27 +23,96 @@ pub(crate) fn exact<'a>(
     typed: &str,
     same_iri: &dyn Fn(&str, &str) -> bool,
 ) -> Option<&'a Suggestion> {
-    let _ = (options, typed, same_iri);
-    None
+    let typed = typed.trim();
+    if typed.is_empty() {
+        return None;
+    }
+    let folded = strip(typed);
+    options
+        .iter()
+        .find(|o| strip(&o.value) == folded || strip(&o.label) == folded)
+        .or_else(|| options.iter().find(|o| same_iri(&o.value, typed)))
+}
+
+/// What follows the last `:`, `/` or `#`, in lower case.
+fn local(s: &str) -> String {
+    let s = s.trim();
+    let at = s.rfind([':', '/', '#']).map_or(0, |i| i + 1);
+    s[at..].to_lowercase()
+}
+
+/// Edit distance between two short texts, in characters.
+fn distance(a: &[char], b: &[char]) -> usize {
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.iter().enumerate() {
+        let mut diag = row[0];
+        row[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let up = row[j + 1];
+            row[j + 1] = (diag + usize::from(ca != cb)).min(up + 1).min(row[j] + 1);
+            diag = up;
+        }
+    }
+    row[b.len()]
 }
 
 /// The entry nearest to `typed` by edit distance on the local name, when it
 /// is near enough to be a slip of the keys and not a different word.
 pub(crate) fn closest<'a>(options: &'a [Suggestion], typed: &str) -> Option<&'a Suggestion> {
-    let _ = (options, typed);
-    None
+    let t: Vec<char> = local(typed).chars().collect();
+    if t.len() < 2 || t.len() > LONGEST_COMPARED {
+        return None;
+    }
+    let limit = ((t.len() + 1) / 3).max(1);
+    let mut best: Option<(usize, &Suggestion)> = None;
+    for o in options.iter().take(MOST_COMPARED) {
+        for name in [local(&o.value), local(&o.label)] {
+            let n: Vec<char> = name.chars().collect();
+            if n.len() > LONGEST_COMPARED {
+                continue;
+            }
+            let d = distance(&t, &n);
+            if d <= limit && d < t.len() && best.is_none_or(|(b, _)| d < b) {
+                best = Some((d, o));
+            }
+        }
+    }
+    best.map(|(_, o)| o)
 }
 
 /// The one entry left when `typed` is filtered, if exactly one is.
 pub(crate) fn only<'a>(options: &'a [Suggestion], typed: &str) -> Option<&'a Suggestion> {
-    let _ = (options, typed);
-    None
+    if typed.trim().is_empty() {
+        return None;
+    }
+    let mut left = filter_suggestions(options, typed, 2);
+    match left.len() {
+        1 => left.pop(),
+        _ => None,
+    }
 }
 
 /// "Research Data Profile 0.1.0, Other 2", or "ODRL" with no profile.
 pub(crate) fn profile_names(w: &Wording) -> String {
-    let _ = w;
-    String::new()
+    let names: Vec<String> = w
+        .profiles()
+        .map(|p| {
+            let name = p
+                .title()
+                .pick(w.languages())
+                .or(p.iri())
+                .unwrap_or("unnamed profile");
+            match p.version() {
+                Some(v) => format!("{name} {v}"),
+                None => name.to_string(),
+            }
+        })
+        .collect();
+    if names.is_empty() {
+        "ODRL".to_string()
+    } else {
+        names.join(", ")
+    }
 }
 
 /// Why `typed` was not taken, with the nearest entry when there is one.
@@ -44,14 +123,24 @@ pub(crate) fn not_allowed_message(
     profile: &str,
     near: Option<&Suggestion>,
 ) -> String {
-    let _ = (labels, typed, field, profile, near);
-    String::new()
+    let mut msg = fill(
+        &labels.not_allowed_term,
+        &[("typed", typed), ("field", field), ("profile", profile)],
+    );
+    if let Some(n) = near {
+        msg.push(' ');
+        msg.push_str(&fill(&labels.did_you_mean, &[("suggestion", &n.label)]));
+    }
+    msg
 }
 
 /// What a polite live region says when a closed field goes back to `kept`.
 pub(crate) fn kept_message(labels: &Labels, kept: &str, typed: &str) -> String {
-    let _ = (labels, kept, typed, fill);
-    String::new()
+    if kept.is_empty() {
+        fill(&labels.kept_empty, &[("typed", typed)])
+    } else {
+        fill(&labels.kept_previous, &[("kept", kept), ("typed", typed)])
+    }
 }
 
 #[cfg(test)]
