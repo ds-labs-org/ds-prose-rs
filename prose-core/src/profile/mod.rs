@@ -145,16 +145,41 @@ impl ProfileVocab {
     }
 
     /// As [`ProfileVocab::parse`], with explicit limits.
+    ///
+    /// A relative IRI (`"@id": "#train"`, `<#train>`) is made absolute by
+    /// the document's own `@base`. Without one, it cannot be, and the node
+    /// or value is skipped with a warning, in either syntax; a profile
+    /// fetched from a URL is read with [`ProfileVocab::parse_with_base`].
     pub fn parse_with(text: &str, limits: &ProfileLimits) -> Result<ProfileVocab, ProfileError> {
+        ProfileVocab::read(text, None, limits)
+    }
+
+    /// As [`ProfileVocab::parse_with`], for a text whose own address is
+    /// `base` (the URL it was fetched from): relative IRIs are resolved
+    /// against it, unless the document sets its own `@base`. A `base` that
+    /// is not an absolute IRI is not used, with a warning.
+    pub fn parse_with_base(
+        text: &str,
+        base: &str,
+        limits: &ProfileLimits,
+    ) -> Result<ProfileVocab, ProfileError> {
+        ProfileVocab::read(text, Some(base), limits)
+    }
+
+    fn read(
+        text: &str,
+        base: Option<&str>,
+        limits: &ProfileLimits,
+    ) -> Result<ProfileVocab, ProfileError> {
         let text = within_size(text, limits)?;
         match sniff(text)? {
             Format::Json => {
                 let value: Value =
                     serde_json::from_str(text).map_err(|e| ProfileError::Json(e.to_string()))?;
-                ProfileVocab::from_value(&value, limits)
+                build::vocab(jsonld::read(&value, base, limits)?, limits)
             }
             #[cfg(feature = "turtle")]
-            Format::Turtle => build::vocab(turtle::read(text, limits)?, limits),
+            Format::Turtle => turtle::vocab(text, base, limits),
         }
     }
 
@@ -163,12 +188,24 @@ impl ProfileVocab {
     #[cfg(feature = "turtle")]
     pub fn parse_turtle(text: &str, limits: &ProfileLimits) -> Result<ProfileVocab, ProfileError> {
         let text = within_size(text, limits)?;
-        build::vocab(turtle::read(text, limits)?, limits)
+        turtle::vocab(text, None, limits)
+    }
+
+    /// As [`ProfileVocab::parse_turtle`], with relative IRIs resolved
+    /// against `base`; see [`ProfileVocab::parse_with_base`].
+    #[cfg(feature = "turtle")]
+    pub fn parse_turtle_with_base(
+        text: &str,
+        base: &str,
+        limits: &ProfileLimits,
+    ) -> Result<ProfileVocab, ProfileError> {
+        let text = within_size(text, limits)?;
+        turtle::vocab(text, Some(base), limits)
     }
 
     /// As [`ProfileVocab::parse`], for a value that is already parsed.
     pub fn from_value(v: &Value, limits: &ProfileLimits) -> Result<ProfileVocab, ProfileError> {
-        let parsed = jsonld::read(v, limits)?;
+        let parsed = jsonld::read(v, None, limits)?;
         build::vocab(parsed, limits)
     }
 

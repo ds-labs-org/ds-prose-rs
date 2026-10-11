@@ -78,15 +78,33 @@ enum Work<'a> {
     Node(&'a Obj, Rc<Ctx>, String, usize),
 }
 
-pub(crate) fn read(v: &Value, limits: &ProfileLimits) -> Result<Parsed, ProfileError> {
+/// `base`: the document's own address, if the host knows it; the initial
+/// `@base`.
+pub(crate) fn read(
+    v: &Value,
+    base: Option<&str>,
+    limits: &ProfileLimits,
+) -> Result<Parsed, ProfileError> {
     shape(v)?;
     let mut w = Walker {
         sink: Sink::new(limits),
         max_depth: limits.max_depth,
         blank: 0,
         cut: false,
+        base: None,
     };
-    let mut stack = vec![Work::Top(v, Rc::new(Ctx::default()), 0)];
+    match base {
+        Some(b) if absolute(b) => w.base = Some(b.to_string()),
+        Some(b) => w.warn(format!(
+            "the base IRI \"{b}\" is not absolute; relative IRIs are skipped"
+        )),
+        None => {}
+    }
+    let root = Ctx {
+        base: w.base.clone(),
+        ..Ctx::default()
+    };
+    let mut stack = vec![Work::Top(v, Rc::new(root), 0)];
     while let Some(work) = stack.pop() {
         let mut next = Vec::new();
         match work {
@@ -130,6 +148,8 @@ struct Walker<'l> {
     max_depth: usize,
     blank: usize,
     cut: bool,
+    /// The base the host gave, kept by a `null` context.
+    base: Option<String>,
 }
 
 impl Walker<'_> {
@@ -455,7 +475,12 @@ impl Walker<'_> {
         };
         for c in list {
             match c {
-                Value::Null => out = Ctx::default(),
+                Value::Null => {
+                    out = Ctx {
+                        base: self.base.clone(),
+                        ..Ctx::default()
+                    }
+                }
                 Value::String(s) if ns::is_odrl_context(s) => {
                     out.odrl = true;
                     for (p, iri) in ns::ODRL_CONTEXT {
@@ -651,6 +676,9 @@ fn resolve(base: &str, rel: &str) -> String {
     let no_frag = base.split('#').next().unwrap_or(base);
     let no_query = no_frag.split('?').next().unwrap_or(no_frag);
     let (scheme, rest) = no_query.split_once(':').unwrap_or(("", no_query));
+    if rel.is_empty() {
+        return no_frag.to_string();
+    }
     if rel.starts_with('#') {
         return format!("{no_frag}{rel}");
     }

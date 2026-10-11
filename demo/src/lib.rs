@@ -168,8 +168,9 @@ fn profile_section(state: &UseReducerHandle<ProfileState>, policy: &str) -> Html
             let d = d.clone();
             spawn_local(async move {
                 d.dispatch(match fetch::fetch(&target).await {
-                    Ok((text, content_type)) => ProfileMsg::Fetched {
+                    Ok((text, content_type)) => ProfileMsg::FetchedFrom {
                         generation,
+                        url: target.clone(),
                         text,
                         content_type,
                     },

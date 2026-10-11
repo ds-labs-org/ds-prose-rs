@@ -4,7 +4,7 @@
 use std::rc::Rc;
 
 use prose_yew::SharedWording;
-use prose_yew::prose_core::profile::{ProfileVocab, TermKind, Wording};
+use prose_yew::prose_core::profile::{ProfileLimits, ProfileVocab, TermKind, Wording};
 use serde_json::Value;
 use yew::Reducible;
 
@@ -52,9 +52,17 @@ pub enum ProfileMsg {
     /// The load started at `generation` failed.
     Failed { generation: u32, msg: String },
     /// A fetch started at `generation` answered with this body and
-    /// `Content-Type`.
+    /// `Content-Type`, from an address that is not known.
     Fetched {
         generation: u32,
+        text: String,
+        content_type: Option<String>,
+    },
+    /// As `Fetched`, from `url`: relative IRIs in the profile are read
+    /// against it.
+    FetchedFrom {
+        generation: u32,
+        url: String,
         text: String,
         content_type: Option<String>,
     },
@@ -77,6 +85,10 @@ pub struct ProfileState {
     pub warnings: Vec<String>,
     /// The URL field's text.
     pub url: String,
+    /// The address the field's text was fetched from: its relative IRIs are
+    /// read against it. Kept while the text is edited; a preset, a file or
+    /// Clear drops it.
+    pub base: Option<String>,
     /// Bumped by `Begin` and `Clear`: a load that started before is stale.
     pub generation: u32,
     pub loading: bool,
@@ -97,6 +109,7 @@ pub fn reduce(s: &ProfileState, m: ProfileMsg) -> ProfileState {
             n.generation = n.generation.wrapping_add(1);
             n.loading = false;
             n.text = text;
+            n.base = None;
             apply(&mut n);
         }
         ProfileMsg::Begin => {
@@ -106,6 +119,7 @@ pub fn reduce(s: &ProfileState, m: ProfileMsg) -> ProfileState {
         ProfileMsg::FileRead { generation, text } if generation == s.generation => {
             n.loading = false;
             n.text = text;
+            n.base = None;
             apply(&mut n);
         }
         // The field still holds what was applied, so that profile stays.
@@ -118,18 +132,14 @@ pub fn reduce(s: &ProfileState, m: ProfileMsg) -> ProfileState {
             generation,
             text,
             content_type,
-        } if generation == s.generation => {
-            n.loading = false;
-            match content_type_problem(content_type.as_deref()) {
-                // The field still holds what was applied, so that profile stays.
-                Some(msg) => n.error = Some(msg),
-                None => {
-                    n.text = text;
-                    apply(&mut n);
-                }
-            }
-        }
-        ProfileMsg::Fetched { .. } => {}
+        } if generation == s.generation => fetched(&mut n, None, text, content_type),
+        ProfileMsg::FetchedFrom {
+            generation,
+            url,
+            text,
+            content_type,
+        } if generation == s.generation => fetched(&mut n, Some(url), text, content_type),
+        ProfileMsg::Fetched { .. } | ProfileMsg::FetchedFrom { .. } => {}
         ProfileMsg::Url(url) => n.url = url,
         ProfileMsg::Clear => {
             n = ProfileState {
@@ -140,6 +150,20 @@ pub fn reduce(s: &ProfileState, m: ProfileMsg) -> ProfileState {
         }
     }
     n
+}
+
+/// A fetched answer, from `url` when it is known.
+fn fetched(n: &mut ProfileState, url: Option<String>, text: String, content_type: Option<String>) {
+    n.loading = false;
+    match content_type_problem(content_type.as_deref()) {
+        // The field still holds what was applied, so that profile stays.
+        Some(msg) => n.error = Some(msg),
+        None => {
+            n.text = text;
+            n.base = url;
+            apply(n);
+        }
+    }
 }
 
 /// Why `target` (an absolute URL) is not fetched from the page at `page`,
@@ -229,7 +253,11 @@ fn apply(n: &mut ProfileState) {
     if n.text.trim().is_empty() {
         return;
     }
-    match ProfileVocab::parse(&n.text) {
+    let read = match &n.base {
+        Some(base) => ProfileVocab::parse_with_base(&n.text, base, &ProfileLimits::default()),
+        None => ProfileVocab::parse(&n.text),
+    };
+    match read {
         Ok(p) => {
             n.status = Some(status_line(&p));
             n.warnings = p.warnings().to_vec();
