@@ -8,6 +8,7 @@
 //! an [`Origin`], the JSON it came from) and writes back by merging into
 //! those origins; see [`set_property`].
 mod apply;
+mod check;
 mod issue;
 mod jsonld_read;
 mod jsonld_write;
@@ -17,6 +18,7 @@ mod rules;
 mod segments;
 
 pub use apply::{EditError, EditEvent, FocusTarget, NewItem, focus_after};
+pub use check::check_profile;
 pub use issue::{Issue, IssueTarget, Severity};
 pub use jsonld_read::{read_model, read_model_value};
 pub use jsonld_write::{set_property, write_jsonld};
@@ -61,11 +63,4 @@ pub fn left_operand_at<'d>(doc: &'d EditDoc, slot: &SlotPath) -> Option<&'d str>
         NodeRef::Constraint(ConstraintNode::Atomic(a)) if !a.left.is_empty() => Some(&a.left),
         _ => None,
     }
-}
-
-/// What the loaded profiles in `wording` say about `doc`: advisory
-/// [`Issue`]s, never a refusal. Empty when no profile is loaded.
-pub fn check_profile(doc: &EditDoc, wording: &crate::profile::Wording) -> Vec<Issue> {
-    let _ = (doc, wording);
-    Vec::new()
 }
