@@ -5,7 +5,6 @@
 mod common;
 mod corpus;
 use corpus::*;
-use prose_core::edit::*;
 use prose_core::profile::Wording;
 use prose_core::validate::*;
 use serde_json::{Value, json};

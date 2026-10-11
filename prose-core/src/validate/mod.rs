@@ -18,6 +18,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 mod check;
+mod inherit;
 mod lexical;
 mod rules;
 

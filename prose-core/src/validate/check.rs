@@ -1,7 +1,8 @@
 //! The walk over a document: every term, constraint and literal, checked in
 //! document order against the loaded profiles.
+use super::inherit;
 use super::lexical::lexical;
-use super::{Expected, Finding, Fix, Mode, Options, RuleId, TermRef};
+use super::{Expected, Finding, Fix, Level, Mode, Options, RuleId, TermRef};
 use crate::edit::*;
 use crate::profile::{
     OdrlVocab, OperandHints, Prefixes, ProfileVocab, Term, TermKind, Wording, odrl_term,
@@ -55,8 +56,13 @@ pub(crate) fn run(doc: &EditDoc, w: &Wording, index: &Index, o: &Options) -> Vec
         prefixes: prefixes(doc),
         cur: None,
         unsure: false,
+        cycles: Vec::new(),
+        remote: Vec::new(),
         out: Vec::new(),
     };
+    if o.level_of(RuleId::OdrlInheritanceCycle, false) != Level::Off {
+        c.inheritance(doc);
+    }
     c.imports();
     for note in &doc.warnings {
         c.emit(
@@ -94,6 +100,11 @@ struct Checker<'a> {
     /// A loaded profile builds on one that is not loaded: no policy's
     /// vocabulary is complete.
     unsure: bool,
+    /// Per policy: on an inheritance cycle within the document. Empty when
+    /// the structural tier is off.
+    cycles: Vec<bool>,
+    /// Per policy: the parents it names that are not in the document.
+    remote: Vec<Vec<String>>,
     out: Vec<Finding>,
 }
 
@@ -107,6 +118,21 @@ struct PolicyCtx {
     declared: Vec<String>,
     /// A declared profile is not loaded.
     incomplete: bool,
+    /// The ODRL policy class the policy's type is, or is a subclass of.
+    class: Class,
+    /// Policy-level properties, shared by every rule (IM 2.7.1).
+    assigner: bool,
+    assignee: bool,
+    target: bool,
+    action: bool,
+}
+
+/// The policy classes with structural requirements of their own.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Class {
+    Offer,
+    Agreement,
+    Other,
 }
 
 /// Where a term is written, and so which kind of term belongs there.
@@ -254,10 +280,10 @@ impl<'a> Checker<'a> {
         message: String,
     ) -> Option<&mut Finding> {
         let severity = match self.options.level_of(rule, closed) {
-            super::Level::Off => return None,
-            super::Level::Info => Severity::Info,
-            super::Level::Warning => Severity::Warning,
-            super::Level::Error => Severity::Error,
+            Level::Off => return None,
+            Level::Info => Severity::Info,
+            Level::Warning => Severity::Warning,
+            Level::Error => Severity::Error,
         };
         let mut f = Finding::new(rule, severity, target, message);
         if rule == RuleId::InputUnchecked && self.options.fail_closed {
@@ -662,7 +688,13 @@ impl<'a> Checker<'a> {
                 .map(|d| trim(&self.expand(d)).to_string())
                 .collect(),
             incomplete: !declared.is_empty(),
+            class: self.class_of(&p.kind),
+            assigner: !p.assigner.is_empty(),
+            assignee: !p.assignee.is_empty(),
+            target: !p.target.is_empty(),
+            action: !p.action.is_empty(),
         });
+        self.policy_structure(&path, p);
         self.term(&path, p.id, Field::Kind, &p.kind, Pos::PolicyKind);
         if let Some(c) = &p.conflict {
             self.term(&path, p.id, Field::Conflict, c, Pos::Conflict);
@@ -679,6 +711,208 @@ impl<'a> Checker<'a> {
         self.cur = None;
     }
 
+    /// Works out, once, which policies inherit from themselves and which
+    /// parents are not in the document.
+    fn inheritance(&mut self, doc: &EditDoc) {
+        let mut by_uid: HashMap<String, usize> = HashMap::new();
+        for (i, p) in doc.policies.iter().enumerate() {
+            if p.locked.is_none()
+                && let Some(uid) = p.uid.as_deref().filter(|u| !u.is_empty())
+            {
+                by_uid.entry(self.expand(uid)).or_insert(i);
+            }
+        }
+        let mut parents: Vec<Vec<usize>> = vec![Vec::new(); doc.policies.len()];
+        self.remote = vec![Vec::new(); doc.policies.len()];
+        for (i, p) in doc.policies.iter().enumerate() {
+            if p.locked.is_some() {
+                continue;
+            }
+            for parent in p.inherit_from.iter().filter(|x| !x.is_empty()) {
+                match by_uid.get(&self.expand(parent)) {
+                    Some(&j) => parents[i].push(j),
+                    None => self.remote[i].push(parent.clone()),
+                }
+            }
+        }
+        self.cycles = inherit::on_cycle(&parents);
+    }
+
+    /// The policy's own requirements (IM 2.1, 2.9).
+    fn policy_structure(&mut self, path: &NodePath, p: &PolicyNode) {
+        let node = || IssueTarget::Node(path.clone());
+        if p.uid.as_deref().is_none_or(str::is_empty) {
+            self.emit(
+                RuleId::OdrlPolicyUid,
+                false,
+                node(),
+                "the policy has no uid".into(),
+            );
+        }
+        // A child policy may take all its rules from its parents.
+        if p.permission.is_empty()
+            && p.prohibition.is_empty()
+            && p.obligation.is_empty()
+            && p.inherit_from.is_empty()
+        {
+            let msg = "the policy has no permission, prohibition or obligation".to_string();
+            self.emit(RuleId::OdrlNoRule, false, node(), msg);
+        }
+        if self.cycles.get(path.policy).copied().unwrap_or(false) {
+            let msg = format!(
+                "the policy <{}> inherits from itself through inheritFrom",
+                p.uid.as_deref().unwrap_or("")
+            );
+            self.emit(RuleId::OdrlInheritanceCycle, false, node(), msg);
+        }
+        let remote = self.remote.get(path.policy).cloned().unwrap_or_default();
+        for parent in remote {
+            let msg = format!(
+                "the parent policy <{parent}> is not in this document, so the inheritance could not be checked"
+            );
+            self.unchecked(node(), p.id, msg);
+        }
+    }
+
+    /// A rule's own requirements, with the policy's shared properties
+    /// pushed down (IM 2.1.2, 2.1.3, 2.6, 2.6.1-2, 2.6.6-7, 2.7.1).
+    fn rule_structure(&mut self, path: &NodePath, list: RuleList, r: &RuleNode) {
+        let Some(c) = self.cur.as_ref() else {
+            return;
+        };
+        let (class, assigner, assignee, target, action) = (
+            c.class,
+            !r.assigner.is_empty() || c.assigner,
+            !r.assignee.is_empty() || c.assignee,
+            !r.target.is_empty() || c.target,
+            !r.action.is_empty() || c.action,
+        );
+        let node = || IssueTarget::Node(path.clone());
+        if list.is_top_level() {
+            match class {
+                Class::Offer if !assigner => {
+                    let msg = "this rule of an Offer has no assigner, on the rule or on the policy";
+                    self.emit(RuleId::OdrlOfferAssigner, false, node(), msg.into());
+                }
+                Class::Agreement if !(assigner && assignee) => {
+                    let missing = match (assigner, assignee) {
+                        (false, false) => "no assigner and no assignee",
+                        (false, true) => "no assigner",
+                        _ => "no assignee",
+                    };
+                    let msg = format!(
+                        "this rule of an Agreement has {missing}, on the rule or on the policy"
+                    );
+                    self.emit(RuleId::OdrlAgreementParties, false, node(), msg);
+                }
+                _ => {}
+            }
+        }
+        if matches!(list, RuleList::Permission | RuleList::Prohibition) && !target {
+            let msg = format!(
+                "this {} has no target, on the rule or on the policy",
+                list.as_str()
+            );
+            self.emit(RuleId::OdrlRuleTarget, false, node(), msg);
+        }
+        if !action {
+            let msg = "this rule has no action, on the rule or on the policy";
+            self.emit(RuleId::OdrlRuleAction, false, node(), msg.into());
+        }
+        if !r.consequence.is_empty() {
+            let msg = match list {
+                RuleList::Consequence => Some("this consequence has a consequence of its own"),
+                RuleList::Remedy => Some(
+                    "this remedy has a consequence; a remedy must not refer to a duty that has one",
+                ),
+                _ => None,
+            };
+            if let Some(msg) = msg {
+                self.emit(RuleId::OdrlConsequenceNesting, false, node(), msg.into());
+            }
+        }
+    }
+
+    /// An atomic constraint's shape (IM 2.5.1).
+    fn constraint_structure(&mut self, path: &NodePath, a: &AtomicConstraint) {
+        if self.options.level_of(RuleId::OdrlConstraintShape, false) == Level::Off
+            && self
+                .options
+                .level_of(RuleId::OdrlSetOperatorCardinality, false)
+                == Level::Off
+        {
+            return;
+        }
+        let node = || IssueTarget::Node(path.clone());
+        let mut missing: Vec<&str> = Vec::new();
+        if a.left.is_empty() {
+            missing.push("no left operand");
+        }
+        if a.operator.is_empty() {
+            missing.push("no operator");
+        }
+        let both = a.origin.as_ref().is_some_and(|o| {
+            o.value().get("rightOperand").is_some()
+                && o.value().get("rightOperandReference").is_some()
+        });
+        if both {
+            missing.push("both a rightOperand and a rightOperandReference");
+        } else if a.right == RightOperand::Missing {
+            missing.push("no right operand");
+        }
+        if !missing.is_empty() {
+            let msg = format!("this constraint has {}", missing.join(" and "));
+            if let Some(f) = self.emit(RuleId::OdrlConstraintShape, false, node(), msg) {
+                f.node = Some(a.id);
+            }
+        }
+        if let RightOperand::Values(values) = &a.right
+            && values.len() > 1
+        {
+            let op = self.expand(&a.operator);
+            let single = op.strip_prefix(ODRL).is_some_and(|l| {
+                matches!(
+                    l,
+                    "eq" | "neq" | "gt" | "gteq" | "lt" | "lteq" | "isA" | "hasPart" | "isPartOf"
+                )
+            });
+            if single {
+                let msg = format!(
+                    "\"{}\" compares with one value, but this constraint gives {}; use isAnyOf, isAllOf or isNoneOf for several",
+                    a.operator,
+                    values.len()
+                );
+                if let Some(f) = self.emit(RuleId::OdrlSetOperatorCardinality, false, node(), msg) {
+                    f.node = Some(a.id);
+                }
+            }
+        }
+    }
+
+    /// The ODRL class a policy type is: an Offer or an Agreement, also
+    /// through a loaded profile's subclass of one, transitively.
+    fn class_of(&self, kind: &str) -> Class {
+        let offer = format!("{ODRL}Offer");
+        let agreement = format!("{ODRL}Agreement");
+        let mut todo = vec![self.expand(kind)];
+        let mut seen: HashSet<String> = HashSet::new();
+        while let Some(iri) = todo.pop() {
+            if iri == offer {
+                return Class::Offer;
+            }
+            if iri == agreement {
+                return Class::Agreement;
+            }
+            if seen.len() >= 64 || !seen.insert(iri.clone()) {
+                continue;
+            }
+            if let Some((t, _)) = self.w.lookup(&iri) {
+                todo.extend(t.broader.iter().cloned());
+            }
+        }
+        Class::Other
+    }
+
     fn rules(&mut self, owner: &NodePath, list: RuleList, rules: &[RuleNode]) {
         for (i, r) in rules.iter().enumerate() {
             let path = owner.child(Step::Rule(list, i));
@@ -693,6 +927,7 @@ impl<'a> Checker<'a> {
                 self.unchecked(IssueTarget::Node(path), r.id, msg);
                 continue;
             }
+            self.rule_structure(&path, list, r);
             self.entities(&path, &r.assigner, &r.assignee, &r.target);
             self.actions(&path, &r.action);
             self.constraints(&path, Step::Constraint, &r.constraint);
@@ -769,6 +1004,7 @@ impl<'a> Checker<'a> {
     }
 
     fn atomic(&mut self, path: &NodePath, a: &AtomicConstraint) {
+        self.constraint_structure(path, a);
         self.term(path, a.id, Field::LeftOperand, &a.left, Pos::LeftOperand);
         self.term(path, a.id, Field::Operator, &a.operator, Pos::Operator);
         if let RightOperand::Values(values) = &a.right {
