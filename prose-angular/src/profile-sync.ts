@@ -12,12 +12,24 @@ export interface ProfileSummary {
   warnings: string[];
 }
 
-/** Not implemented yet. */
+/**
+ * A tracker of the profile text last handed to the wasm, one per component.
+ * It returns true when `text` must be handed over now: only when it changed,
+ * so a policy change alone does not re-read a large profile, and a profile
+ * that failed is not reported again until it changes. `null`, `undefined`
+ * and blank text all mean no profile, which is what a fresh mount has.
+ */
 export function createProfileTracker(): (text: string | null | undefined) => boolean {
-  return () => false;
+  let applied: string | null = null;
+  return (text) => {
+    const next = text == null || text.trim() === '' ? null : text;
+    if (next === applied) return false;
+    applied = next;
+    return true;
+  };
 }
 
-/** Not implemented yet. */
-export function parseSummary(_json: string): ProfileSummary | null {
-  return null;
+/** The summary `setProfile` returns, or null for `"null"` (no profile). */
+export function parseSummary(json: string): ProfileSummary | null {
+  return JSON.parse(json) as ProfileSummary | null;
 }

@@ -51,7 +51,10 @@ export class PolicyComponent {
 |---|---|---|
 | `json` | input, required | the ODRL policy as JSON-LD text |
 | `articleClass` | input | extra class(es) for the rendered `<article class="ds-prose">` |
+| `profile` | input | the ODRL profile the prose is worded with, as JSON-LD or Turtle text (`null` or blank: none) |
 | `loadFailed` | output | emits the error when the wasm cannot be loaded |
+| `profileLoaded` | output | emits a `ProfileSummary` (`iri`, `title`, `version`, `terms`, `counts`, `warnings`) for each profile loaded |
+| `profileError` | output | emits the error when `profile` is not a readable profile; the previous profile stays |
 | `PROSE_WASM_URL` | injection token | where the browser fetches the wasm from, relative to the page's base href (default `prose_wasm_bg.wasm`) |
 
 Invalid JSON shows an error message in place of the prose; it recovers on the
@@ -59,6 +62,11 @@ next valid input. Style the result through the `prose-*` classes
 (`.ds-prose`, `.prose-policy`, `.prose-rule`, `.prose-permission`,
 `.prose-prohibition`, `.prose-obligation`, `.prose-error`, ...) or the
 `articleClass` input.
+
+With a profile, the sentences use its labels ("may fine-tune" rather than
+"may fine tune") and a glossary of its terms follows each policy. The
+component does no network access: fetch the profile yourself and pass its
+text. It is read again only when the text changes.
 
 If the wasm cannot be loaded (a wrong `PROSE_WASM_URL`, a 404, a network
 failure) the element shows an error (`<p class="prose-error" role="alert">`),
