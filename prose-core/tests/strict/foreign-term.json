@@ -1,0 +1,16 @@
+{
+  "@context": [
+    "http://www.w3.org/ns/odrl.jsonld",
+    { "foo": "https://example.net/foo/" }
+  ],
+  "@type": "Set",
+  "uid": "urn:policy:foreign",
+  "permission": [{
+    "target": "urn:asset:1",
+    "action": "foo:bar",
+    "constraint": [{ "leftOperand": "foo:size", "operator": "foo:near", "rightOperand": 3 }]
+  }, {
+    "target": "urn:asset:1",
+    "action": "distil"
+  }]
+}

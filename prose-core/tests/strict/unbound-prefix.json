@@ -1,0 +1,10 @@
+{
+  "@context": "http://www.w3.org/ns/odrl.jsonld",
+  "@type": "Set",
+  "uid": "urn:policy:unbound-prefix",
+  "profile": "https://example.org/odrl/profile/research",
+  "permission": [{
+    "target": "urn:asset:1",
+    "action": "ex:train"
+  }]
+}

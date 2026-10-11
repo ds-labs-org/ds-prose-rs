@@ -1,0 +1,21 @@
+{
+  "@context": [
+    "http://www.w3.org/ns/odrl.jsonld",
+    { "ex": "https://example.org/odrl/profile/research/",
+      "foo": "https://example.net/foo/" }
+  ],
+  "@type": "Set",
+  "uid": "urn:policy:locked",
+  "profile": "https://example.org/odrl/profile/research",
+  "permission": [{
+    "target": "urn:asset:1",
+    "action": "use",
+    "constraint": [{
+      "and": [{ "leftOperand": "foo:x", "operator": "eq", "rightOperand": 1 }],
+      "or": [{ "leftOperand": "foo:y", "operator": "eq", "rightOperand": 1 }]
+    }, "urn:constraint:shared"]
+  }, "urn:rule:shared", {
+    "target": "urn:asset:1",
+    "action": 42
+  }]
+}

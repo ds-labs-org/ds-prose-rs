@@ -1,0 +1,13 @@
+{
+  "@context": "http://www.w3.org/ns/odrl.jsonld",
+  "@id": "urn:uuid:3dd1add4-4d2d-569e-d634-8394a8836a88",
+  "@type": "Offer",
+  "permission": [{
+    "action": "use",
+    "constraint": [{
+      "leftOperand": "purpose",
+      "operator": "eq",
+      "rightOperand": "research"
+    }]
+  }]
+}

@@ -1,0 +1,35 @@
+{
+  "@context": "http://www.w3.org/ns/odrl.jsonld",
+  "@type": "Offer",
+  "permission": [{
+    "action": "use",
+    "constraint": [{
+      "leftOperand": "count",
+      "rightOperand": 5
+    }, {
+      "leftOperand": "count",
+      "operator": "eq",
+      "rightOperand": [1, 2]
+    }, {
+      "leftOperand": "dateTime",
+      "operator": "lt",
+      "rightOperand": "2027-01-01",
+      "rightOperandReference": "http://example.com/deadline"
+    }]
+  }],
+  "prohibition": [{
+    "target": "urn:asset:1",
+    "action": "index",
+    "remedy": [{
+      "action": "anonymize",
+      "consequence": [{ "action": "inform" }]
+    }]
+  }],
+  "obligation": [{
+    "action": "compensate",
+    "consequence": [{
+      "action": "inform",
+      "consequence": [{ "action": "delete" }]
+    }]
+  }]
+}
