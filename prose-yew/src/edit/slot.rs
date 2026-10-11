@@ -228,13 +228,16 @@ fn profile_suggestion(env: &Env, iri: &str, group: Option<&AttrValue>) -> Sugges
 
 /// A right operand's suggestions: the values the profile suggests for the
 /// left operand with their narrower values nested under them; else every
-/// value the loaded profiles declare, under a heading that says so.
+/// value the loaded profiles declare, under a heading that says so, unless
+/// the left operand expects a literal datatype those IRIs cannot fit.
 fn profile_values(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<AttrValue, usize>) {
+    const ANY_URI: &str = "http://www.w3.org/2001/XMLSchema#anyURI";
     let w = &env.cfg.wording;
     if w.is_empty() {
         return (vec![], HashMap::new());
     }
-    if let Some(t) = left_operand_term(env, slot)
+    let left = left_operand_term(env, slot);
+    if let Some(t) = left
         && !t.hints.value_tree.is_empty()
     {
         let mut depth = HashMap::new();
@@ -251,6 +254,12 @@ fn profile_values(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<AttrValue
             })
             .collect();
         return (list, depth);
+    }
+    if left
+        .and_then(|t| t.hints.datatype.as_deref())
+        .is_some_and(|d| d != ANY_URI)
+    {
+        return (vec![], HashMap::new());
     }
     let group = env.cfg.labels.profile_values.clone();
     let mut seen = HashSet::new();
