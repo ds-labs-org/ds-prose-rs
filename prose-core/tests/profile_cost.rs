@@ -221,3 +221,36 @@ fn default_limits_are_the_documented_ones() {
     assert_eq!(l.max_text_chars, 4_000);
     assert_eq!(l.max_expanded_bytes, 32 * 1024 * 1024);
 }
+
+#[test]
+fn many_empty_contexts_under_a_long_vocab() {
+    // Every node with its own @context, even an empty one, used to copy the
+    // inherited @vocab and @base: 3 MiB times 400 000 here.
+    let vocab = format!("x:{}", "a".repeat(3 * 1024 * 1024));
+    let items = vec![r#"{"@context":{}}"#; 400_000].join(",");
+    let text = format!(
+        r#"{{"@context":{{"@vocab":"{vocab}"}},"@graph":[{{"@id":"https://e/x","@type":"{ODRL}Action"}},{items}]}}"#
+    );
+    let v = quick("vocab per context", move || {
+        ProfileVocab::parse_with(&text, &big()).unwrap()
+    });
+    assert_eq!(v.terms().count(), 1);
+}
+
+#[test]
+fn a_vocab_counts_against_the_expansion_limit() {
+    // An @vocab written as a compact IRI with an unbound prefix is kept as
+    // written; it is read, so it is counted, used or not.
+    let vocab = format!("x:{}", "a".repeat(2 * 1024 * 1024));
+    let text = format!(
+        r#"{{"@context":{{"@vocab":"{vocab}"}},"@id":"https://e/x","@type":"{ODRL}Action"}}"#
+    );
+    let mut l = ProfileLimits::default();
+    l.max_expanded_bytes = 1024 * 1024;
+    assert_eq!(
+        ProfileVocab::parse_with(&text, &l),
+        Err(prose_core::profile::ProfileError::LimitExceeded(
+            "max_expanded_bytes"
+        ))
+    );
+}
