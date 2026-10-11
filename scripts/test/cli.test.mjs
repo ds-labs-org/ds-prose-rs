@@ -17,7 +17,7 @@ const finding = (rule, severity = 'error', message = `${rule} happened`, path = 
 });
 
 /** Runs the CLI against in-memory files; `reports` maps a file's text to its report text. */
-async function cli(argv, { files = {}, reports = {}, stdin = '', engineError, ctorError } = {}) {
+async function cli(argv, { files = {}, reports = {}, stdin = '', engineError, ctorError, validateError } = {}) {
   const out = [];
   const err = [];
   const calls = [];
@@ -35,7 +35,12 @@ async function cli(argv, { files = {}, reports = {}, stdin = '', engineError, ct
         validator(profiles, options) {
           calls.push({ profiles, options });
           if (ctorError) throw new Error(ctorError(profiles));
-          return { validate: (json) => reports[json] ?? report('conforms') };
+          return {
+            validate: (json) => {
+              if (validateError?.(json)) throw new Error(validateError(json));
+              return reports[json] ?? report('conforms');
+            },
+          };
         },
       };
     },
@@ -194,4 +199,27 @@ test('- reads the policy from standard input', async () => {
   const r = await cli(['--strict', '-'], { stdin: 'STDIN', reports });
   assert.equal(r.code, 3);
   assert.match(r.out, /<stdin>: incomplete/);
+});
+
+test('an engine that fails on one policy is exit 2, not a crash, and the rest are still checked', async () => {
+  const r = await cli(['--strict', 'a.json', 'b.json'], {
+    files: { 'a.json': 'A', 'b.json': 'B' },
+    validateError: (json) => (json === 'A' ? 'unreachable executed' : ''),
+    reports: { B: report('violations', [finding('profile.unknown-term')]) },
+  });
+  assert.equal(r.code, 2);
+  assert.match(r.err, /a\.json/);
+  assert.match(r.err, /unreachable executed/);
+  assert.match(r.out, /b\.json: violations/);
+});
+
+test('a report that is not JSON is exit 2 and names the file', async () => {
+  const r = await cli(['--strict', 'a.json'], { files: { 'a.json': 'A' }, reports: { A: 'not json' } });
+  assert.equal(r.code, 2);
+  assert.match(r.err, /a\.json/);
+});
+
+test('--rule with an id that is an Object.prototype key is passed on, not dropped', async () => {
+  const r = await cli(['--strict', '--rule', '__proto__=off', 'a.json'], { files: { 'a.json': 'A' } });
+  assert.deepEqual(Object.keys(r.calls[0].options.rules), ['__proto__']);
 });
