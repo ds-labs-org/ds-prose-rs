@@ -1336,3 +1336,40 @@ async fn profile_values_leave_out_deprecated_and_list_each_once() {
     let labels: Vec<String> = shown_options(&c).into_iter().map(|(l, _)| l).collect();
     assert_eq!(labels, ["Gold"]);
 }
+
+fn set_iris(log: &Log) -> Vec<(String, String)> {
+    log.borrow()
+        .iter()
+        .filter_map(|e| match e {
+            EditEvent::SetIri { slot, value, .. } => Some((slot.to_string(), value.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+#[wasm_bindgen_test]
+async fn a_value_picked_into_a_text_slot_is_written_as_an_iri() {
+    // The slot holds a plain string: picking a profile value must turn it
+    // into an IRI reference, not the string "ex:academic".
+    let json = r#"{"@context": {"ex": "https://example.org/odrl/profile/research/"},
+        "@type": "Set", "uid": "urn:p",
+        "permission": [{"action": "use", "target": "urn:a",
+          "constraint": [{"leftOperand": "ex:researchPurpose", "operator": "eq",
+                          "rightOperand": "tbd"}]}]}"#;
+    let (c, log, _h) = mount_worded(json, Some(research_wording())).await;
+    let path = "policy[0].permission[0].constraint[0]#rightOperand[0]";
+    type_into(&slot(&c, path), "");
+    settle().await;
+    mousedown(&q(&c, "[role=option]"));
+    settle().await;
+    assert_eq!(set_texts(&log), vec![]);
+    assert_eq!(
+        set_iris(&log),
+        vec![(path.to_string(), "ex:academic".to_string())]
+    );
+    // The slot now shows the value's label.
+    assert_eq!(
+        slot(&c, path).get_attribute("title").as_deref(),
+        Some("academic research")
+    );
+}

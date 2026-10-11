@@ -902,3 +902,69 @@ fn string_value_naming_a_profile_value_stays_as_written() {
     assert_eq!(slot_at(&with, slot), slot_at(&without, slot));
     assert_ne!(slot_at(&with, slot).2, "clinical research");
 }
+
+fn set_iri(doc: &mut EditDoc, slot: &str, value: &str) -> Result<(), EditError> {
+    let slot: SlotPath = slot.parse().unwrap();
+    let expect = doc.node(&slot.node).map(|n| n.id()).unwrap_or_default();
+    doc.apply(
+        &EditEvent::SetIri {
+            slot,
+            expect,
+            value: value.to_string(),
+        },
+        &EditRules::default(),
+    )
+}
+
+#[test]
+fn a_value_picked_into_a_text_or_new_slot_is_written_as_an_iri() {
+    let text = r#"{"@context": {"ex": "https://example.org/odrl/profile/research/"},
+        "@type": "Set", "uid": "urn:p",
+        "permission": [{"action": "use", "target": "urn:a",
+          "constraint": [{"leftOperand": "ex:researchPurpose", "operator": "eq",
+                          "rightOperand": "tbd"}]}]}"#;
+    let slot = "policy[0].permission[0].constraint[0]#rightOperand[0]";
+    // A slot that held a plain string.
+    let mut doc = read_model(text).unwrap();
+    set_iri(&mut doc, slot, "ex:academic").unwrap();
+    assert_eq!(
+        write_jsonld(&doc)["permission"][0]["constraint"][0]["rightOperand"],
+        json!({"@id": "ex:academic"})
+    );
+    // A typed literal is replaced too: the pick is an IRI, not a value.
+    let mut doc = research_doc();
+    set_iri(
+        &mut doc,
+        "policy[0].permission[0].action[0].refinement[0]#rightOperand[0]",
+        "ex:academic",
+    )
+    .unwrap();
+    assert_eq!(
+        write_jsonld(&doc)["permission"][0]["action"]["refinement"][0]["rightOperand"],
+        json!({"@id": "ex:academic"})
+    );
+    // A value just added with +.
+    let mut doc = read_model(&text.replace(r#""tbd""#, "[]")).unwrap();
+    let list = lp("policy[0].permission[0].constraint[0]@rightOperand");
+    let ev = add_ev(&doc, list, 0, NewItem::Default);
+    doc.apply(&ev, &EditRules::default()).unwrap();
+    set_iri(&mut doc, slot, "ex:academic").unwrap();
+    assert_eq!(
+        write_jsonld(&doc)["permission"][0]["constraint"][0]["rightOperand"],
+        json!({"@id": "ex:academic"})
+    );
+    // Only a right operand value takes an IRI this way.
+    let mut doc = read_model(text).unwrap();
+    assert!(matches!(
+        set_iri(
+            &mut doc,
+            "policy[0].permission[0].constraint[0]#leftOperand",
+            "ex:x"
+        ),
+        Err(EditError::NoSuchPath(_))
+    ));
+    assert!(matches!(
+        set_iri(&mut doc, slot, ""),
+        Err(EditError::Invalid(_))
+    ));
+}
