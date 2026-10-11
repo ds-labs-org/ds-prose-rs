@@ -10,6 +10,10 @@ pub mod strict;
 use edit::EditDemo;
 use profile_field::{MAX_BYTES, PRESETS, ProfileMsg, ProfileState, declared_profile};
 use prose_yew::OdrlProse;
+use prose_yew::prose_core::validate::Validator;
+use std::rc::Rc;
+use std::sync::Arc;
+use strict::StrictBar;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::{HtmlInputElement, HtmlTextAreaElement};
 use yew::prelude::*;
@@ -25,6 +29,21 @@ pub fn demo_app() -> Html {
     let json = use_state(|| AttrValue::from(fixtures::ALL[0].json));
     let tab = use_state(|| Tab::Read);
     let profile = use_reducer(ProfileState::default);
+    // The validator strict mode asks, made again only when the profile or
+    // the switches change.
+    let validator = use_memo(
+        (profile.wording.clone(), profile.options()),
+        |(w, options)| {
+            options.as_ref().map(|o| {
+                let wording = w.as_ref().map(|w| (*w.0).clone()).unwrap_or_default();
+                Validator::new(Arc::new(wording), o.clone())
+            })
+        },
+    );
+    let report = use_memo(((*json).clone(), (*validator).clone()), |(json, v)| {
+        v.as_ref().map(|v| Rc::new(v.validate_json(json)))
+    });
+    let profile_name = profile.name.clone().map(AttrValue::from);
     // Bumped on every preset, so the Edit tab loads it.
     let load = use_state(|| 0u32);
     let oninput = {
@@ -77,7 +96,15 @@ pub fn demo_app() -> Html {
                     </section>
                     <section>
                         <h2>{ "Prose" }</h2>
-                        <OdrlProse json={(*json).clone()} wording={profile.wording.clone()} />
+                        if let Some(r) = &*report {
+                            <StrictBar report={r.clone()} profile={profile_name.clone()} json={(*json).clone()} />
+                        }
+                        <OdrlProse
+                            json={(*json).clone()}
+                            wording={profile.wording.clone()}
+                            validator={(*validator).clone()}
+                            violations={true}
+                        />
                     </section>
                 </div>
             } else {
@@ -86,6 +113,9 @@ pub fn demo_app() -> Html {
                     load={*load}
                     onchange={onchange}
                     wording={profile.wording.clone()}
+                    options={profile.options()}
+                    strict_edit={profile.strict_edit()}
+                    profile_name={profile_name.clone()}
                 />
             }
         </main>
@@ -190,6 +220,14 @@ fn profile_section(state: &UseReducerHandle<ProfileState>, policy: &str) -> Html
             }
         })
     };
+    let switch = |m: fn(bool) -> ProfileMsg| {
+        let d = state.dispatcher();
+        Callback::from(move |e: Event| {
+            if let Some(el) = e.target_dyn_into::<HtmlInputElement>() {
+                d.dispatch(m(el.checked()));
+            }
+        })
+    };
     let presets = PRESETS.iter().map(|p| {
         html! {
             <button type="button" id={p.id} onclick={send(ProfileMsg::Use(p.text.to_string()))}>
@@ -253,6 +291,25 @@ fn profile_section(state: &UseReducerHandle<ProfileState>, policy: &str) -> Html
                 { "The URL is fetched without cookies, and only when you ask. The server must allow cross-origin requests (CORS)." }
             </p>
             <p id="profile-status" role="status" aria-live="polite">{ status }</p>
+            <div class="profile-strict">
+                <label>
+                    <input type="checkbox" id="profile-strict" checked={state.strict} onchange={switch(ProfileMsg::Strict)} />
+                    { " Strict validation" }
+                </label>
+                <p class="hint">
+                    { "Reads ODRL and the loaded profile as every term there is: a term that resolves nowhere is an error, and a profile the policy declares but you have not loaded stops the verdict short. The two Strict presets are written to the Research (closed) profile." }
+                </p>
+                if state.strict {
+                    <label>
+                        <input type="checkbox" id="profile-structural" checked={state.structural} onchange={switch(ProfileMsg::Structural)} />
+                        { " Also check the ODRL Information Model's own structure" }
+                    </label>
+                    <label>
+                        <input type="checkbox" id="profile-refuse" checked={state.refuse} onchange={switch(ProfileMsg::Refuse)} />
+                        { " Refuse a term the profile does not allow, instead of marking it" }
+                    </label>
+                }
+            </div>
             if notes > 0 {
                 <details class="profile-warnings">
                     <summary>

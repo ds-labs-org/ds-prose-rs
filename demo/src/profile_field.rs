@@ -37,6 +37,11 @@ pub const PRESETS: &[Preset] = &[
         label: "W3C ODRL 2.2 vocabulary",
         text: include_str!("../profiles/odrl22-trimmed.json"),
     },
+    Preset {
+        id: "profile-sample-closed",
+        label: "Research (closed)",
+        text: include_str!("../../prose-core/tests/profiles/research-closed.jsonld"),
+    },
 ];
 
 #[derive(Clone, Debug, PartialEq)]
@@ -115,12 +120,17 @@ impl ProfileState {
     /// The validation options these switches mean; `None` while strict is
     /// off, which is the advisory behaviour of before.
     pub fn options(&self) -> Option<Options> {
-        todo!("options")
+        self.strict
+            .then(|| Options::strict().structural(self.structural))
     }
 
     /// What the editor does with a term outside the profile.
     pub fn strict_edit(&self) -> StrictEdit {
-        todo!("strict_edit")
+        if self.strict && self.refuse {
+            StrictEdit::RefuseTerms
+        } else {
+            StrictEdit::Flag
+        }
     }
 }
 
@@ -171,11 +181,16 @@ pub fn reduce(s: &ProfileState, m: ProfileMsg) -> ProfileState {
         } if generation == s.generation => fetched(&mut n, Some(url), text, content_type),
         ProfileMsg::Fetched { .. } | ProfileMsg::FetchedFrom { .. } => {}
         ProfileMsg::Url(url) => n.url = url,
-        ProfileMsg::Strict(_) | ProfileMsg::Structural(_) | ProfileMsg::Refuse(_) => {}
+        ProfileMsg::Strict(on) => n.strict = on,
+        ProfileMsg::Structural(on) => n.structural = on,
+        ProfileMsg::Refuse(on) => n.refuse = on,
         ProfileMsg::Clear => {
             n = ProfileState {
                 generation: s.generation.wrapping_add(1),
                 url: s.url.clone(),
+                strict: s.strict,
+                structural: s.structural,
+                refuse: s.refuse,
                 ..ProfileState::default()
             }
         }
@@ -278,6 +293,7 @@ fn first_iri(v: &Value) -> Option<String> {
 /// unreadable one is an error and no profile, never the last good one.
 fn apply(n: &mut ProfileState) {
     n.wording = None;
+    n.name = None;
     n.error = None;
     n.status = None;
     n.warnings.clear();
@@ -291,6 +307,7 @@ fn apply(n: &mut ProfileState) {
     match read {
         Ok(p) => {
             n.status = Some(status_line(&p));
+            n.name = Some(profile_name(&p));
             n.warnings = p.warnings().to_vec();
             n.wording = Some(SharedWording::from(Wording::new().with_profile(p)));
         }
@@ -298,10 +315,9 @@ fn apply(n: &mut ProfileState) {
     }
 }
 
-/// What is loaded, for the status line: "Using {title} {version}: 3
-/// actions, 1 operator." Only the kinds the edit suggestions use are
-/// counted; a profile with none of them gives its number of terms.
-pub fn status_line(p: &ProfileVocab) -> String {
+/// The profile's title and version, else its IRI: "Research Data Profile
+/// 0.1.0".
+pub fn profile_name(p: &ProfileVocab) -> String {
     let mut name = match (p.title().pick(&[]), p.iri()) {
         (Some(t), _) => t.to_string(),
         (None, Some(iri)) => iri.to_string(),
@@ -312,6 +328,14 @@ pub fn status_line(p: &ProfileVocab) -> String {
     {
         name = format!("{name} {v}");
     }
+    name
+}
+
+/// What is loaded, for the status line: "Using {title} {version}: 3
+/// actions, 1 operator." Only the kinds the edit suggestions use are
+/// counted; a profile with none of them gives its number of terms.
+pub fn status_line(p: &ProfileVocab) -> String {
+    let name = profile_name(p);
     let s = p.summary();
     let kinds = [
         (TermKind::Action, "action", "actions"),

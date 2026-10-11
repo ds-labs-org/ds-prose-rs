@@ -1,12 +1,37 @@
 //! What the demo's strict mode shows, as pure functions the browser tests
 //! and the host tests both reach: where "Go to" lands, whether the export
 //! is open, and what the status badge says.
-use prose_yew::prose_core::validate::{Finding, Report};
+use std::rc::Rc;
+
+use prose_yew::prose_core::edit::IssueTarget;
+use prose_yew::prose_core::validate::{Finding, Mode, Report, Verdict};
+use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::{JsFuture, spawn_local};
+use yew::prelude::*;
+
+fn escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
 
 /// The selectors "Go to" tries for a finding, best first: the first one that
-/// matches an element of the Edit view gets the focus.
-pub fn jump_selectors(_f: &Finding) -> Vec<String> {
-    todo!("jump_selectors")
+/// matches an element of the Edit view gets the focus. A finding about the
+/// document as a whole goes to the first node there is.
+pub fn jump_selectors(f: &Finding) -> Vec<String> {
+    target_selectors(&f.target)
+}
+
+/// As [`jump_selectors`], for the target alone (what the problems panel
+/// reports when "Go to" is pressed).
+pub fn target_selectors(target: &IssueTarget) -> Vec<String> {
+    match target {
+        IssueTarget::Slot(s) => vec![
+            format!("[data-slot=\"{}\"]", escape(&s.to_string())),
+            format!("[data-node=\"{}\"]", escape(&s.node.to_string())),
+        ],
+        IssueTarget::Node(n) => vec![format!("[data-node=\"{}\"]", escape(&n.to_string()))],
+        IssueTarget::List(l) => vec![format!("[data-add=\"{}\"]", escape(&l.to_string()))],
+        _ => vec!["[data-node]".to_string()],
+    }
 }
 
 /// The first of [`jump_selectors`].
@@ -16,24 +41,185 @@ pub fn jump_selector(f: &Finding) -> String {
 
 /// Whether "Copy conformant JSON" is open: only a strict report that
 /// conforms certifies anything.
-pub fn export_enabled(_r: &Report) -> bool {
-    todo!("export_enabled")
+pub fn export_enabled(r: &Report) -> bool {
+    r.mode == Mode::Strict && r.verdict == Verdict::Conforms
+}
+
+/// What a gap says, as the end of "Cannot certify: ...": the profile that
+/// is not loaded, else the finding's own words.
+fn gap_reason(r: &Report) -> Option<String> {
+    let gap = r.gaps.first()?;
+    Some(match &gap.profile {
+        Some(iri) => format!("profile {iri} is not loaded"),
+        None => gap.message.clone(),
+    })
+}
+
+fn plural(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
+/// "2 errors, 1 warning": the severities that have a finding.
+fn tally(r: &Report) -> String {
+    let c = r.counts();
+    let parts: Vec<String> = [
+        (c.error, "error", "errors"),
+        (c.warning, "warning", "warnings"),
+        (c.info, "note", "notes"),
+    ]
+    .into_iter()
+    .filter(|(n, ..)| *n > 0)
+    .map(|(n, one, many)| plural(n, one, many))
+    .collect();
+    parts.join(", ")
 }
 
 /// Why the export is shut, when it is.
-pub fn export_note(_r: &Report) -> Option<String> {
-    todo!("export_note")
+pub fn export_note(r: &Report) -> Option<String> {
+    if export_enabled(r) {
+        return None;
+    }
+    if r.mode != Mode::Strict {
+        return Some("Switch strict validation on to certify a policy.".to_string());
+    }
+    Some(match r.verdict {
+        Verdict::Incomplete => match r.gaps.first().and_then(|g| g.profile.as_ref()) {
+            Some(iri) => format!("Load profile {iri} to certify."),
+            None => format!("Cannot certify: {}.", gap_reason(r).unwrap_or_default()),
+        },
+        // A verdict this version does not know is not a pass.
+        _ => format!("The policy does not conform: {}.", tally(r)),
+    })
 }
 
 /// The status badge: a class and the sentence. `profile` is the name of the
 /// loaded profile, when there is one.
-pub fn badge(_r: &Report, _profile: Option<&str>) -> (&'static str, String) {
-    todo!("badge")
+pub fn badge(r: &Report, profile: Option<&str>) -> (&'static str, String) {
+    if r.mode != Mode::Strict {
+        return ("prose-advisory", tally(r));
+    }
+    match r.verdict {
+        Verdict::Conforms => (
+            "prose-conforms",
+            match profile {
+                Some(p) => format!("Conforms to {p} (strict)"),
+                None => "Conforms (strict)".to_string(),
+            },
+        ),
+        Verdict::Incomplete => (
+            "prose-incomplete",
+            format!("Cannot certify: {}", gap_reason(r).unwrap_or_default()),
+        ),
+        _ => ("prose-violations-found", tally(r)),
+    }
 }
 
 /// The report as the `ds-prose/validation-report@1` JSON the download holds.
-pub fn report_text(_r: &Report) -> String {
-    todo!("report_text")
+pub fn report_text(r: &Report) -> String {
+    serde_json::to_string_pretty(&r.to_json()).unwrap_or_default()
+}
+
+/// Moves the keyboard focus to the first element of `root` that one of the
+/// target's selectors finds, and scrolls it into view. A node is not
+/// focusable by itself, so it is made so first. `false` when nothing matched.
+pub fn go_to(root: &NodeRef, target: &IssueTarget) -> bool {
+    let Some(root) = root.cast::<web_sys::Element>() else {
+        return false;
+    };
+    for sel in target_selectors(target) {
+        let Ok(Some(el)) = root.query_selector(&sel) else {
+            continue;
+        };
+        let Ok(el) = el.dyn_into::<web_sys::HtmlElement>() else {
+            continue;
+        };
+        if el.tab_index() < 0 && el.get_attribute("tabindex").is_none() {
+            let _ = el.set_attribute("tabindex", "-1");
+        }
+        let _ = el.focus();
+        el.scroll_into_view();
+        return true;
+    }
+    false
+}
+
+/// Downloads `text` as `name`, through a Blob URL that lives for the click.
+fn download(name: &str, text: &str) {
+    let parts = js_sys::Array::of1(&wasm_bindgen::JsValue::from_str(text));
+    let opts = web_sys::BlobPropertyBag::new();
+    opts.set_type("application/json");
+    let Ok(blob) = web_sys::Blob::new_with_str_sequence_and_options(&parts, &opts) else {
+        return;
+    };
+    let Ok(url) = web_sys::Url::create_object_url_with_blob(&blob) else {
+        return;
+    };
+    if let Some(a) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.create_element("a").ok())
+        .and_then(|a| a.dyn_into::<web_sys::HtmlElement>().ok())
+    {
+        let _ = a.set_attribute("href", &url);
+        let _ = a.set_attribute("download", name);
+        a.click();
+    }
+    let _ = web_sys::Url::revoke_object_url(&url);
+}
+
+#[derive(Properties, PartialEq, Clone)]
+pub struct StrictBarProps {
+    pub report: Rc<Report>,
+    /// The loaded profile's name, for the badge.
+    #[prop_or_default]
+    pub profile: Option<AttrValue>,
+    /// The policy as JSON-LD, which "Copy conformant JSON" copies.
+    pub json: AttrValue,
+}
+
+/// The verdict as a status line, the export button it gates and the
+/// report download. Shown while strict is on, in both tabs.
+#[function_component(StrictBar)]
+pub fn strict_bar(props: &StrictBarProps) -> Html {
+    let r = &props.report;
+    let (class, text) = badge(r, props.profile.as_deref());
+    let open = export_enabled(r);
+    let note = export_note(r);
+    let copied = use_state(|| None::<AttrValue>);
+    let copy = {
+        let json = props.json.clone();
+        let copied = copied.clone();
+        Callback::from(move |_: MouseEvent| {
+            let Some(w) = web_sys::window() else { return };
+            let promise = w.navigator().clipboard().write_text(&json);
+            let copied = copied.clone();
+            spawn_local(async move {
+                copied.set(Some(match JsFuture::from(promise).await {
+                    Ok(_) => "Copied.".into(),
+                    Err(_) => {
+                        "The browser would not copy; select the text in the JSON box instead."
+                            .into()
+                    }
+                }));
+            });
+        })
+    };
+    let report = r.clone();
+    let save = Callback::from(move |_: MouseEvent| {
+        download("validation-report.json", &report_text(&report))
+    });
+    html! {
+        <div class="strict-bar">
+            <p id="conformance" class={classes!("conformance", class)} role="status">{ text }</p>
+            <div class="strict-actions">
+                <button type="button" id="copy-conformant" disabled={!open} onclick={copy}>
+                    { "Copy conformant JSON" }
+                </button>
+                <button type="button" id="report-json" onclick={save}>{ "Download the report" }</button>
+            </div>
+            if let Some(n) = note { <p id="export-note" class="hint">{ n }</p> }
+            if open { if let Some(c) = &*copied { <p id="copy-status" class="hint" role="status">{ c.clone() }</p> } }
+        </div>
+    }
 }
 
 #[cfg(test)]
@@ -81,6 +267,11 @@ mod tests {
             preset("Strict clean"),
             include_str!("../../prose-core/tests/strict/clean.json")
         );
+        // The one that has a fix to offer.
+        assert_eq!(
+            preset("Profile not declared (has a fix)"),
+            include_str!("../../prose-core/tests/strict/not-declared.json")
+        );
         // The first four are as they were.
         assert_eq!(fixtures::ALL[3].label, "Research agreement");
     }
@@ -116,7 +307,9 @@ mod tests {
 
     #[test]
     fn a_doc_finding_jumps_to_the_first_node() {
-        let r = report(preset("Research agreement"), Options::strict(), false);
+        // What no node holds: the text that is not a policy.
+        let v = Validator::new(Arc::new(Default::default()), Options::strict());
+        let r = v.validate_json("{");
         let f = r
             .findings
             .iter()

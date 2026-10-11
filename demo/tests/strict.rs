@@ -18,6 +18,7 @@ const POLICY: &str = include_str!("../../prose-core/tests/profiles/research-poli
 const STRUCTURAL_BAD: &str = include_str!("../../prose-core/tests/strict/structural-bad.json");
 const VIOLATES: &str = "Research agreement (violates the profile)";
 const CLEAN: &str = "Strict clean";
+const FIXABLE: &str = "Profile not declared (has a fix)";
 const FOREIGN_ACTION: &str = "policy[0].permission[2].action[0]#name";
 const VALUE: &str = "policy[0].permission[0].constraint[0]#rightOperand[0]";
 
@@ -220,27 +221,30 @@ async fn go_to_focuses_slot() {
 
 #[wasm_bindgen_test]
 async fn fix_clears_finding() {
-    let c = strict(VIOLATES).await;
+    let c = strict(FIXABLE).await;
     click_tab(&c, "Edit").await;
-    let before = count(&c, "#problems .prose-problem-error");
-    assert!(textarea_value(&c, "textarea#written").contains("ex:distil\""));
-    let p = problem_with(&c, "ex:distil");
+    assert_eq!(count(&c, "#problems .prose-problem-error"), 1);
+    assert!(!textarea_value(&c, "textarea#written").contains("\"profile\""));
+    let p = problem_with(&c, "ex:train");
     p.query_selector(".prose-problem-fix")
         .unwrap()
-        .expect("a fix for the misspelt term")
+        .expect("a fix for the undeclared profile")
         .dyn_into::<HtmlElement>()
         .unwrap()
         .click();
     settle().await;
-    assert!(
-        count(&c, "#problems .prose-problem-error") < before,
+    assert_eq!(
+        count(&c, "#problems .prose-problem-error"),
+        0,
         "{}",
         text(&c, "#problems")
     );
-    assert!(!textarea_value(&c, "textarea#written").contains("ex:distil\""));
+    assert!(textarea_value(&c, "textarea#written").contains("\"profile\""));
+    assert!(text(&c, "#conformance").starts_with("Conforms to"));
     // One undo step puts it back.
     click(&c, "button#undo").await;
-    assert!(textarea_value(&c, "textarea#written").contains("ex:distil\""));
+    assert_eq!(count(&c, "#problems .prose-problem-error"), 1);
+    assert!(!textarea_value(&c, "textarea#written").contains("\"profile\""));
 }
 
 #[wasm_bindgen_test]

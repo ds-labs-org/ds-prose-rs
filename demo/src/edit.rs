@@ -2,10 +2,18 @@
 //! JSON-LD it writes, kept in step both ways.
 use std::rc::Rc;
 
-use prose_yew::prose_core::edit::{EditDoc, EditRules, check_profile, read_model, write_jsonld};
-use prose_yew::{EditConfig, EditMode, OdrlProseView, SharedWording, use_prose_editor};
+use prose_yew::prose_core::edit::{
+    EditDoc, IssueTarget, StrictEdit, check_profile, read_model, write_jsonld,
+};
+use prose_yew::prose_core::validate::Options;
+use prose_yew::{
+    EditConfig, EditMode, OdrlProseView, ProseProblems, SharedWording, use_prose_editor_with,
+    use_validation,
+};
 use web_sys::HtmlTextAreaElement;
 use yew::prelude::*;
+
+use crate::strict::{StrictBar, go_to};
 
 #[derive(Properties, PartialEq, Clone)]
 pub struct EditDemoProps {
@@ -19,6 +27,15 @@ pub struct EditDemoProps {
     /// and its undo history.
     #[prop_or_default]
     pub wording: Option<SharedWording>,
+    /// Strict validation, when it is on.
+    #[prop_or_default]
+    pub options: Option<Options>,
+    /// Whether the editor refuses a term outside the profile or flags it.
+    #[prop_or_default]
+    pub strict_edit: StrictEdit,
+    /// The loaded profile's name, for the badge.
+    #[prop_or_default]
+    pub profile_name: Option<AttrValue>,
 }
 
 /// A document compared by identity, as a memo key.
@@ -36,18 +53,37 @@ fn pretty(doc: &EditDoc) -> String {
 
 #[function_component(EditDemo)]
 pub fn edit_demo(props: &EditDemoProps) -> Html {
-    let rules = use_memo((), |_| EditRules::default());
-    let config = use_memo(props.wording.clone(), |w| match w {
-        Some(w) => EditConfig::default().with_wording(w.0.clone()),
-        None => EditConfig::default(),
+    // The config carries the validator, and with it the defaults an add
+    // button creates, so the reducer is handed the config's rules.
+    let config = use_memo((props.wording.clone(), props.options.clone()), |(w, o)| {
+        let c = match w {
+            Some(w) => EditConfig::default().with_wording(w.0.clone()),
+            None => EditConfig::default(),
+        };
+        match o {
+            Some(o) => c.with_strict(o.clone()),
+            None => c,
+        }
     });
+    let rules = {
+        let config = config.clone();
+        use_memo((props.wording.clone(), props.options.clone()), move |_| {
+            config.rules.clone()
+        })
+    };
     let source = props.source.clone();
     // An unreadable source is reported, not swallowed: the editor starts empty,
     // the user's text stays in the JSON panel, and nothing is reported upward
     // until the document is really changed.
     let initial_error = use_state(|| read_model(&source).err().map(|e| e.to_string()));
     let initial_text = props.source.to_string();
-    let editor = use_prose_editor(move || read_model(&source).unwrap_or_default(), rules);
+    let with = use_prose_editor_with(
+        move || read_model(&source).unwrap_or_default(),
+        rules,
+        config.validator.clone(),
+        props.strict_edit,
+    );
+    let editor = with.editor.clone();
     let text = use_state({
         let unreadable = initial_error.is_some();
         let doc = editor.doc.clone();
@@ -118,13 +154,32 @@ pub fn edit_demo(props: &EditDemoProps) -> Html {
             Err(e) => error.set(Some(e.to_string())),
         })
     };
-    let issues = use_memo(
-        (DocKey(editor.doc.clone()), props.wording.clone()),
-        |(doc, w)| match w {
-            Some(w) => check_profile(&doc.0, &w.0),
-            None => Vec::new(),
-        },
-    );
+    let report = use_validation(&editor.doc, config.validator.as_ref());
+    let strict = config.validator.is_some();
+    let issues = {
+        let report = report.clone();
+        use_memo(
+            (
+                DocKey(editor.doc.clone()),
+                props.wording.clone(),
+                props.options.clone(),
+            ),
+            move |(doc, w, _)| match (strict, w) {
+                // The report's findings are the issues, with their rules.
+                (true, _) => report.issues(),
+                (false, Some(w)) => check_profile(&doc.0, &w.0),
+                (false, None) => Vec::new(),
+            },
+        )
+    };
+    let refusal = with.refused.as_ref().and_then(|(ev, e)| e.issue(ev));
+    let view = use_node_ref();
+    let onjump = {
+        let view = view.clone();
+        Callback::from(move |t: IssueTarget| {
+            go_to(&view, &t);
+        })
+    };
     let undo = {
         let undo = editor.undo.clone();
         Callback::from(move |_| undo.emit(()))
@@ -137,17 +192,36 @@ pub fn edit_demo(props: &EditDemoProps) -> Html {
                 <p class="hint">
                     { "Click a highlighted word to type; pick an option with the arrow keys and Enter. + adds, \u{2212} removes. Esc undoes the word you are typing." }
                 </p>
-                <button type="button" onclick={undo} disabled={!editor.can_undo}>{ "Undo" }</button>
+                <button type="button" id="undo" onclick={undo} disabled={!editor.can_undo}>{ "Undo" }</button>
+                if strict {
+                    <StrictBar
+                        report={report.clone()}
+                        profile={props.profile_name.clone()}
+                        json={AttrValue::from(pretty(&editor.doc))}
+                    />
+                }
                 if let Some(e) = &editor.last_error {
                     <p class="prose-error" role="alert">{ e.to_string() }</p>
                 }
-                <OdrlProseView
-                    doc={editor.doc.clone()}
-                    mode={EditMode::Edit}
-                    config={config.clone()}
-                    issues={issues.clone()}
-                    onedit={editor.onedit.clone()}
-                />
+                <div id="edit-view" ref={view}>
+                    <OdrlProseView
+                        doc={editor.doc.clone()}
+                        mode={EditMode::Edit}
+                        config={config.clone()}
+                        issues={issues.clone()}
+                        refusal={refusal}
+                        onedit={editor.onedit.clone()}
+                    />
+                </div>
+                if strict {
+                    <section id="problems">
+                        <ProseProblems
+                            report={report.clone()}
+                            onjump={onjump}
+                            onfix={with.apply_all.clone()}
+                        />
+                    </section>
+                }
             </section>
             <section>
                 <label for="written">{ "JSON-LD it writes" }</label>

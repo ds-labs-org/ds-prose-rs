@@ -9,14 +9,14 @@
 #   SMOKE_TITLE overrides the text the page must show (default: the Trunk
 #   demo's heading); the Angular demo sets it to its own.
 #   SMOKE_EXTRA is a space-separated list of further text the page must hold
-#   (default: the Trunk demo's Profile field); set it empty to check none.
+#   (default: the Trunk demo's Profile field and its strict switch); set it empty to check none.
 set -euo pipefail
 
 dist="${1:-demo/dist}"
 base="${2:-/ds-prose-rs/}"
 port="${SMOKE_PORT:-8741}"
 title="${SMOKE_TITLE:-ds-prose-rs demo}"
-extra="${SMOKE_EXTRA-id=\"profile-json\"}"
+extra="${SMOKE_EXTRA-id=\"profile-json\" id=\"profile-strict\"}"
 
 chrome="${CHROME:-}"
 if [ -z "$chrome" ]; then

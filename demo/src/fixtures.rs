@@ -20,4 +20,16 @@ pub const ALL: &[Preset] = &[
         label: "Research agreement",
         json: include_str!("../../prose-core/tests/profiles/research-policy.json"),
     },
+    Preset {
+        label: "Research agreement (violates the profile)",
+        json: include_str!("../../prose-core/tests/strict/violating.json"),
+    },
+    Preset {
+        label: "Strict clean",
+        json: include_str!("../../prose-core/tests/strict/clean.json"),
+    },
+    Preset {
+        label: "Profile not declared (has a fix)",
+        json: include_str!("../../prose-core/tests/strict/not-declared.json"),
+    },
 ];
