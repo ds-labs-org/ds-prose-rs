@@ -332,6 +332,7 @@ pub fn odrl_prose_view(props: &OdrlProseViewProps) -> Html {
         prefixes: prefixes.clone(),
         doc: props.doc.clone(),
         closed_cache: Default::default(),
+        checks: std::cell::Cell::new(super::MAX_CHECKS),
     });
     let mut index: HashMap<String, Vec<&Issue>> = HashMap::new();
     for i in props.issues.iter().chain(props.refusal.iter()) {

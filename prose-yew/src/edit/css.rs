@@ -78,6 +78,20 @@ pub const BASE_CSS: &str = r#"
 .ds-prose.prose-edit .prose-issue-warning { color: var(--prose-warning, #b45309); }
 .ds-prose.prose-edit .prose-issue-info { opacity: .8; }
 .ds-prose.prose-edit .prose-slot-wrap { position: relative; display: inline-block; }
+.ds-prose.prose-edit .prose-slot-note { margin-inline-start: .3em; font-size: .8em; opacity: .8; }
+/* Why a closed slot did not take its text: above the slot, out of the flow of
+   the sentence, so the list below it stays reachable. */
+.ds-prose.prose-edit .prose-slot-message {
+  position: absolute;
+  z-index: 11;
+  left: 0;
+  bottom: 100%;
+  width: max-content;
+  max-width: min(24em, 90vw);
+  padding: .1em .4em;
+  background: Canvas;
+  border: 1px solid currentColor;
+}
 .ds-prose.prose-edit .prose-suggestions {
   position: absolute;
   z-index: 10;

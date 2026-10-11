@@ -20,6 +20,7 @@ use prose_core::profile::{Term, TermKind};
 use prose_core::validate::{Mode, Validator};
 use prose_core::wording;
 
+use super::closed;
 use super::config::{Suggestion, cls, merge_styles, written_form};
 use super::suggest::filter_suggestions;
 use super::{Env, EnvRef, FocusKind, SlotFocus};
@@ -185,6 +186,7 @@ fn closure(env: &Env, slot: &Slot) -> Option<Closure> {
     if !env.cfg.suggestions {
         return None;
     }
+    let cached = |key: &str| env.closed_cache.borrow().get(key).copied();
     match slot.kind {
         SlotKind::Action | SlotKind::LeftOperand | SlotKind::PolicyKind | SlotKind::Unit => {
             // What a policy's terms are read against is the policy's; a
@@ -193,12 +195,16 @@ fn closure(env: &Env, slot: &Slot) -> Option<Closure> {
                 SlotKind::Unit => slot.path.to_string(),
                 kind => format!("{}:{:?}", slot.path.node.policy, kind),
             };
-            let cached = env.closed_cache.borrow().get(&key).copied();
-            let closed = cached.unwrap_or_else(|| {
-                let closed = v.admissible(&env.doc, &set_text(slot, PROBE)).is_err();
-                env.closed_cache.borrow_mut().insert(key, closed);
-                closed
-            });
+            let closed = match cached(&key) {
+                Some(c) => c,
+                // Past the render's checks the slot is left open.
+                None if !env.spend() => false,
+                None => {
+                    let closed = v.admissible(&env.doc, &set_text(slot, PROBE)).is_err();
+                    env.closed_cache.borrow_mut().insert(key, closed);
+                    closed
+                }
+            };
             closed.then_some(Closure::Terms)
         }
         SlotKind::Literal if matches!(slot.path.field, Field::RightOperand(_)) => {
@@ -208,6 +214,64 @@ fn closure(env: &Env, slot: &Slot) -> Option<Closure> {
         }
         _ => None,
     }
+}
+
+/// What a closed slot offers: the entries the validator would take. Asks
+/// it once per entry.
+fn allowed_options(
+    env: &Env,
+    slot: &Slot,
+    closure: Closure,
+    options: &[Suggestion],
+) -> Vec<Suggestion> {
+    match (closure, strict(env)) {
+        (Closure::Terms, Some(v)) => options
+            .iter()
+            .filter(|o| v.admissible(&env.doc, &set_text(slot, &o.value)).is_ok())
+            .cloned()
+            .collect(),
+        _ => options.to_vec(),
+    }
+}
+
+/// What typed text means in a closed slot: the written form of the entry it
+/// names, a term the vocabulary has that the list does not offer, or, on
+/// Enter, the only entry the text leaves. `None`: it names nothing.
+fn resolve(
+    env: &Env,
+    slot: &Slot,
+    closure: Closure,
+    allowed: &[Suggestion],
+    typed: &str,
+    enter: bool,
+) -> Option<String> {
+    let w = &env.cfg.wording;
+    let expand = |t: &str| match w.is_empty() {
+        true => env.prefixes.expand(t),
+        false => w.expand(&env.prefixes, t),
+    };
+    let same = |a: &str, b: &str| expand(a) == expand(b);
+    if let Some(o) = closed::exact(allowed, typed, &same) {
+        return Some(o.value.to_string());
+    }
+    if closure == Closure::Terms
+        && strict(env).is_some_and(|v| v.admissible(&env.doc, &set_text(slot, typed)).is_ok())
+    {
+        return Some(typed.to_string());
+    }
+    if enter {
+        return closed::only(allowed, typed).map(|o| o.value.to_string());
+    }
+    None
+}
+
+/// What commits a slot's text.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum How {
+    Enter,
+    Blur,
+    /// An entry of the list was picked.
+    Pick,
 }
 
 /// Whether the text now in a closed slot is one it does not take: the
@@ -446,6 +510,11 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
     let query = use_state(String::new);
     let open = use_state(|| false);
     let active = use_state(|| 0usize);
+    // A closed slot: why the text typed into it was not taken (it is still
+    // there, to correct), and what a polite live region says about a draft
+    // that was given up.
+    let invalid = use_state(|| None::<AttrValue>);
+    let announce = use_state(AttrValue::default);
 
     let use_suggestions = cfg.suggestions;
     let (options, depths) = if use_suggestions {
@@ -456,14 +525,31 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
     let closed = closure(&env, slot);
     let not_in_profile = closed.is_some_and(|c| outside(&env, slot, c, &options));
     let note_id = format!("prose-note-{}", slot.path);
-    // The issues that describe the slot, then the note under it.
-    let described = match (described_by.clone(), not_in_profile) {
-        (Some(d), true) => Some(AttrValue::from(format!("{d} {note_id}"))),
-        (None, true) => Some(AttrValue::from(note_id.clone())),
-        (d, false) => d,
+    let message_id = format!("prose-message-{}", slot.path);
+    // The issues that describe the slot, then the note under it, then why
+    // the text typed into it was not taken.
+    let described = {
+        let mut ids: Vec<String> = described_by.iter().map(|d| d.to_string()).collect();
+        if not_in_profile {
+            ids.push(note_id.clone());
+        }
+        if invalid.is_some() {
+            ids.push(message_id.clone());
+        }
+        (!ids.is_empty()).then(|| AttrValue::from(ids.join(" ")))
+    };
+    // A closed slot lists every entry it takes, scrolling; an open one the
+    // best few.
+    let allowed;
+    let (source, most): (&[Suggestion], usize) = match closed {
+        Some(c) if *open => {
+            allowed = allowed_options(&env, slot, c, &options);
+            (&allowed, usize::MAX)
+        }
+        _ => (&options, cfg.max_suggestions),
     };
     let shown: Vec<Suggestion> = if *open {
-        filter_suggestions(&options, &query, cfg.max_suggestions)
+        filter_suggestions(source, &query, most)
             .into_iter()
             .cloned()
             .collect()
@@ -478,7 +564,14 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         (*active).min(shown.len() - 1)
     };
 
-    let commit: Callback<()> = {
+    // A right operand's suggestions are profile values, which are IRIs. A
+    // slot that already holds an IRI keeps it through SetText; into any
+    // other (a string, a typed or new value) a pick is sent as SetIri.
+    let pick_as_iri = slot.kind == SlotKind::Literal
+        && matches!(slot.path.field, Field::RightOperand(_))
+        && !holds_iri(&env.doc, &slot.path);
+
+    let commit: Callback<How> = {
         let node_ref = node_ref.clone();
         let dirty = dirty.clone();
         let rev = rev.dispatcher();
@@ -486,7 +579,13 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         let path = slot.path.clone();
         let owner = slot.owner;
         let raw = slot.raw.clone();
-        Callback::from(move |_| {
+        let env = env.clone();
+        let slot = slot.clone();
+        let options = closed.map(|_| options.clone());
+        let invalid = invalid.clone();
+        let announce = announce.clone();
+        let open = open.clone();
+        Callback::from(move |how: How| {
             if !*dirty.borrow() {
                 return;
             }
@@ -494,25 +593,71 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                 .cast::<web_sys::Element>()
                 .and_then(|e| e.text_content())
                 .unwrap_or_default();
-            let value = clean_edit(&text, &raw);
+            let mut value = clean_edit(&text, &raw);
+            let mut as_iri = false;
+            if let (Some(closure), Some(options)) = (closed, &options)
+                && value != raw
+                && !value.is_empty()
+            {
+                let allowed = allowed_options(&env, &slot, closure, options);
+                match resolve(&env, &slot, closure, &allowed, &value, how == How::Enter) {
+                    Some(v) => {
+                        value = v;
+                        as_iri = closure == Closure::Values && pick_as_iri;
+                    }
+                    None if how == How::Blur => {
+                        // Given up: back to the value, and say so.
+                        *dirty.borrow_mut() = false;
+                        let labels = &env.cfg.labels;
+                        announce.set(closed::kept_message(labels, &raw, &value).into());
+                        invalid.set(None);
+                        rev.dispatch(());
+                        return;
+                    }
+                    None => {
+                        // Not taken: the text stays, with the reason.
+                        let labels = &env.cfg.labels;
+                        let field = match closure {
+                            Closure::Values => labels.fields.right_operand.to_string(),
+                            Closure::Terms => labels.field_name(slot.path.field),
+                        };
+                        let near = closed::closest(&allowed, &value);
+                        invalid.set(Some(
+                            closed::not_allowed_message(
+                                labels,
+                                &value,
+                                &field,
+                                &closed::profile_names(&env.cfg.wording),
+                                near,
+                            )
+                            .into(),
+                        ));
+                        open.set(true);
+                        return;
+                    }
+                }
+            }
             *dirty.borrow_mut() = false;
             if value != raw {
-                onedit.emit(EditEvent::SetText {
-                    slot: path.clone(),
-                    expect: owner,
-                    value,
+                invalid.set(None);
+                onedit.emit(if as_iri {
+                    EditEvent::SetIri {
+                        slot: path.clone(),
+                        expect: owner,
+                        value,
+                    }
+                } else {
+                    EditEvent::SetText {
+                        slot: path.clone(),
+                        expect: owner,
+                        value,
+                    }
                 });
             }
             rev.dispatch(());
         })
     };
 
-    // A right operand's suggestions are profile values, which are IRIs. A
-    // slot that already holds an IRI keeps it through SetText; into any
-    // other (a string, a typed or new value) a pick is sent as SetIri.
-    let pick_as_iri = slot.kind == SlotKind::Literal
-        && matches!(slot.path.field, Field::RightOperand(_))
-        && !holds_iri(&env.doc, &slot.path);
     let accept: Callback<AttrValue> = {
         let node_ref = node_ref.clone();
         let dirty = dirty.clone();
@@ -540,7 +685,7 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                 return;
             }
             *dirty.borrow_mut() = true;
-            commit.emit(());
+            commit.emit(How::Pick);
         })
     };
 
@@ -551,9 +696,13 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         let query = query.clone();
         let open = open.clone();
         let active = active.clone();
+        let invalid = invalid.clone();
         Callback::from(move |e: InputEvent| {
             *dirty.borrow_mut() = true;
             *navigated.borrow_mut() = false;
+            if invalid.is_some() {
+                invalid.set(None);
+            }
             if use_suggestions && !e.is_composing() {
                 let text = node_ref
                     .cast::<web_sys::Element>()
@@ -579,6 +728,9 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         let node_ref = node_ref.clone();
         let shown = shown.clone();
         let navigated = navigated.clone();
+        let invalid = invalid.clone();
+        let rejected = invalid.is_some();
+        let is_closed = closed.is_some();
         Callback::from(move |e: KeyboardEvent| {
             // keyCode 229: Safari sends the Enter that confirms an IME
             // candidate after `compositionend`, with isComposing already false.
@@ -599,14 +751,21 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                     if *dirty.borrow() {
                         *refocus.borrow_mut() = true;
                     }
-                    open.set(false);
-                    commit.emit(());
+                    // A closed slot decides whether the list stays open.
+                    if !is_closed {
+                        open.set(false);
+                    }
+                    commit.emit(How::Enter);
                 }
                 "Escape" => {
                     e.prevent_default();
-                    if list_open {
+                    if list_open && !rejected {
                         open.set(false);
                     } else {
+                        if rejected {
+                            invalid.set(None);
+                            open.set(false);
+                        }
                         *reverting.borrow_mut() = true;
                         *dirty.borrow_mut() = false;
                         *refocus.borrow_mut() = true;
@@ -647,7 +806,14 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
             kind: FocusKind::Slot(slot.kind),
             raw: slot.raw.clone(),
         };
-        Callback::from(move |_: FocusEvent| on_focus.emit(Some(focus.clone())))
+        let announce = announce.clone();
+        Callback::from(move |_: FocusEvent| {
+            // The same message must be able to be announced again.
+            if !announce.is_empty() {
+                announce.set(AttrValue::default());
+            }
+            on_focus.emit(Some(focus.clone()))
+        })
     };
 
     let onfocusout = {
@@ -660,7 +826,7 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                 *reverting.borrow_mut() = false;
                 return;
             }
-            commit.emit(());
+            commit.emit(How::Blur);
             open.set(false);
             on_focus.emit(None);
         })
@@ -734,6 +900,11 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         class.extend(cls!(cfg, slot_empty, "prose-slot-empty"));
         styles.push(&cfg.styles.slot_empty);
     }
+    let severity = if invalid.is_some() {
+        Some(Severity::Error)
+    } else {
+        *severity
+    };
     match severity {
         Some(Severity::Error) => {
             class.extend(cls!(cfg, slot_invalid, "prose-slot-invalid"));
@@ -758,7 +929,7 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         *epoch.borrow()
     );
     let label = cfg.labels.slot_name(&slot.path);
-    let invalid = matches!(severity, Some(Severity::Error)).then_some("true");
+    let aria_invalid = matches!(severity, Some(Severity::Error)).then_some("true");
     // aria-expanded and the popup relationship belong to a combobox, not a
     // plain textbox.
     let role = if use_suggestions {
@@ -859,7 +1030,7 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                     aria-placeholder={placeholder(&env, slot)}
                     aria-haspopup={use_suggestions.then_some("listbox")}
                     aria-label={label}
-                    aria-invalid={invalid}
+                    aria-invalid={aria_invalid}
                     aria-describedby={described}
                     aria-autocomplete={use_suggestions.then_some("list")}
                     aria-expanded={expanded}
@@ -885,6 +1056,24 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
             </span>
             if not_in_profile {
                 <small id={note_id} class="prose-slot-note">{ cfg.labels.not_in_profile.clone() }</small>
+            }
+            if let Some(message) = &*invalid {
+                <span
+                    id={message_id}
+                    class={classes!(
+                        cls!(cfg, issue, "prose-issue"),
+                        cls!(cfg, issue_error, "prose-issue-error"),
+                        "prose-slot-message"
+                    )}
+                    style={merge_styles(&[&cfg.styles.issue, &cfg.styles.issue_error])}
+                >
+                    { message.clone() }
+                </span>
+            }
+            if closed.is_some() {
+                <span class={cls!(cfg, live, "prose-live")} role="status" aria-live="polite">
+                    { (*announce).clone() }
+                </span>
             }
             if list_open {
                 <ul

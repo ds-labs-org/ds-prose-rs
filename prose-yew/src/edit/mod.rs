@@ -119,6 +119,25 @@ pub(crate) struct Env {
     /// Whether a slot is closed by strict validation, by (policy, kind of
     /// slot) or slot, so that one render asks the validator once.
     pub closed_cache: std::cell::RefCell<std::collections::HashMap<String, bool>>,
+    /// How many more times one render may ask the validator (see
+    /// [`Env::spend`]).
+    pub checks: std::cell::Cell<u32>,
+}
+
+/// The most times one render of the view asks the validator whether a term
+/// is allowed, for the markers and the closed lists. Each ask reads the
+/// whole document, so a hostile one cannot be allowed to make a render
+/// quadratic; past the limit the view shows what it would without a
+/// validator (the markers from the host's issues are not affected).
+pub(crate) const MAX_CHECKS: u32 = 2000;
+
+impl Env {
+    /// Takes one of the render's checks; `false` when none is left.
+    pub(crate) fn spend(&self) -> bool {
+        let left = self.checks.get();
+        self.checks.set(left.saturating_sub(1));
+        left > 0
+    }
 }
 
 #[derive(Clone)]

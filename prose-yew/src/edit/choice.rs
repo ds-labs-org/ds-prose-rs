@@ -168,7 +168,7 @@ fn options(env: &Env, c: &ChoiceSlot, severity: Option<Severity>) -> (Vec<Opt>, 
         && matches!(c.kind, ChoiceKind::Operator | ChoiceKind::Conflict)
     {
         for o in opts.iter_mut().filter(|o| !o.value.is_empty()) {
-            o.blocked = is_blocked(v, &env.doc, c, &o.value);
+            o.blocked = env.spend() && is_blocked(v, &env.doc, c, &o.value);
         }
     }
     // An operator the reducer would refuse is not offered, unless the host
@@ -265,14 +265,20 @@ pub(crate) fn choice_select(props: &ChoiceSelectProps) -> Html {
         let owner = c.owner;
         let raw = c.raw.clone();
         let rev = rev.dispatcher();
+        let env = env.clone();
+        let c = c.clone();
         Callback::from(move |e: Event| {
             use wasm_bindgen::JsCast;
             let value = e
                 .target()
                 .and_then(|t| t.dyn_into::<web_sys::HtmlSelectElement>().ok())
                 .map(|s| s.value());
+            // The select does not offer what the validator would refuse, but
+            // a script or an assistive technology can still choose it: the
+            // same check, before anything is sent.
             if let Some(value) = value
                 && value != raw
+                && !strict(&env).is_some_and(|v| is_blocked(v, &env.doc, &c, &value))
             {
                 onedit.emit(EditEvent::SetChoice {
                     slot: slot.clone(),

@@ -2,9 +2,6 @@
 //! component (slot.rs) decides when to ask; this module decides what typed
 //! text means against the entries a list offers, and says why it was not
 //! taken.
-// Wired into the slot editor by the next change.
-#![allow(dead_code)]
-
 use prose_core::profile::Wording;
 
 use super::config::{Labels, Suggestion, fill};

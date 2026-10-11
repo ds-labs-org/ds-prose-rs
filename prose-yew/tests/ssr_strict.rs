@@ -492,3 +492,32 @@ async fn strict_operator_select_snapshot() {
     let html = edit_view("violating.json", strict_config(), vec![]).await;
     snapshot("strict_operator_select", &select_of(&html, PURPOSE_OP));
 }
+
+#[tokio::test]
+async fn strict_checks_are_bounded_per_render() {
+    // 300 constraints on a closed operand: 12 operators each is more asks
+    // of the validator than one render makes. The view still renders, with
+    // the markers for the first ones and none past the limit.
+    let constraint = r#"{"leftOperand": "ex:researchPurpose", "operator": "lteq",
+        "rightOperand": {"@id": "ex:academic"}}"#;
+    let json = format!(
+        r#"{{"@context": ["http://www.w3.org/ns/odrl.jsonld",
+              {{"ex": "https://example.org/odrl/profile/research/"}}],
+            "@type": "Set", "uid": "urn:p",
+            "permission": [{{"target": "urn:a", "action": "use",
+                             "constraint": [{}]}}]}}"#,
+        vec![constraint; 300].join(",")
+    );
+    let doc = Rc::new(read_model(&json).unwrap());
+    let config = Rc::new(strict_config());
+    let html = ssr::<OdrlProseView>(yew::props!(prose_yew::OdrlProseViewProps {
+        doc,
+        mode: EditMode::Edit,
+        config
+    }))
+    .await;
+    let first = select_of(&html, "policy[0].permission[0].constraint[0]#operator");
+    assert!(first.contains("Not allowed by the profile"), "{first}");
+    let last = select_of(&html, "policy[0].permission[0].constraint[299]#operator");
+    assert!(!last.contains("Not allowed by the profile"), "{last}");
+}

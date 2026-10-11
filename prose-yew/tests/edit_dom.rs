@@ -2019,3 +2019,33 @@ async fn toggle_strict_keeps_doc_and_history() {
         Some("urn:policy:s")
     );
 }
+
+#[wasm_bindgen_test]
+async fn a_closed_value_slot_takes_only_the_values_the_profile_lists() {
+    let value = "policy[0].permission[0].constraint[0]#rightOperand[0]";
+    let log = Log::default();
+    let (c, _h) = mount_strict(strict_props(STRICT_POLICY, &log, true, StrictEdit::Flag)).await;
+    assert_eq!(
+        slot(&c, value).get_attribute("data-closed").as_deref(),
+        Some("true")
+    );
+    // The profile lists ex:academic (with its narrower values) and
+    // ex:commercialResearch, and nothing else is taken.
+    let el = slot(&c, value);
+    type_into(&el, "ex:nothing");
+    key(&el, "Enter", false, false);
+    settle().await;
+    assert!(log.borrow().is_empty(), "{:?}", log.borrow());
+    assert_eq!(
+        slot(&c, value).get_attribute("aria-invalid").as_deref(),
+        Some("true")
+    );
+    let el = slot(&c, value);
+    type_into(&el, "ex:commercialResearch");
+    key(&el, "Enter", false, false);
+    settle().await;
+    assert_eq!(
+        set_texts(&log),
+        vec![(value.into(), "ex:commercialResearch".into())]
+    );
+}
