@@ -319,3 +319,23 @@ fn every_documented_well_known_prefix_falls_back() {
         );
     }
 }
+
+#[test]
+fn odrl_context_binds_only_its_own_prefixes() {
+    // The W3C context defines dct but not dcterms, prof or prose.
+    let silent = from(json!({
+        "@context": "http://www.w3.org/ns/odrl.jsonld",
+        "@id": "dct:t", "@type": "odrl:Action"
+    }))
+    .unwrap();
+    assert_eq!(iris(&silent), vec!["http://purl.org/dc/terms/t"]);
+    assert!(silent.warnings().is_empty(), "{:?}", silent.warnings());
+    for prefix in ["dcterms", "prof", "prose"] {
+        let v = from(json!({
+            "@context": "http://www.w3.org/ns/odrl.jsonld",
+            "@id": format!("{prefix}:t"), "@type": "odrl:Action"
+        }))
+        .unwrap();
+        assert_eq!(v.warnings().len(), 1, "{prefix}: {:?}", v.warnings());
+    }
+}
