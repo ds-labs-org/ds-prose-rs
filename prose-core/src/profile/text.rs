@@ -6,9 +6,12 @@
 pub struct LangText(Vec<(Option<String>, String)>);
 
 impl LangText {
-    /// The text in the best language for `prefs` (most preferred first): an
-    /// exact tag match, then a primary-subtag match (`de-CH` and `de`), then
-    /// English, then untagged text, then the first text given.
+    /// The text in the best language for `prefs` (most preferred first).
+    /// Each preference is tried in turn before the next: its exact tag, then
+    /// the tag shortened subtag by subtag (`zh-Hant-TW`, `zh-Hant`, `zh`, as
+    /// in RFC 4647 lookup), then any tag with the same primary subtag
+    /// (`de-AT` for `de-CH`). Then English, then untagged text, then the
+    /// first text given.
     pub fn pick(&self, prefs: &[String]) -> Option<&str> {
         let tagged = |want: &dyn Fn(&str) -> bool| {
             self.0
@@ -18,11 +21,18 @@ impl LangText {
         };
         prefs
             .iter()
-            .find_map(|p| tagged(&|l| l.eq_ignore_ascii_case(p)))
-            .or_else(|| {
-                prefs
-                    .iter()
-                    .find_map(|p| tagged(&|l| primary(l).eq_ignore_ascii_case(primary(p))))
+            .find_map(|p| {
+                let mut range = p.as_str();
+                loop {
+                    if let Some(t) = tagged(&|l| l.eq_ignore_ascii_case(range)) {
+                        return Some(t);
+                    }
+                    match shorter(range) {
+                        Some(r) => range = r,
+                        None => break,
+                    }
+                }
+                tagged(&|l| primary(l).eq_ignore_ascii_case(primary(p)))
             })
             .or_else(|| tagged(&|l| primary(l) == "en"))
             .or_else(|| {
@@ -55,6 +65,19 @@ impl LangText {
 /// The primary subtag: `de` for `de-CH`.
 fn primary(tag: &str) -> &str {
     tag.split('-').next().unwrap_or(tag)
+}
+
+/// `range` without its last subtag, and without a single-letter subtag
+/// that would then end it (`de-CH-x-a` gives `de-CH`); `None` at the
+/// primary subtag.
+fn shorter(range: &str) -> Option<&str> {
+    let mut r = &range[..range.rfind('-')?];
+    while let Some(i) = r.rfind('-')
+        && r.len() - i == 2
+    {
+        r = &r[..i];
+    }
+    Some(r)
 }
 
 /// `s` as plain text of at most `max_chars` characters: tags stripped,
