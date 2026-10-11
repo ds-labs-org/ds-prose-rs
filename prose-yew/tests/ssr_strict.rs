@@ -521,3 +521,29 @@ async fn strict_checks_are_bounded_per_render() {
     let last = select_of(&html, "policy[0].permission[0].constraint[299]#operator");
     assert!(!last.contains("Not allowed by the profile"), "{last}");
 }
+
+#[tokio::test]
+async fn the_not_in_the_profile_notes_are_bounded_per_render() {
+    // Each note asks the validator, which reads the whole document: with
+    // thousands of slots outside the profile a render must not ask for
+    // every one.
+    let permission = r#"{"target": "urn:a", "action": "ex:distil"}"#;
+    let json = format!(
+        r#"{{"@context": ["http://www.w3.org/ns/odrl.jsonld",
+              {{"ex": "https://example.org/odrl/profile/research/"}}],
+            "@type": "Set", "uid": "urn:p",
+            "permission": [{}]}}"#,
+        vec![permission; 2600].join(",")
+    );
+    let doc = Rc::new(read_model(&json).unwrap());
+    let config = Rc::new(strict_config());
+    let html = ssr::<OdrlProseView>(yew::props!(prose_yew::OdrlProseViewProps {
+        doc,
+        mode: EditMode::Edit,
+        config
+    }))
+    .await;
+    let notes = html.matches("(not in the profile)").count();
+    assert!(notes > 0, "the first slots are still marked");
+    assert!(notes <= 2000, "{notes} notes: one validator ask per slot");
+}
