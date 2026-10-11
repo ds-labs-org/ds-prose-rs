@@ -242,7 +242,7 @@ fn profile_title(p: &ProfileVocab, langs: &[String]) -> Option<String> {
 }
 
 /// The IRI up to and including its last `#` or `/`.
-fn namespace(iri: &str) -> &str {
+pub(crate) fn namespace(iri: &str) -> &str {
     match iri.rfind(['#', '/']) {
         Some(i) => &iri[..=i],
         None => iri,
