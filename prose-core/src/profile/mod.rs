@@ -246,10 +246,19 @@ impl Term {
 #[non_exhaustive]
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct OperandHints {
+    /// `prose:operator`: operators to offer first.
     pub operators: Vec<String>,
+    /// `prose:rightOperand`: suggested values, as the profile lists them.
     pub values: Vec<String>,
+    /// `prose:datatype`: the first one given, an xsd IRI.
     pub datatype: Option<String>,
+    /// `prose:unit`: suggested units.
     pub units: Vec<String>,
+    /// `values` with their descendants within the profile (right operands
+    /// whose `skos:broader` or `rdfs:subClassOf` leads to them), depth
+    /// first, each with its depth below the suggested value (0). Each value
+    /// appears once, at its first place.
+    pub value_tree: Vec<(String, usize)>,
 }
 
 /// What a term is, as far as ODRL is concerned. One term can be several.
