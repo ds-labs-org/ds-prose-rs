@@ -101,6 +101,17 @@ pub const BASE_CSS: &str = r#"
   color: HighlightText;
 }
 .ds-prose.prose-edit .prose-suggestion small { opacity: .75; margin-left: .5em; }
+.ds-prose.prose-edit .prose-suggestion-nested {
+  padding-inline-start: calc(.5em + var(--prose-depth, 1) * 1em);
+}
+.ds-prose.prose-edit .prose-suggestion-group > ul { list-style: none; margin: 0; padding: 0; }
+.ds-prose.prose-edit .prose-suggestion-group-label {
+  display: block;
+  padding: .25em .5em .1em;
+  font-size: .85em;
+  font-weight: bold;
+  opacity: .8;
+}
 .ds-prose.prose-edit.prose-reveal-hover .prose-add,
 .ds-prose.prose-edit.prose-reveal-hover .prose-remove,
 .ds-prose.prose-edit.prose-reveal-hover .prose-reorder,

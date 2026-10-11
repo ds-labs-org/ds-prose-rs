@@ -270,3 +270,13 @@ pub(crate) fn gloss(w: &Wording, prefixes: &Prefixes, written: &str) -> Option<G
     let kind = *t.kinds.first()?;
     Some(ctx.gloss_of(written, t, p, kind))
 }
+
+/// [`crate::wording::operator_with`].
+pub(crate) fn operator_with(w: &Wording, prefixes: &Prefixes, left: &str, op: &str) -> String {
+    let ctx = WordCtx {
+        wording: (!w.is_empty()).then_some(w),
+        prefixes: prefixes.clone(),
+        namespaces: HashMap::new(),
+    };
+    ctx.operator_for(left, op)
+}

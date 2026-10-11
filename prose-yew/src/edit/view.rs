@@ -322,6 +322,7 @@ pub fn odrl_prose_view(props: &OdrlProseViewProps) -> Html {
             })
             .collect(),
         prefixes: prefixes.clone(),
+        doc: props.doc.clone(),
     });
     let mut index: HashMap<String, Vec<&Issue>> = HashMap::new();
     for i in props.issues.iter() {

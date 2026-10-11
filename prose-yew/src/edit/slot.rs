@@ -10,7 +10,11 @@ use std::rc::Rc;
 use wasm_bindgen::JsCast;
 use yew::prelude::*;
 
-use prose_core::edit::{EditEvent, IssueTarget, Severity, Slot, SlotKind};
+use std::collections::{HashMap, HashSet};
+
+use prose_core::edit::{EditEvent, Field, IssueTarget, Severity, Slot, SlotKind, left_operand_at};
+use prose_core::profile::{Term, TermKind};
+use prose_core::wording;
 
 use super::config::{Suggestion, cls, merge_styles, written_form};
 use super::suggest::filter_suggestions;
@@ -139,7 +143,9 @@ pub(crate) struct SlotEditorProps {
     pub described_by: Option<AttrValue>,
 }
 
-fn options_for(env: &Env, slot: &Slot) -> Vec<Suggestion> {
+/// The suggestions for a slot, and the depth of each nested one (a value
+/// under a broader suggested value), by value.
+fn options_for(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<AttrValue, usize>) {
     let v = &env.cfg.vocab;
     // A profile term is listed by its full IRI and written as the policy's
     // prefixes allow.
@@ -151,28 +157,125 @@ fn options_for(env: &Env, slot: &Slot) -> Vec<Suggestion> {
             })
             .collect()
     };
+    let flat = |list: Vec<Suggestion>| (list, HashMap::new());
     match slot.kind {
-        SlotKind::Action => written(&v.actions),
-        SlotKind::LeftOperand => written(&v.left_operands),
-        SlotKind::PolicyKind => written(&v.policy_kinds),
-        SlotKind::Party => v.parties.clone(),
-        SlotKind::Asset => v.assets.clone(),
-        SlotKind::PolicyRef => env
-            .policy_uids
-            .iter()
-            .filter(|(i, _)| *i != slot.path.node.policy)
-            .map(|(_, uid)| Suggestion {
-                value: uid.clone(),
-                label: uid.clone(),
-                hint: None,
-                group: None,
-            })
-            .collect(),
-        _ => vec![],
+        SlotKind::Action => flat(written(&v.actions)),
+        SlotKind::LeftOperand => flat(written(&v.left_operands)),
+        SlotKind::PolicyKind => flat(written(&v.policy_kinds)),
+        SlotKind::Party => flat(v.parties.clone()),
+        SlotKind::Asset => flat(v.assets.clone()),
+        SlotKind::PolicyRef => flat(
+            env.policy_uids
+                .iter()
+                .filter(|(i, _)| *i != slot.path.node.policy)
+                .map(|(_, uid)| Suggestion {
+                    value: uid.clone(),
+                    label: uid.clone(),
+                    hint: None,
+                    group: None,
+                })
+                .collect(),
+        ),
+        SlotKind::Literal if matches!(slot.path.field, Field::RightOperand(_)) => {
+            profile_values(env, slot)
+        }
+        SlotKind::Unit => flat(
+            left_operand_term(env, slot)
+                .map(|t| {
+                    t.hints
+                        .units
+                        .iter()
+                        .map(|u| profile_suggestion(env, u, None))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        ),
+        _ => flat(vec![]),
     }
 }
 
-fn placeholder(env: &Env, kind: SlotKind) -> AttrValue {
+/// The loaded term the slot's constraint names as its left operand.
+fn left_operand_term<'e>(env: &'e Env, slot: &Slot) -> Option<&'e Term> {
+    let w = &env.cfg.wording;
+    if w.is_empty() {
+        return None;
+    }
+    let left = left_operand_at(&env.doc, &slot.path)?;
+    w.lookup_written(&env.prefixes, left).map(|(t, _)| t)
+}
+
+/// A suggestion for the IRI `iri`: the loaded term's label and definition
+/// when a profile declares it.
+fn profile_suggestion(env: &Env, iri: &str, group: Option<&AttrValue>) -> Suggestion {
+    let w = &env.cfg.wording;
+    let term = w.lookup(iri).map(|(t, _)| t);
+    let label = match term {
+        Some(t) => t.display_label(w.languages()),
+        None => wording::humanise(wording::local_name(iri)),
+    };
+    Suggestion {
+        value: written_form(iri, &env.prefixes),
+        label: label.into(),
+        hint: term
+            .and_then(|t| t.definition.pick(w.languages()))
+            .map(|d| AttrValue::from(d.to_string())),
+        group: group.cloned(),
+    }
+}
+
+/// A right operand's suggestions: the values the profile suggests for the
+/// left operand with their narrower values nested under them; else every
+/// value the loaded profiles declare, under a heading that says so.
+fn profile_values(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<AttrValue, usize>) {
+    let w = &env.cfg.wording;
+    if w.is_empty() {
+        return (vec![], HashMap::new());
+    }
+    if let Some(t) = left_operand_term(env, slot)
+        && !t.hints.value_tree.is_empty()
+    {
+        let mut depth = HashMap::new();
+        let list = t
+            .hints
+            .value_tree
+            .iter()
+            .map(|(iri, d)| {
+                let s = profile_suggestion(env, iri, None);
+                if *d > 0 {
+                    depth.insert(s.value.clone(), *d);
+                }
+                s
+            })
+            .collect();
+        return (list, depth);
+    }
+    let group = env.cfg.labels.profile_values.clone();
+    let mut seen = HashSet::new();
+    let list = w
+        .profiles()
+        .flat_map(|p| p.terms_of(TermKind::RightOperand))
+        .filter(|t| !t.deprecated && seen.insert(t.iri.as_str()))
+        .map(|t| profile_suggestion(env, &t.iri, Some(&group)))
+        .collect();
+    (list, HashMap::new())
+}
+
+fn placeholder(env: &Env, slot: &Slot) -> AttrValue {
+    if slot.kind == SlotKind::Literal
+        && let Some(dt) = left_operand_term(env, slot).and_then(|t| t.hints.datatype.as_deref())
+        && let Some((_, p)) = env
+            .cfg
+            .labels
+            .datatype_placeholders
+            .iter()
+            .find(|(k, _)| k == dt)
+    {
+        return p.clone();
+    }
+    placeholder_of(env, slot.kind)
+}
+
+fn placeholder_of(env: &Env, kind: SlotKind) -> AttrValue {
     let p = &env.cfg.labels.placeholders;
     match kind {
         SlotKind::PolicyKind => &p.kind,
@@ -238,10 +341,10 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
     let active = use_state(|| 0usize);
 
     let use_suggestions = cfg.suggestions;
-    let options = if use_suggestions {
+    let (options, depths) = if use_suggestions {
         options_for(&env, slot)
     } else {
-        vec![]
+        (vec![], HashMap::new())
     };
     let shown: Vec<Suggestion> = if *open {
         filter_suggestions(&options, &query, cfg.max_suggestions)
@@ -537,6 +640,75 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         (None, None, None)
     };
 
+    let option = |i: usize| {
+        let s = &shown[i];
+        let accept = accept.clone();
+        let value = s.value.clone();
+        let onmousedown = Callback::from(move |e: MouseEvent| {
+            e.prevent_default();
+            accept.emit(value.clone());
+        });
+        // The pointer highlights an option (the stylesheet does it for
+        // `:hover`); the active descendant follows, so what is shown and
+        // what is announced agree. Enter still commits the typed text
+        // unless an arrow key was used.
+        let onmousemove = {
+            let active = active.clone();
+            Callback::from(move |_: MouseEvent| {
+                if *active != i {
+                    active.set(i);
+                }
+            })
+        };
+        let mut class = cls!(cfg, suggestion, "prose-suggestion");
+        let mut styles = vec![&cfg.styles.suggestion];
+        if i == active_idx {
+            class.extend(cls!(cfg, suggestion_active, "prose-suggestion-active"));
+            styles.push(&cfg.styles.suggestion_active);
+        }
+        // A value narrower than a suggested one is indented by the
+        // stylesheet, by depth.
+        let depth = depths.get(&s.value).copied().unwrap_or(0);
+        let depth_style = (depth > 0).then(|| AttrValue::from(format!("--prose-depth: {depth}")));
+        if depth > 0 {
+            class.push("prose-suggestion-nested");
+            styles.push(&depth_style);
+        }
+        let style = merge_styles(&styles);
+        html! {
+            <li
+                id={format!("{list_id}-{i}")}
+                role="option"
+                class={class}
+                style={style}
+                aria-selected={(i == active_idx).to_string()}
+                onmousedown={onmousedown}
+                onmousemove={onmousemove}
+            >
+                { s.label.clone() }
+                if let Some(h) = &s.hint {
+                    <small>{ h.clone() }</small>
+                }
+            </li>
+        }
+    };
+    // Runs of options under one heading. Without any profile group the list
+    // is flat, as it always was.
+    let grouped = shown.iter().any(|s| s.group.is_some());
+    let mut runs: Vec<(AttrValue, std::ops::Range<usize>)> = vec![];
+    if grouped {
+        for (i, s) in shown.iter().enumerate() {
+            let heading = s
+                .group
+                .clone()
+                .unwrap_or_else(|| cfg.labels.group_core.clone());
+            match runs.last_mut() {
+                Some((h, r)) if *h == heading => r.end = i + 1,
+                _ => runs.push((heading, i..i + 1)),
+            }
+        }
+    }
+
     html! {
         <span class="prose-slot-wrap">
             <span class="prose-slot-edit">
@@ -548,7 +720,7 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                     role={role}
                     contenteditable={editable_value()}
                     aria-multiline={(!use_suggestions).then_some("false")}
-                    aria-placeholder={placeholder(&env, slot.kind)}
+                    aria-placeholder={placeholder(&env, slot)}
                     aria-haspopup={use_suggestions.then_some("listbox")}
                     aria-label={label}
                     aria-invalid={invalid}
@@ -558,7 +730,7 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                     aria-controls={controls}
                     aria-activedescendant={activedesc}
                     data-slot={slot.path.to_string()}
-                    data-placeholder={placeholder(&env, slot.kind)}
+                    data-placeholder={placeholder(&env, slot)}
                     title={slot.display.clone()}
                     spellcheck="false"
                     autocapitalize="off"
@@ -581,50 +753,16 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                     class={cls!(cfg, suggestions, "prose-suggestions")}
                     style={cfg.styles.suggestions.clone()}
                 >
-                    { for shown.iter().enumerate().map(|(i, s)| {
-                        let accept = accept.clone();
-                        let value = s.value.clone();
-                        let onmousedown = Callback::from(move |e: MouseEvent| {
-                            e.prevent_default();
-                            accept.emit(value.clone());
-                        });
-                        // The pointer highlights an option (the stylesheet does
-                        // it for `:hover`); the active descendant follows, so
-                        // what is shown and what is announced agree. Enter
-                        // still commits the typed text unless an arrow key was
-                        // used.
-                        let onmousemove = {
-                            let active = active.clone();
-                            Callback::from(move |_: MouseEvent| {
-                                if *active != i {
-                                    active.set(i);
-                                }
-                            })
-                        };
-                        let mut class = cls!(cfg, suggestion, "prose-suggestion");
-                        let mut styles = vec![&cfg.styles.suggestion];
-                        if i == active_idx {
-                            class.extend(cls!(cfg, suggestion_active, "prose-suggestion-active"));
-                            styles.push(&cfg.styles.suggestion_active);
-                        }
-                        let style = merge_styles(&styles);
-                        html! {
-                            <li
-                                id={format!("{list_id}-{i}")}
-                                role="option"
-                                class={class}
-                                style={style}
-                                aria-selected={(i == active_idx).to_string()}
-                                onmousedown={onmousedown}
-                                onmousemove={onmousemove}
-                            >
-                                { s.label.clone() }
-                                if let Some(h) = &s.hint {
-                                    <small>{ h.clone() }</small>
-                                }
+                    if grouped {
+                        { for runs.iter().enumerate().map(|(k, (heading, range))| html! {
+                            <li role="group" class="prose-suggestion-group" aria-labelledby={format!("{list_id}-g{k}")}>
+                                <span id={format!("{list_id}-g{k}")} class="prose-suggestion-group-label">{ heading.clone() }</span>
+                                <ul role="none">{ for range.clone().map(&option) }</ul>
                             </li>
-                        }
-                    }) }
+                        }) }
+                    } else {
+                        { for (0..shown.len()).map(&option) }
+                    }
                 </ul>
             }
         </span>

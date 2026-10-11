@@ -107,6 +107,8 @@ pub(crate) struct Env {
     pub policy_uids: Vec<(usize, AttrValue)>,
     /// The prefixes the document binds, for writing picked IRIs.
     pub prefixes: Rc<prose_core::profile::Prefixes>,
+    /// The document, for what a slot's constraint says elsewhere.
+    pub doc: Rc<prose_core::edit::EditDoc>,
 }
 
 #[derive(Clone)]

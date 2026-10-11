@@ -282,3 +282,27 @@ fn compact_writes_a_curie_only_with_a_bound_prefix() {
         assert_eq!(p.expand(&c), iri);
     }
 }
+
+#[test]
+fn operator_with_uses_the_profile_label_outside_odrl() {
+    use prose_core::wording::{operator_for, operator_with};
+    let w = Wording::new().with_profile(research());
+    let p = Prefixes::of_document(&json!({"@context": {"ex": EX}}));
+    assert_eq!(
+        operator_with(&w, &p, "ex:region", "ex:withinRegion"),
+        "is within region"
+    );
+    assert_eq!(
+        operator_with(&w, &p, "x", &format!("{EX}withinRegion")),
+        "is within region"
+    );
+    // ODRL operators and an empty wording read as operator_for has them.
+    assert_eq!(
+        operator_with(&w, &p, "count", "gteq"),
+        operator_for("count", "gteq")
+    );
+    assert_eq!(
+        operator_with(&Wording::default(), &p, "count", "ex:withinRegion"),
+        operator_for("count", "ex:withinRegion")
+    );
+}

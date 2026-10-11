@@ -41,6 +41,18 @@ pub mod wording {
     ) -> Option<crate::Gloss> {
         crate::words_ctx::gloss(wording, prefixes, written)
     }
+
+    /// [`operator_for`], worded with the loaded profiles: an operator a
+    /// profile declares (outside ODRL's namespace) reads with its label,
+    /// e.g. "is within region"; any other as [`operator_for`] phrases it.
+    pub fn operator_with(
+        wording: &crate::profile::Wording,
+        prefixes: &crate::profile::Prefixes,
+        left: &str,
+        op: &str,
+    ) -> String {
+        crate::words_ctx::operator_with(wording, prefixes, left, op)
+    }
 }
 
 pub use model::{

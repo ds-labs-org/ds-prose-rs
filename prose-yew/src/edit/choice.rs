@@ -7,12 +7,39 @@ use prose_core::edit::{
 };
 use prose_core::wording;
 
-use super::config::{Choice, cls, fill};
+use super::config::{Choice, cls, fill, written_form};
 use super::{Env, EnvRef, FocusKind, SlotFocus};
 
 struct Opt {
     value: String,
     label: String,
+    /// Among the operators the profile suggests for the left operand.
+    suggested: bool,
+    /// The current value, which no list offers.
+    extra: bool,
+}
+
+impl Opt {
+    fn new(value: String, label: String) -> Opt {
+        Opt {
+            value,
+            label,
+            suggested: false,
+            extra: false,
+        }
+    }
+}
+
+/// The operators the loaded profiles suggest for `left` (`prose:operator`),
+/// as expanded IRIs; empty without a profile or a hint.
+fn hinted_operators(env: &Env, left: &str) -> Vec<String> {
+    let w = &env.cfg.wording;
+    if w.is_empty() || left.is_empty() {
+        return Vec::new();
+    }
+    w.lookup_written(&env.prefixes, left)
+        .map(|(t, _)| t.hints.operators.clone())
+        .unwrap_or_default()
 }
 
 /// The options of a choice, with the current raw value among them: a raw
@@ -20,35 +47,49 @@ struct Opt {
 fn options(env: &Env, c: &ChoiceSlot, severity: Option<Severity>) -> (Vec<Opt>, String) {
     let labels = &env.cfg.labels;
     let vocab = &env.cfg.vocab;
+    let w = &env.cfg.wording;
     let mut opts: Vec<Opt> = match c.kind {
-        ChoiceKind::Operator => vocab
-            .operators
-            .iter()
-            .map(|op| {
-                let phrase = wording::operator_for(&c.left_operand, op);
-                Opt {
-                    value: op.to_string(),
-                    label: if env.cfg.show_raw_terms {
-                        fill(&labels.operator_option, &[("phrase", &phrase), ("raw", op)])
+        ChoiceKind::Operator => {
+            let hinted = hinted_operators(env, &c.left_operand);
+            vocab
+                .operators
+                .iter()
+                .map(|op| {
+                    let op = written_form(op, &env.prefixes).to_string();
+                    let phrase = if w.is_empty() {
+                        wording::operator_for(&c.left_operand, &op)
+                    } else {
+                        wording::operator_with(w, &env.prefixes, &c.left_operand, &op)
+                    };
+                    let label = if env.cfg.show_raw_terms {
+                        fill(
+                            &labels.operator_option,
+                            &[("phrase", &phrase), ("raw", &op)],
+                        )
                     } else {
                         phrase
-                    },
-                }
-            })
-            .collect(),
+                    };
+                    let suggested =
+                        !hinted.is_empty() && hinted.contains(&w.expand(&env.prefixes, &op));
+                    Opt {
+                        suggested,
+                        ..Opt::new(op, label)
+                    }
+                })
+                .collect()
+        }
         ChoiceKind::LogicalOp => LogicalOp::ALL
             .iter()
-            .map(|o| Opt {
-                value: o.as_str().to_string(),
-                label: o.phrase().to_string(),
-            })
+            .map(|o| Opt::new(o.as_str().to_string(), o.phrase().to_string()))
             .collect(),
         ChoiceKind::Conflict => vocab
             .conflicts
             .iter()
-            .map(|Choice { value, label }| Opt {
-                value: value.to_string(),
-                label: label.to_string(),
+            .map(|Choice { value, label }| {
+                Opt::new(
+                    written_form(value, &env.prefixes).to_string(),
+                    label.to_string(),
+                )
             })
             .collect(),
         // A choice this version has no vocabulary for offers only its value.
@@ -94,8 +135,8 @@ fn options(env: &Env, c: &ChoiceSlot, severity: Option<Severity>) -> (Vec<Opt>, 
             opts.insert(
                 0,
                 Opt {
-                    value: c.raw.clone(),
-                    label,
+                    extra: true,
+                    ..Opt::new(c.raw.clone(), label)
                 },
             );
             c.raw.clone()
@@ -203,10 +244,25 @@ pub(crate) fn choice_select(props: &ChoiceSelectProps) -> Html {
             onfocusin={onfocusin}
             onfocusout={onfocusout}
         >
-            { for opts.iter().map(|o| html! {
-                <option value={o.value.clone()} selected={o.value == selected}>{ o.label.clone() }</option>
-            }) }
+            if opts.iter().any(|o| o.suggested) {
+                // The profile's suggestions first, never hiding the rest.
+                { for opts.iter().filter(|o| o.extra).map(|o| option(o, &selected)) }
+                <optgroup label={cfg.labels.suggested_operators.clone()}>
+                    { for opts.iter().filter(|o| o.suggested).map(|o| option(o, &selected)) }
+                </optgroup>
+                <optgroup label={cfg.labels.other_operators.clone()}>
+                    { for opts.iter().filter(|o| !o.suggested && !o.extra).map(|o| option(o, &selected)) }
+                </optgroup>
+            } else {
+                { for opts.iter().map(|o| option(o, &selected)) }
+            }
         </select>
+    }
+}
+
+fn option(o: &Opt, selected: &str) -> Html {
+    html! {
+        <option value={o.value.clone()} selected={o.value == selected}>{ o.label.clone() }</option>
     }
 }
 
