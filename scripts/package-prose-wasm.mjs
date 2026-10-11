@@ -2,7 +2,7 @@
 // Builds @ds-labs/prose-wasm into dist-npm/prose-wasm, ready for `npm pack` or
 // `npm publish`: the wasm-bindgen output (web target) plus a package.json,
 // README and LICENSE written here, so the package is not at the mercy of
-// wasm-pack's defaults.
+// wasm-pack's defaults, and the ds-prose-validate command copied in.
 //
 //   node scripts/package-prose-wasm.mjs [version]
 //
@@ -10,7 +10,7 @@
 // together). The workspace version the wasm was built from is recorded in
 // package.json as dsProse.prose-yew.
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -47,4 +47,7 @@ const pkg = { ...own, version, dsProse: { 'prose-yew': workspaceVersion } };
 writeFileSync(join(out, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');
 copyFileSync(join(source, 'README.md'), join(out, 'README.md'));
 copyFileSync(join(root, 'LICENSE'), join(out, 'LICENSE'));
+// The command line validator; it loads the wasm module that sits next to it.
+copyFileSync(join(root, 'scripts', 'ds-prose-validate.mjs'), join(out, 'ds-prose-validate.mjs'));
+chmodSync(join(out, 'ds-prose-validate.mjs'), 0o755);
 console.log(`packaged ${pkg.name}@${version} (prose-yew ${workspaceVersion}) in ${out}`);

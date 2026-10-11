@@ -21,11 +21,15 @@
   "type": "module",
   "main": "prose_wasm.js",
   "types": "prose_wasm.d.ts",
+  "bin": {
+    "ds-prose-validate": "ds-prose-validate.mjs"
+  },
   "files": [
     "prose_wasm.js",
     "prose_wasm.d.ts",
     "prose_wasm_bg.wasm",
     "prose_wasm_bg.wasm.d.ts",
+    "ds-prose-validate.mjs",
     "README.md",
     "LICENSE"
   ],
