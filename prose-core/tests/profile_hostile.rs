@@ -287,3 +287,23 @@ fn display_messages_name_the_fix() {
         assert!(!m.contains("ProfileError") && !m.contains('{'), "{m}");
     }
 }
+
+#[test]
+fn values_past_max_depth_are_not_read() {
+    let doc = json!({
+        "@id": "https://example.org/t",
+        "@type": "http://www.w3.org/ns/odrl/2/Action",
+        "http://www.w3.org/2000/01/rdf-schema#label": [["shallow"]],
+        "http://www.w3.org/2004/02/skos/core#definition": [[[["deep"]]]]
+    });
+    let l = limits(|l| l.max_depth = 4);
+    let v = ProfileVocab::from_value(&doc, &l).unwrap();
+    let t = v.term("https://example.org/t").unwrap();
+    assert_eq!(t.label.pick(&en()), Some("shallow"));
+    assert!(t.definition.is_empty(), "{:?}", t.definition);
+    assert!(
+        v.warnings().iter().any(|w| w.contains("deeper than 4")),
+        "{:?}",
+        v.warnings()
+    );
+}

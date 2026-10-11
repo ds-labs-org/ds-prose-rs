@@ -268,3 +268,21 @@ fn relative_id_without_base_skipped() {
     );
     assert!(v.warnings().is_empty(), "{:?}", v.warnings());
 }
+
+#[test]
+fn null_base_in_a_nested_context_clears_it() {
+    let v = from(json!({
+        "@context": {"odrl": ODRL, "@base": "https://example.org/p/"},
+        "@graph": [
+            {"@context": {"@base": null}, "@id": "train", "@type": "odrl:Action"},
+            {"@id": "tune", "@type": "odrl:Action"}
+        ]
+    }))
+    .unwrap();
+    assert_eq!(iris(&v), vec!["https://example.org/p/tune"]);
+    assert!(
+        v.warnings().iter().any(|w| w.contains("\"train\"")),
+        "{:?}",
+        v.warnings()
+    );
+}

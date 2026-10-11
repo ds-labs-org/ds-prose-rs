@@ -439,3 +439,19 @@ fn blank_nodes_are_never_named() {
     assert!(t.implies.is_empty(), "{:?}", t.implies);
     assert!(t.exact_match.is_empty(), "{:?}", t.exact_match);
 }
+
+#[test]
+fn deprecated_reads_every_boolean_spelling() {
+    let owl = "http://www.w3.org/2002/07/owl#deprecated";
+    let xsd = "http://www.w3.org/2001/XMLSchema#boolean";
+    let v = from(json!([
+        {"@id": "https://example.org/t", "@type": odrl("Action"), owl: true},
+        {"@id": "https://example.org/one", "@type": odrl("Action"), owl: {"@value": "1", "@type": xsd}},
+        {"@id": "https://example.org/f", "@type": odrl("Action"), owl: false},
+        {"@id": "https://example.org/zero", "@type": odrl("Action"), owl: {"@value": "0", "@type": xsd}}
+    ]))
+    .unwrap();
+    let dep = |i: &str| term(&v, &format!("https://example.org/{i}")).deprecated;
+    assert!(dep("t") && dep("one"));
+    assert!(!dep("f") && !dep("zero"));
+}
