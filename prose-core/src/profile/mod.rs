@@ -15,8 +15,6 @@ use serde_json::Value;
 mod build;
 mod jsonld;
 mod ns;
-// The hygiene is applied by term semantics, in the next commit.
-#[allow(dead_code)]
 mod text;
 mod triples;
 
@@ -132,7 +130,21 @@ impl ProfileVocab {
 
     /// Counts per kind, for a status line.
     pub fn summary(&self) -> ProfileSummary {
-        ProfileSummary::default()
+        let mut counts: Vec<(TermKind, usize)> = Vec::new();
+        for k in self.terms.iter().flat_map(|t| &t.kinds) {
+            match counts.iter_mut().find(|(c, _)| c == k) {
+                Some((_, n)) => *n += 1,
+                None => counts.push((*k, 1)),
+            }
+        }
+        counts.sort();
+        ProfileSummary {
+            iri: self.iri.clone(),
+            version: self.version.clone(),
+            terms: self.terms.len(),
+            counts,
+            warnings: self.warnings.len(),
+        }
     }
 }
 
@@ -206,8 +218,10 @@ impl Term {
     /// The label in the best language for `langs`, else the IRI's local
     /// name, humanised.
     pub fn display_label(&self, langs: &[String]) -> String {
-        let _ = langs;
-        String::new()
+        match self.label.pick(langs) {
+            Some(l) => l.to_string(),
+            None => crate::words::humanise(crate::words::local_name(&self.iri)),
+        }
     }
 }
 
