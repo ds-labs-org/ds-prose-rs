@@ -98,14 +98,27 @@ fn options(env: &Env, c: &ChoiceSlot, severity: Option<Severity>) -> (Vec<Opt>, 
     // A compact IRI or full term for a listed one selects that option, unless
     // the host flagged the value as an error: then it is shown as it is, so
     // that choosing the listed option is a real change the browser reports.
+    // The same IRI written another way (in full, or as a CURIE the policy or
+    // the profile resolves) is that option; else a value with the option's
+    // local name is.
+    let expand = |v: &str| match w.is_empty() {
+        true => env.prefixes.expand(v),
+        false => w.expand(&env.prefixes, v),
+    };
     let selected = opts
         .iter()
         .find(|o| o.value == c.raw)
         .or_else(|| {
             (!c.raw.is_empty() && severity != Some(Severity::Error))
                 .then(|| {
+                    let raw = expand(&c.raw);
                     opts.iter()
-                        .find(|o| !o.value.is_empty() && o.value == wording::local_name(&c.raw))
+                        .find(|o| !o.value.is_empty() && expand(&o.value) == raw)
+                        .or_else(|| {
+                            opts.iter().find(|o| {
+                                !o.value.is_empty() && o.value == wording::local_name(&c.raw)
+                            })
+                        })
                 })
                 .flatten()
         })
