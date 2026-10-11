@@ -1384,3 +1384,638 @@ async fn a_typed_slot_is_not_offered_unrelated_profile_values() {
     settle().await;
     assert_eq!(shown_options(&c), vec![]);
 }
+
+// --- strict validation ------------------------------------------------------------
+
+use prose_core::validate::Options;
+use prose_yew::{ProseProblems, StrictEdit, use_prose_editor_with, use_validation};
+
+const CLOSED: &str = include_str!("../../prose-core/tests/profiles/research-closed.jsonld");
+
+/// A Set that conforms to the closed research profile in strict mode.
+const STRICT_POLICY: &str = r#"{
+  "@context": ["http://www.w3.org/ns/odrl.jsonld",
+               {"ex": "https://example.org/odrl/profile/research/",
+                "foo": "https://example.net/foo/"}],
+  "@type": "Set", "uid": "urn:policy:s",
+  "profile": "https://example.org/odrl/profile/research",
+  "permission": [{
+    "target": "urn:asset:1", "assigner": "urn:party:a", "action": "use",
+    "constraint": [{"leftOperand": "ex:researchPurpose", "operator": "isAnyOf",
+                    "rightOperand": [{"@id": "ex:academic"}]}]
+  }]
+}"#;
+
+/// The same with `foo:bar` as the action, which the profile does not allow.
+fn violating_policy() -> String {
+    STRICT_POLICY.replace(r#""action": "use""#, r#""action": "foo:bar""#)
+}
+
+/// `ex:train` is used without the policy declaring the profile.
+fn undeclared_policy() -> String {
+    STRICT_POLICY
+        .replace(r#""action": "use""#, r#""action": "ex:train""#)
+        .replace(
+            "  \"profile\": \"https://example.org/odrl/profile/research\",\n",
+            "",
+        )
+}
+
+const LEFT: &str = "policy[0].permission[0].constraint[0]#leftOperand";
+const OPERATOR: &str = "policy[0].permission[0].constraint[0]#operator";
+
+fn closed_wording() -> Rc<Wording> {
+    Rc::new(Wording::new().with_profile(ProfileVocab::parse(CLOSED).unwrap()))
+}
+
+#[derive(Properties, PartialEq, Clone)]
+struct StrictProps {
+    json: AttrValue,
+    log: Log,
+    strict: bool,
+    policy: StrictEdit,
+    /// Events the page's buttons emit (`#inject-0`, ...), as a host that
+    /// writes events itself would; `#apply-batch` applies them all as one.
+    inject: Vec<EditEvent>,
+    /// An action added to the vocabulary, which the profile does not allow.
+    extra_action: Option<AttrValue>,
+}
+
+fn strict_props(json: &str, log: &Log, strict: bool, policy: StrictEdit) -> StrictProps {
+    StrictProps {
+        json: json.to_string().into(),
+        log: log.clone(),
+        strict,
+        policy,
+        inject: vec![],
+        extra_action: None,
+    }
+}
+
+/// A host as the demo's Edit tab builds one: the configuration follows the
+/// strict switch, the issues come from the validator, and a refusal and the
+/// problems panel are shown.
+#[function_component(StrictHost)]
+fn strict_host(p: &StrictProps) -> Html {
+    let strict = use_state(|| p.strict);
+    let config = use_memo((*strict, p.extra_action.clone()), |(strict, extra)| {
+        let mut cfg = EditConfig::default().with_wording(closed_wording());
+        if let Some(a) = extra {
+            cfg.vocab
+                .actions
+                .push(prose_yew::Suggestion::new(a, a, None));
+        }
+        if *strict {
+            cfg = cfg.with_strict(Options::strict());
+        }
+        cfg
+    });
+    let json = p.json.clone();
+    let with = use_prose_editor_with(
+        move || read_model(&json).expect("a readable fixture"),
+        Rc::new(config.rules.clone()),
+        config.validator.clone(),
+        p.policy,
+    );
+    let report = use_validation(&with.editor.doc, config.validator.as_ref());
+    let issues = Rc::new(report.issues());
+    let refusal = with.refused.as_ref().and_then(|(ev, e)| e.issue(ev));
+    let onedit = {
+        let log = p.log.clone();
+        let inner = with.editor.onedit.clone();
+        Callback::from(move |ev: EditEvent| {
+            log.borrow_mut().push(ev.clone());
+            inner.emit(ev);
+        })
+    };
+    let toggle = {
+        let strict = strict.clone();
+        Callback::from(move |_| strict.set(!*strict))
+    };
+    let undo = {
+        let undo = with.editor.undo.clone();
+        Callback::from(move |_| undo.emit(()))
+    };
+    let batch = {
+        let apply = with.apply_all.clone();
+        let evs = p.inject.clone();
+        Callback::from(move |_| apply.emit(evs.clone()))
+    };
+    let onfix = with.apply_all.clone();
+    html! {
+        <>
+            <button id="toggle" type="button" onclick={toggle}>{ "Toggle strict" }</button>
+            <button id="undo" type="button" onclick={undo}>{ "Undo" }</button>
+            <button id="apply-batch" type="button" onclick={batch}>{ "Batch" }</button>
+            { for p.inject.iter().enumerate().map(|(i, ev)| {
+                let onedit = onedit.clone();
+                let ev = ev.clone();
+                html! {
+                    <button id={format!("inject-{i}")} type="button"
+                            onclick={Callback::from(move |_| onedit.emit(ev.clone()))}>
+                        { "Inject" }
+                    </button>
+                }
+            }) }
+            <p id="state"
+               data-refused={with.refused.is_some().to_string()}
+               data-can-undo={with.editor.can_undo.to_string()}
+               data-verdict={format!("{:?}", report.verdict)} />
+            <ProseProblems report={report.clone()} onfix={onfix} />
+            <OdrlProseView
+                doc={with.editor.doc.clone()}
+                mode={EditMode::Edit}
+                config={config.clone()}
+                onedit={onedit}
+                issues={issues}
+                refusal={refusal}
+            />
+        </>
+    }
+}
+
+async fn mount_strict(props: StrictProps) -> (Element, yew::AppHandle<StrictHost>) {
+    let container = document().create_element("div").unwrap();
+    document().body().unwrap().append_child(&container).unwrap();
+    let handle =
+        yew::Renderer::<StrictHost>::with_root_and_props(container.clone(), props).render();
+    settle().await;
+    (container, handle)
+}
+
+fn state_attr(c: &Element, name: &str) -> String {
+    q(c, "#state").get_attribute(name).unwrap()
+}
+
+fn text_event(json: &str, path: &str, field: &str, value: &str) -> EditEvent {
+    let slot: SlotPath = format!("{path}#{field}").parse().unwrap();
+    EditEvent::SetText {
+        expect: id_of(json, path),
+        slot,
+        value: value.into(),
+    }
+}
+
+fn wrap_of(el: &Element) -> Element {
+    el.closest(".prose-slot-wrap").unwrap().unwrap()
+}
+
+#[wasm_bindgen_test]
+async fn non_match_enter_keeps_draft_open_invalid() {
+    let log = Log::default();
+    let (c, _h) = mount_strict(strict_props(STRICT_POLICY, &log, true, StrictEdit::Flag)).await;
+    let el = slot(&c, ACTION);
+    type_into(&el, "trian");
+    key(&el, "Enter", false, false);
+    settle().await;
+    assert!(log.borrow().is_empty(), "nothing is committed");
+    // The same element, with the draft in it: not remounted.
+    let again = slot(&c, ACTION);
+    assert_eq!(again.text_content().as_deref(), Some("trian"));
+    assert_eq!(again.get_attribute("aria-invalid").as_deref(), Some("true"));
+    let err = wrap_of(&again)
+        .query_selector(".prose-issue-error")
+        .unwrap()
+        .expect("a message");
+    assert_eq!(
+        err.text_content().unwrap(),
+        "\"trian\" is not an allowed action in Research Data Profile 0.1.0. Did you mean Train?"
+    );
+    let described = again.get_attribute("aria-describedby").unwrap();
+    assert!(described.split(' ').any(|id| id == err.id()), "{described}");
+
+    // With several entries left, the list stays open and Enter takes none.
+    type_into(&slot(&c, ACTION), "t");
+    settle().await;
+    key(&slot(&c, ACTION), "Enter", false, false);
+    settle().await;
+    assert!(log.borrow().is_empty());
+    assert!(
+        c.query_selector("[role=listbox]").unwrap().is_some(),
+        "{}",
+        c.inner_html()
+    );
+    assert_eq!(
+        slot(&c, ACTION).get_attribute("aria-invalid").as_deref(),
+        Some("true")
+    );
+}
+
+#[wasm_bindgen_test]
+async fn typing_again_clears_the_message() {
+    let log = Log::default();
+    let (c, _h) = mount_strict(strict_props(STRICT_POLICY, &log, true, StrictEdit::Flag)).await;
+    type_into(&slot(&c, ACTION), "trian");
+    key(&slot(&c, ACTION), "Enter", false, false);
+    settle().await;
+    assert!(
+        c.query_selector(".prose-slot-wrap .prose-issue-error")
+            .unwrap()
+            .is_some()
+    );
+    type_into(&slot(&c, ACTION), "tria");
+    settle().await;
+    assert!(
+        c.query_selector(".prose-slot-wrap .prose-issue-error")
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(slot(&c, ACTION).get_attribute("aria-invalid"), None);
+}
+
+#[wasm_bindgen_test]
+async fn blur_non_match_reverts_and_announces() {
+    let log = Log::default();
+    let (c, _h) = mount_strict(strict_props(STRICT_POLICY, &log, true, StrictEdit::Flag)).await;
+    let el = slot(&c, ACTION);
+    type_into(&el, "trian");
+    fire_focusout(&el);
+    settle().await;
+    assert!(log.borrow().is_empty());
+    let again = slot(&c, ACTION);
+    assert_eq!(
+        again.text_content().as_deref(),
+        Some("use"),
+        "back to the value"
+    );
+    assert_eq!(again.get_attribute("aria-invalid"), None);
+    let live = wrap_of(&again)
+        .query_selector("[role=status]")
+        .unwrap()
+        .expect("a live region");
+    assert_eq!(live.get_attribute("aria-live").as_deref(), Some("polite"));
+    assert_eq!(
+        live.text_content().unwrap(),
+        "Kept \"use\"; \"trian\" is not in the profile"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn escape_reverts_a_rejected_draft() {
+    let log = Log::default();
+    let (c, _h) = mount_strict(strict_props(STRICT_POLICY, &log, true, StrictEdit::Flag)).await;
+    type_into(&slot(&c, ACTION), "trian");
+    key(&slot(&c, ACTION), "Enter", false, false);
+    settle().await;
+    key(&slot(&c, ACTION), "Escape", false, false);
+    settle().await;
+    assert!(log.borrow().is_empty());
+    assert_eq!(slot(&c, ACTION).text_content().as_deref(), Some("use"));
+    assert!(
+        c.query_selector(".prose-slot-wrap .prose-issue-error")
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[wasm_bindgen_test]
+async fn exact_label_match_commits() {
+    for (typed, written) in [
+        ("Train", "ex:train"),
+        ("TRAIN", "ex:train"),
+        ("ex:train", "ex:train"),
+        ("Fine-tune", "ex:fineTune"),
+        (
+            "https://example.org/odrl/profile/research/fineTune",
+            "ex:fineTune",
+        ),
+        ("odrl:read", "read"),
+        // In the vocabulary, though not among the offered entries.
+        ("extract", "extract"),
+    ] {
+        let log = Log::default();
+        let (c, _h) = mount_strict(strict_props(STRICT_POLICY, &log, true, StrictEdit::Flag)).await;
+        let el = slot(&c, ACTION);
+        type_into(&el, typed);
+        key(&el, "Enter", false, false);
+        settle().await;
+        assert_eq!(
+            set_texts(&log),
+            vec![(ACTION.into(), written.into())],
+            "typed {typed:?}"
+        );
+        assert!(
+            c.query_selector(".prose-slot-wrap .prose-issue-error")
+                .unwrap()
+                .is_none()
+        );
+    }
+}
+
+#[wasm_bindgen_test]
+async fn enter_takes_the_only_entry_left() {
+    let log = Log::default();
+    let (c, _h) = mount_strict(strict_props(STRICT_POLICY, &log, true, StrictEdit::Flag)).await;
+    let el = slot(&c, ACTION);
+    type_into(&el, "fine");
+    key(&el, "Enter", false, false);
+    settle().await;
+    assert_eq!(set_texts(&log), vec![(ACTION.into(), "ex:fineTune".into())]);
+}
+
+#[wasm_bindgen_test]
+async fn clearing_a_closed_slot_commits_the_empty_text() {
+    let log = Log::default();
+    let (c, _h) = mount_strict(strict_props(STRICT_POLICY, &log, true, StrictEdit::Flag)).await;
+    let el = slot(&c, ACTION);
+    type_into(&el, "");
+    fire_focusout(&el);
+    settle().await;
+    assert_eq!(set_texts(&log), vec![(ACTION.into(), String::new())]);
+}
+
+#[wasm_bindgen_test]
+async fn empty_query_lists_all_allowed() {
+    let log = Log::default();
+    let mut props = strict_props(STRICT_POLICY, &log, true, StrictEdit::Flag);
+    props.extra_action = Some("foo:bar".into());
+    let (c, _h) = mount_strict(props).await;
+    type_into(&slot(&c, ACTION), "");
+    settle().await;
+    let labels: Vec<String> = shown_options(&c).into_iter().map(|(l, _)| l).collect();
+    // More than the 8 an open list shows, and none the profile refuses.
+    assert!(labels.len() > 8, "{labels:?}");
+    assert!(labels.iter().any(|l| l == "Train"), "{labels:?}");
+    assert!(labels.iter().any(|l| l == "use"), "{labels:?}");
+    assert!(!labels.iter().any(|l| l == "foo:bar"), "{labels:?}");
+
+    // Outside strict mode the same list is open: capped, and unfiltered.
+    let log = Log::default();
+    let mut props = strict_props(STRICT_POLICY, &log, false, StrictEdit::Flag);
+    props.extra_action = Some("foo:bar".into());
+    let (c, _h) = mount_strict(props).await;
+    type_into(&slot(&c, ACTION), "");
+    settle().await;
+    assert_eq!(shown_options(&c).len(), 8);
+    assert!(slot(&c, ACTION).get_attribute("data-closed").is_none());
+}
+
+#[wasm_bindgen_test]
+async fn an_open_slot_still_commits_anything() {
+    let log = Log::default();
+    let (c, _h) = mount_strict(strict_props(STRICT_POLICY, &log, false, StrictEdit::Flag)).await;
+    let el = slot(&c, ACTION);
+    type_into(&el, "foo:bar");
+    key(&el, "Enter", false, false);
+    settle().await;
+    assert_eq!(set_texts(&log), vec![(ACTION.into(), "foo:bar".into())]);
+}
+
+#[wasm_bindgen_test]
+async fn view_never_triggers_refusal() {
+    let log = Log::default();
+    let (c, _h) = mount_strict(strict_props(
+        STRICT_POLICY,
+        &log,
+        true,
+        StrictEdit::RefuseTerms,
+    ))
+    .await;
+    // Text the profile does not take, on every closed slot: not sent.
+    for (path, text) in [
+        (ACTION, "foo:bar"),
+        (LEFT, "foo:bar"),
+        ("policy[0]#kind", "foo:bar"),
+    ] {
+        let el = slot(&c, path);
+        type_into(&el, text);
+        key(&el, "Enter", false, false);
+        settle().await;
+        fire_focusout(&slot(&c, path));
+        settle().await;
+    }
+    // An operator the operand does not allow, picked by script.
+    let select = slot(&c, OPERATOR).dyn_into::<HtmlSelectElement>().unwrap();
+    select.set_value("gt");
+    select
+        .dispatch_event(&Event::new_with_event_init_dict("change", &bubbling()).unwrap())
+        .unwrap();
+    settle().await;
+    assert!(log.borrow().is_empty(), "{:?}", log.borrow());
+    assert_eq!(state_attr(&c, "data-refused"), "false");
+    assert_eq!(
+        slot(&c, OPERATOR)
+            .dyn_into::<HtmlSelectElement>()
+            .unwrap()
+            .value(),
+        "isAnyOf",
+        "the select shows the document's operator"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn flag_commits_and_marks() {
+    let log = Log::default();
+    let mut props = strict_props(STRICT_POLICY, &log, true, StrictEdit::Flag);
+    props.inject = vec![text_event(
+        STRICT_POLICY,
+        "policy[0].permission[0].action[0]",
+        "name",
+        "foo:bar",
+    )];
+    let (c, _h) = mount_strict(props).await;
+    click(&q(&c, "#inject-0"));
+    settle().await;
+    let el = slot(&c, ACTION);
+    assert_eq!(el.text_content().as_deref(), Some("foo:bar"), "committed");
+    assert_eq!(
+        el.get_attribute("aria-invalid").as_deref(),
+        Some("true"),
+        "and marked"
+    );
+    assert_eq!(state_attr(&c, "data-refused"), "false");
+    assert_eq!(state_attr(&c, "data-verdict"), "Violations");
+    assert!(
+        c.query_selector(".prose-problems .prose-problem-error")
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[wasm_bindgen_test]
+async fn refuseterms_host_event_shown_at_slot() {
+    let log = Log::default();
+    let mut props = strict_props(STRICT_POLICY, &log, true, StrictEdit::RefuseTerms);
+    props.inject = vec![
+        text_event(
+            STRICT_POLICY,
+            "policy[0].permission[0].action[0]",
+            "name",
+            "foo:bar",
+        ),
+        text_event(
+            STRICT_POLICY,
+            "policy[0].permission[0].action[0]",
+            "name",
+            "read",
+        ),
+    ];
+    let (c, _h) = mount_strict(props).await;
+    click(&q(&c, "#inject-0"));
+    settle().await;
+    let el = slot(&c, ACTION);
+    assert_eq!(
+        el.text_content().as_deref(),
+        Some("use"),
+        "the document is unchanged"
+    );
+    assert_eq!(state_attr(&c, "data-refused"), "true");
+    assert_eq!(state_attr(&c, "data-can-undo"), "false", "no history entry");
+    assert_eq!(el.get_attribute("aria-invalid").as_deref(), Some("true"));
+    // The slot is described by the refusal, which the view draws with its
+    // other issues.
+    let described = el.get_attribute("aria-describedby").expect("a description");
+    let err = described
+        .split(' ')
+        .filter_map(|id| document().get_element_by_id(id))
+        .find(|e| e.class_name().contains("prose-issue-error"))
+        .expect("the refusal");
+    assert!(
+        err.text_content().unwrap().contains("foo:bar"),
+        "{}",
+        err.text_content().unwrap()
+    );
+    // The next edit that goes through clears it.
+    click(&q(&c, "#inject-1"));
+    settle().await;
+    assert_eq!(slot(&c, ACTION).text_content().as_deref(), Some("read"));
+    assert_eq!(state_attr(&c, "data-refused"), "false");
+    assert_eq!(slot(&c, ACTION).get_attribute("aria-invalid"), None);
+}
+
+#[wasm_bindgen_test]
+async fn fix_is_one_undo_step() {
+    let json = undeclared_policy();
+    let log = Log::default();
+    let (c, _h) = mount_strict(strict_props(&json, &log, true, StrictEdit::Flag)).await;
+    assert_eq!(state_attr(&c, "data-verdict"), "Violations");
+    let fix = q(&c, ".prose-problems .prose-problem-fix");
+    assert_eq!(fix.get_attribute("data-safe").as_deref(), Some("true"));
+    click(&fix);
+    settle().await;
+    assert_eq!(
+        state_attr(&c, "data-verdict"),
+        "Conforms",
+        "{}",
+        c.inner_html()
+    );
+    assert!(
+        c.query_selector(".prose-problems .prose-problem-fix")
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(state_attr(&c, "data-can-undo"), "true");
+    click(&q(&c, "#undo"));
+    settle().await;
+    assert_eq!(state_attr(&c, "data-verdict"), "Violations");
+    assert_eq!(
+        state_attr(&c, "data-can-undo"),
+        "false",
+        "one step undid the fix"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn several_events_are_one_undo_step_or_none() {
+    let mut props = strict_props(
+        STRICT_POLICY,
+        &Log::default(),
+        true,
+        StrictEdit::RefuseTerms,
+    );
+    let action = "policy[0].permission[0].action[0]";
+    props.inject = vec![
+        text_event(STRICT_POLICY, action, "name", "read"),
+        text_event(STRICT_POLICY, "policy[0]", "uid", "urn:policy:renamed"),
+    ];
+    let (c, _h) = mount_strict(props.clone()).await;
+    click(&q(&c, "#apply-batch"));
+    settle().await;
+    assert_eq!(slot(&c, ACTION).text_content().as_deref(), Some("read"));
+    assert_eq!(
+        slot(&c, "policy[0]#uid").text_content().as_deref(),
+        Some("urn:policy:renamed")
+    );
+    click(&q(&c, "#undo"));
+    settle().await;
+    assert_eq!(slot(&c, ACTION).text_content().as_deref(), Some("use"));
+    assert_eq!(
+        slot(&c, "policy[0]#uid").text_content().as_deref(),
+        Some("urn:policy:s")
+    );
+    assert_eq!(state_attr(&c, "data-can-undo"), "false");
+
+    // If the second is refused, the first is not applied either.
+    props.inject = vec![
+        text_event(STRICT_POLICY, action, "name", "read"),
+        text_event(STRICT_POLICY, action, "name", "foo:bar"),
+    ];
+    let (c, _h) = mount_strict(props).await;
+    click(&q(&c, "#apply-batch"));
+    settle().await;
+    assert_eq!(slot(&c, ACTION).text_content().as_deref(), Some("use"));
+    assert_eq!(state_attr(&c, "data-refused"), "true");
+    assert_eq!(state_attr(&c, "data-can-undo"), "false");
+}
+
+#[wasm_bindgen_test]
+async fn undo_never_refused() {
+    let json = violating_policy();
+    let mut props = strict_props(&json, &Log::default(), true, StrictEdit::RefuseTerms);
+    props.inject = vec![text_event(
+        &json,
+        "policy[0].permission[0].action[0]",
+        "name",
+        "read",
+    )];
+    let (c, _h) = mount_strict(props).await;
+    // An already violating document loads and can be edited.
+    assert_eq!(slot(&c, ACTION).text_content().as_deref(), Some("foo:bar"));
+    click(&q(&c, "#inject-0"));
+    settle().await;
+    assert_eq!(slot(&c, ACTION).text_content().as_deref(), Some("read"));
+    assert_eq!(state_attr(&c, "data-verdict"), "Conforms");
+    // Undo restores the document the profile does not allow.
+    click(&q(&c, "#undo"));
+    settle().await;
+    assert_eq!(slot(&c, ACTION).text_content().as_deref(), Some("foo:bar"));
+    assert_eq!(state_attr(&c, "data-refused"), "false");
+    assert_eq!(state_attr(&c, "data-verdict"), "Violations");
+}
+
+#[wasm_bindgen_test]
+async fn toggle_strict_keeps_doc_and_history() {
+    let log = Log::default();
+    let (c, _h) = mount_strict(strict_props(STRICT_POLICY, &log, true, StrictEdit::Flag)).await;
+    let uid = slot(&c, "policy[0]#uid");
+    type_into(&uid, "urn:policy:edited");
+    fire_focusout(&uid);
+    settle().await;
+    assert_eq!(state_attr(&c, "data-can-undo"), "true");
+    assert!(slot(&c, ACTION).get_attribute("data-closed").is_some());
+    click(&q(&c, "#toggle"));
+    settle().await;
+    assert!(slot(&c, ACTION).get_attribute("data-closed").is_none());
+    assert_eq!(
+        slot(&c, "policy[0]#uid").text_content().as_deref(),
+        Some("urn:policy:edited")
+    );
+    assert_eq!(
+        state_attr(&c, "data-can-undo"),
+        "true",
+        "the history is kept"
+    );
+    click(&q(&c, "#toggle"));
+    settle().await;
+    assert!(slot(&c, ACTION).get_attribute("data-closed").is_some());
+    assert_eq!(
+        slot(&c, "policy[0]#uid").text_content().as_deref(),
+        Some("urn:policy:edited")
+    );
+    click(&q(&c, "#undo"));
+    settle().await;
+    assert_eq!(
+        slot(&c, "policy[0]#uid").text_content().as_deref(),
+        Some("urn:policy:s")
+    );
+}

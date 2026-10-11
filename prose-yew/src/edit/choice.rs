@@ -69,8 +69,8 @@ fn closes_operators(env: &Env, left: &str) -> bool {
 
 /// Whether strict validation would refuse `value` written into the select.
 fn is_blocked(v: &Validator, doc: &EditDoc, c: &ChoiceSlot, value: &str) -> bool {
-    value.is_empty()
-        || v.admissible(
+    !value.is_empty()
+        && v.admissible(
             doc,
             &EditEvent::SetChoice {
                 slot: c.path.clone(),
