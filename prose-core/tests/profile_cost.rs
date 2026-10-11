@@ -358,3 +358,43 @@ fn the_editor_without_a_profile_bounds_policy_context_expansion() {
     assert!(n.0 < 10_000);
     assert_eq!(n.1, 1);
 }
+
+/// A policy document whose @context binds 20 000 prefixes, with `n` other
+/// @graph items written as `item` before the policy.
+fn graph_under_a_large_context(n: usize, item: &str) -> String {
+    let ctx: Vec<String> = (0..20_000)
+        .map(|i| format!(r#""p{i}":"https://e/{i}/""#))
+        .collect();
+    let mut items = vec![item; n];
+    let policy =
+        r#"{"@type":"Set","uid":"urn:p","permission":[{"action":"use","target":"urn:a"}]}"#;
+    items.push(policy);
+    format!(
+        r#"{{"@context":{{{}}},"@graph":[{}]}}"#,
+        ctx.join(","),
+        items.join(",")
+    )
+}
+
+fn render_with_a_profile(text: String) -> Result<usize, prose_core::ProseError> {
+    let w =
+        prose_core::profile::Wording::new().with_profile(ProfileVocab::parse(&action("")).unwrap());
+    prose_core::render_with(&text, &w).map(|r| r.document.policies.len())
+}
+
+#[test]
+fn many_graph_items_under_a_large_policy_context() {
+    // The outer context was copied for every @graph item, policy or not.
+    let text = graph_under_a_large_context(2_500, "{}");
+    let r = quick("graph items", move || render_with_a_profile(text));
+    assert_eq!(r, Ok(1));
+}
+
+#[test]
+fn many_graph_items_with_their_own_context() {
+    let text = graph_under_a_large_context(2_500, r#"{"@context":{"a":"https://e/a/"}}"#);
+    let r = quick("graph items with contexts", move || {
+        render_with_a_profile(text)
+    });
+    assert_eq!(r, Ok(1));
+}
