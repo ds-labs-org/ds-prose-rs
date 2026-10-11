@@ -326,7 +326,7 @@ that makes this finding, and only under `StrictEdit::RefuseTerms`.
 | <a id="rule-odrl-rule-action"></a>`odrl.rule-action` | a rule without an action (IM §2.6, §2.7.1) | off, error | standard | no |
 | <a id="rule-odrl-constraint-shape"></a>`odrl.constraint-shape` | a constraint without a left operand, an operator, or exactly one of `rightOperand` and `rightOperandReference` (IM §2.5.1) | off, error | standard | no |
 | <a id="rule-odrl-set-operator-cardinality"></a>`odrl.set-operator-cardinality` | several right operand values with an operator that is not set-based (IM §2.5.1) | off, error | standard | no |
-| <a id="rule-odrl-consequence-nesting"></a>`odrl.consequence-nesting` | a consequence on a consequence, or a remedy that has a consequence (IM §2.6.6, §2.6.7) | off, error | standard | no |
+| <a id="rule-odrl-consequence-nesting"></a>`odrl.consequence-nesting` | a consequence on a consequence, or a remedy that has a consequence (IM §2.6.3, §2.6.7) | off, error | standard | no |
 | <a id="rule-odrl-inheritance-cycle"></a>`odrl.inheritance-cycle` | policies in the document that inherit from each other in a circle (IM §2.9) | off, error | standard | no |
 | <a id="rule-prose-operator-not-allowed"></a>`prose.operator-not-allowed` | an operator outside the left operand's `prose:operator` | info, info; closed: error | convention | closed only |
 | <a id="rule-prose-value-not-allowed"></a>`prose.value-not-allowed` | an IRI value outside `prose:rightOperand` and the values narrower than it | off, info; closed: error | convention | no |

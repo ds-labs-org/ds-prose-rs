@@ -443,7 +443,7 @@ pub static RULES: &[RuleInfo] = &[
         "odrl.consequence-nesting",
         Odrl,
         Standard,
-        "ODRL IM 2.6.6, 2.6.7",
+        "ODRL IM 2.6.3, 2.6.7",
         "A consequence on a consequence, or a remedy that has a consequence",
         Off,
         Error,

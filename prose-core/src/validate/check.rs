@@ -1052,7 +1052,7 @@ impl<'a> Checker<'a> {
     }
 
     /// A rule's own requirements, with the policy's shared properties
-    /// pushed down (IM 2.1.2, 2.1.3, 2.6, 2.6.1-2, 2.6.6-7, 2.7.1).
+    /// pushed down (IM 2.1.2, 2.1.3, 2.6, 2.6.1-2, 2.6.3, 2.6.7, 2.7.1).
     fn rule_structure(&mut self, path: &NodePath, list: RuleList, r: &RuleNode) {
         let Some(c) = self.cur.as_ref() else {
             return;
