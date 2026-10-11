@@ -547,3 +547,25 @@ async fn the_not_in_the_profile_notes_are_bounded_per_render() {
     assert!(notes > 0, "the first slots are still marked");
     assert!(notes <= 2000, "{notes} notes: one validator ask per slot");
 }
+
+const PURPOSE_RIGHT: &str = "policy[0].permission[0].constraint[0]#rightOperand[0]";
+
+#[tokio::test]
+async fn only_a_closed_operand_closes_its_values() {
+    // The same profile without the closing marker suggests values and
+    // closes nothing.
+    let closed = edit_view("violating.json", strict_config(), vec![]).await;
+    assert!(
+        tag_of(&closed, PURPOSE_RIGHT).contains("data-closed=\"true\""),
+        "{closed}"
+    );
+    let open = ProfileVocab::parse(&profile_file("research.jsonld")).unwrap();
+    let config = EditConfig::default()
+        .with_wording(Rc::new(Wording::new().with_profile(open)))
+        .with_strict(Options::strict());
+    let html = edit_view("violating.json", config, vec![]).await;
+    assert!(
+        !tag_of(&html, PURPOSE_RIGHT).contains("data-closed"),
+        "{html}"
+    );
+}

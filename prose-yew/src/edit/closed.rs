@@ -219,6 +219,8 @@ mod tests {
         assert_eq!(near("u"), None);
         assert_eq!(near(""), None);
         assert_eq!(near(&"distill".repeat(40)), None);
+        // Three slips in five letters is a different word.
+        assert_eq!(near("txxyn"), None);
         // An exact entry is not "near" anything else.
         assert_eq!(near("use").as_deref(), Some("use"));
     }
