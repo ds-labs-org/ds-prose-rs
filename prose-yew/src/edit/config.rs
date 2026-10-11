@@ -4,9 +4,11 @@
 //! ODRL JSON-LD preset.
 use prose_core::edit::{EditRules, EmptyText, Field, ListKind, ListPath, NodePath, RuleList, Step};
 use prose_core::profile::{Prefixes, ProfileVocab, Term, TermKind, Wording};
+use prose_core::validate::{Options, Validator};
 use prose_core::wording;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::sync::Arc;
 use yew::prelude::*;
 
 /// What a + or - button shows. The accessible name is always the specific
@@ -842,6 +844,10 @@ pub struct EditConfig {
     /// the suggestions and selects. Set it with [`EditConfig::with_wording`],
     /// which also extends `vocab`.
     pub wording: Rc<Wording>,
+    /// Validation of the document against `wording`, when the host asks
+    /// for it. Set it with [`EditConfig::with_strict`]; `None` (the
+    /// default) validates nothing.
+    pub validator: Option<Validator>,
 }
 
 impl EditConfig {
@@ -852,8 +858,122 @@ impl EditConfig {
     pub fn with_wording(mut self, w: Rc<Wording>) -> EditConfig {
         self.vocab = self.vocab.with_profiles_in(&w, &self.labels.group_profile);
         self.wording = w;
+        match self.validator.take() {
+            Some(v) => self.with_strict(v.options().clone()),
+            None => self,
+        }
+    }
+
+    /// Validates against `wording` with `options` (usually
+    /// [`Options::strict`]), and rewrites `rules.defaults` so that what an
+    /// add button creates is admissible: the left operand, operator, action
+    /// and policy type each stay as they are when admissible, and otherwise
+    /// become the first admissible entry of `vocab`, or `""` when there is
+    /// none. The policy type is the exception: a policy cannot do without
+    /// one, so with nothing admissible it stays as it was. Call it after
+    /// [`EditConfig::with_wording`], which rebuilds the validator anyway.
+    pub fn with_strict(mut self, options: Options) -> EditConfig {
+        let v = Validator::new(Arc::new((*self.wording).clone()), options);
+        let d = &mut self.rules.defaults;
+        let ops: Vec<String> = self.vocab.operators.iter().map(|o| o.to_string()).collect();
+        let values = |list: &[Suggestion]| -> Vec<String> {
+            list.iter().map(|s| s.value.to_string()).collect()
+        };
+        d.left_operand = admissible_default(&v, Field::LeftOperand, &d.left_operand, &[], "")
+            .unwrap_or_default();
+        d.operator = admissible_default(&v, Field::Operator, &d.operator, &ops, &d.left_operand)
+            .unwrap_or_default();
+        d.action = admissible_default(&v, Field::Name, &d.action, &values(&self.vocab.actions), "")
+            .unwrap_or_default();
+        if let Some(kind) = admissible_default(
+            &v,
+            Field::Kind,
+            &d.policy_kind,
+            &values(&self.vocab.policy_kinds),
+            "",
+        ) {
+            d.policy_kind = kind;
+        }
+        self.validator = Some(v);
         self
     }
+}
+
+/// `current` when `v` admits it in `field` of a new node, else the first
+/// of `candidates` it admits; `None` when it admits none. `left` is the
+/// left operand of the new constraint an operator is checked under.
+fn admissible_default(
+    v: &Validator,
+    field: Field,
+    current: &str,
+    candidates: &[String],
+    left: &str,
+) -> Option<String> {
+    std::iter::once(current)
+        .chain(candidates.iter().map(String::as_str))
+        .find(|c| admits(v, field, c, left))
+        .map(str::to_string)
+}
+
+/// Whether `v`'s reducer gate lets `value` be written into `field` of a
+/// fresh policy with one permission and one constraint (under `left`).
+/// Both are read as the loaded profiles' prefixes read them: whether a
+/// policy binds a prefix is that policy's to say.
+fn admits(v: &Validator, field: Field, value: &str, left: &str) -> bool {
+    use prose_core::edit::{
+        ActionNode, AtomicConstraint, ConstraintNode, EditDoc, EditEvent, Literal, PolicyNode,
+        RightOperand, RuleNode, SlotPath,
+    };
+    let none = Prefixes::default();
+    let expand = |t: &str| {
+        if t.is_empty() {
+            String::new()
+        } else {
+            v.wording().expand(&none, t)
+        }
+    };
+    let doc = EditDoc::new(vec![PolicyNode {
+        kind: "Set".into(),
+        uid: Some("urn:ds-prose:defaults".into()),
+        permission: vec![RuleNode {
+            action: vec![ActionNode {
+                name: "use".into(),
+                ..ActionNode::default()
+            }],
+            constraint: vec![ConstraintNode::Atomic(AtomicConstraint {
+                left: expand(left),
+                operator: "eq".into(),
+                right: RightOperand::Values(vec![Literal::Str(String::new())]),
+                ..AtomicConstraint::default()
+            })],
+            ..RuleNode::default()
+        }],
+        ..PolicyNode::default()
+    }]);
+    let rule = NodePath::policy(0).child(Step::Rule(RuleList::Permission, 0));
+    let node = match field {
+        Field::Kind => NodePath::policy(0),
+        Field::Name => rule.child(Step::Action(0)),
+        _ => rule.child(Step::Constraint(0)),
+    };
+    let Some(expect) = doc.node(&node).map(|n| n.id()) else {
+        return false;
+    };
+    let slot = SlotPath { node, field };
+    let value = expand(value);
+    let ev = match field {
+        Field::Operator => EditEvent::SetChoice {
+            slot,
+            expect,
+            value,
+        },
+        _ => EditEvent::SetText {
+            slot,
+            expect,
+            value,
+        },
+    };
+    v.admissible(&doc, &ev).is_ok()
 }
 
 impl Default for EditConfig {
@@ -873,6 +993,7 @@ impl Default for EditConfig {
             max_suggestions: 8,
             host_plans_operator_switches: false,
             wording: Rc::new(Wording::default()),
+            validator: None,
         }
     }
 }
@@ -1328,12 +1449,22 @@ mod tests {
         assert_eq!(defaults(&cfg), ["Set", "use", "", "eq"]);
 
         // Defaults the profiles do not allow give way to the first
-        // admissible entry of the vocabulary.
+        // admissible entry of the vocabulary, where the profile's terms
+        // come first.
         let mut cfg = EditConfig::default().with_wording(w.clone());
         cfg.rules.defaults.policy_kind = format!("{EX}fineTune");
         cfg.rules.defaults.action = "https://example.net/foo/bar".into();
         cfg.rules.defaults.left_operand = format!("{EX}academic");
         cfg.rules.defaults.operator = "https://example.net/foo/op".into();
+        let cfg = cfg.with_strict(Options::strict());
+        let (kind, action) = (format!("{EX}ResearchAgreement"), format!("{EX}train"));
+        assert_eq!(cfg.vocab.policy_kinds[0].value.as_str(), kind);
+        assert_eq!(cfg.vocab.actions[0].value.as_str(), action);
+        assert_eq!(defaults(&cfg), [kind.as_str(), action.as_str(), "", "eq"]);
+        // Without a profile, ODRL's own.
+        let mut cfg = EditConfig::default();
+        cfg.rules.defaults.policy_kind = format!("{EX}fineTune");
+        cfg.rules.defaults.action = "https://example.net/foo/bar".into();
         let cfg = cfg.with_strict(Options::strict());
         assert_eq!(defaults(&cfg), ["Set", "use", "", "eq"]);
 

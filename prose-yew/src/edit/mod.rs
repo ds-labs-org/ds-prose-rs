@@ -46,6 +46,7 @@ pub use config::{
 };
 pub use css::BASE_CSS;
 pub use hook::{ProseEditor, use_prose_editor};
+pub use prose_core::edit::StrictEdit;
 pub use suggest::filter_suggestions;
 pub use view::{OdrlProseView, OdrlProseViewProps};
 
