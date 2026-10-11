@@ -52,8 +52,18 @@ pub(crate) fn run(doc: &EditDoc, w: &Wording, index: &Index, o: &Options) -> Vec
         options: o,
         prefixes: prefixes(doc),
         cur: None,
+        unsure: false,
         out: Vec::new(),
     };
+    c.imports();
+    for note in &doc.warnings {
+        c.emit(
+            RuleId::InputReaderNote,
+            false,
+            IssueTarget::Doc,
+            note.clone(),
+        );
+    }
     for (i, p) in doc.policies.iter().enumerate() {
         c.policy(NodePath::policy(i), p);
     }
@@ -79,6 +89,9 @@ struct Checker<'a> {
     prefixes: Prefixes,
     /// The policy being checked.
     cur: Option<PolicyCtx>,
+    /// A loaded profile builds on one that is not loaded: no policy's
+    /// vocabulary is complete.
+    unsure: bool,
     out: Vec<Finding>,
 }
 
@@ -244,7 +257,12 @@ impl<'a> Checker<'a> {
             super::Level::Warning => Severity::Warning,
             super::Level::Error => Severity::Error,
         };
-        self.out.push(Finding::new(rule, severity, target, message));
+        let mut f = Finding::new(rule, severity, target, message);
+        if rule == RuleId::InputUnchecked && self.options.fail_closed {
+            // Fail closed: what could not be checked fails the policy.
+            f.gap = false;
+        }
+        self.out.push(f);
         self.out.last_mut()
     }
 
@@ -513,7 +531,43 @@ impl<'a> Checker<'a> {
     /// Whether the policy being checked has a declared profile it could
     /// not load, so its vocabulary is not complete.
     fn incomplete(&self) -> bool {
-        self.cur.as_ref().is_some_and(|c| c.incomplete)
+        self.unsure || self.cur.as_ref().is_some_and(|c| c.incomplete)
+    }
+
+    /// The profiles the loaded ones build on (`owl:imports`,
+    /// `prof:isProfileOf`) that are not loaded: recorded, never fetched.
+    /// ODRL itself is always there.
+    fn imports(&mut self) {
+        let mut seen: HashSet<(&str, &str)> = HashSet::new();
+        for p in self.profiles.clone() {
+            for i in p.imports() {
+                if self.w.covers(i) || !seen.insert((p.iri().unwrap_or(""), i)) {
+                    continue;
+                }
+                self.unsure = true;
+                let msg = format!(
+                    "the loaded profile {} builds on <{i}>, which is not loaded",
+                    profile_name(p)
+                );
+                if let Some(f) =
+                    self.emit(RuleId::ProfileImportNotLoaded, false, IssueTarget::Doc, msg)
+                {
+                    f.profile = Some(i.clone());
+                    f.term = Some(TermRef {
+                        written: i.clone(),
+                        iri: i.clone(),
+                    });
+                }
+            }
+        }
+    }
+
+    /// Something the reader kept as written, or only a reference to: it
+    /// could not be checked.
+    fn unchecked(&mut self, target: IssueTarget, id: NodeId, message: String) {
+        if let Some(f) = self.emit(RuleId::InputUnchecked, false, target, message) {
+            f.node = Some(id);
+        }
     }
 
     /// Whether the policy being checked names the profile `iri`.
@@ -552,7 +606,9 @@ impl<'a> Checker<'a> {
     }
 
     fn policy(&mut self, path: NodePath, p: &PolicyNode) {
-        if p.locked.is_some() {
+        if let Some(reason) = &p.locked {
+            let msg = format!("this policy could not be checked: {reason}");
+            self.unchecked(IssueTarget::Node(path), p.id, msg);
             return;
         }
         // Each profile that is not loaded once, the first MAX_NAMED by name.
@@ -623,10 +679,18 @@ impl<'a> Checker<'a> {
 
     fn rules(&mut self, owner: &NodePath, list: RuleList, rules: &[RuleNode]) {
         for (i, r) in rules.iter().enumerate() {
-            if r.locked.is_some() {
+            let path = owner.child(Step::Rule(list, i));
+            if let Some(reason) = &r.locked {
+                let msg = format!("this rule could not be checked: {reason}");
+                self.unchecked(IssueTarget::Node(path), r.id, msg);
                 continue;
             }
-            let path = owner.child(Step::Rule(list, i));
+            if let Some(iri) = &r.reference {
+                let msg =
+                    format!("the rule <{iri}> is only referenced, so it could not be checked");
+                self.unchecked(IssueTarget::Node(path), r.id, msg);
+                continue;
+            }
             self.entities(&path, &r.assigner, &r.assignee, &r.target);
             self.actions(&path, &r.action);
             self.constraints(&path, Step::Constraint, &r.constraint);
@@ -653,9 +717,17 @@ impl<'a> Checker<'a> {
             (EntityRole::Target, target),
         ] {
             for (i, e) in list.iter().enumerate() {
-                if e.locked.is_none() {
-                    let path = owner.child(Step::Entity(role, i));
-                    self.constraints(&path, Step::Refinement, &e.refinement);
+                let path = owner.child(Step::Entity(role, i));
+                match &e.locked {
+                    None => self.constraints(&path, Step::Refinement, &e.refinement),
+                    Some(reason) => {
+                        let noun = match role {
+                            EntityRole::Target => "asset",
+                            _ => "party",
+                        };
+                        let msg = format!("this {noun} could not be checked: {reason}");
+                        self.unchecked(IssueTarget::Node(path), e.id, msg);
+                    }
                 }
             }
         }
@@ -663,10 +735,12 @@ impl<'a> Checker<'a> {
 
     fn actions(&mut self, owner: &NodePath, actions: &[ActionNode]) {
         for (i, a) in actions.iter().enumerate() {
-            if a.locked.is_some() {
+            let path = owner.child(Step::Action(i));
+            if let Some(reason) = &a.locked {
+                let msg = format!("this action could not be checked: {reason}");
+                self.unchecked(IssueTarget::Node(path), a.id, msg);
                 continue;
             }
-            let path = owner.child(Step::Action(i));
             self.term(&path, a.id, Field::Name, &a.name, Pos::Action);
             self.constraints(&path, Step::Refinement, &a.refinement);
         }
@@ -678,7 +752,16 @@ impl<'a> Checker<'a> {
             match c {
                 ConstraintNode::Atomic(a) => self.atomic(&path, a),
                 ConstraintNode::Logical(l) => self.constraints(&path, Step::Child, &l.children),
-                ConstraintNode::Reference { .. } | ConstraintNode::Opaque { .. } => {}
+                ConstraintNode::Reference { id, iri, .. } => {
+                    let msg = format!(
+                        "the constraint <{iri}> is only referenced, so it could not be checked"
+                    );
+                    self.unchecked(IssueTarget::Node(path), *id, msg);
+                }
+                ConstraintNode::Opaque { id, reason, .. } => {
+                    let msg = format!("this constraint could not be checked: {reason}");
+                    self.unchecked(IssueTarget::Node(path), *id, msg);
+                }
             }
         }
     }
