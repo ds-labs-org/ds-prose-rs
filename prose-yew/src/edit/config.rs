@@ -3,8 +3,9 @@
 //! button looks. Nothing here is specific to a host; the defaults are the
 //! ODRL JSON-LD preset.
 use prose_core::edit::{EditRules, EmptyText, Field, ListKind, ListPath, NodePath, RuleList, Step};
-use prose_core::profile::{Prefixes, Wording};
+use prose_core::profile::{Prefixes, ProfileVocab, Term, TermKind, Wording};
 use prose_core::wording;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use yew::prelude::*;
 
@@ -160,18 +161,159 @@ impl Vocabulary {
     }
 
     /// As [`Vocabulary::with_profiles`], with the group heading template.
-    pub(crate) fn with_profiles_in(self, w: &Wording, group: &str) -> Vocabulary {
-        let _ = (w, group);
+    pub(crate) fn with_profiles_in(mut self, w: &Wording, group: &str) -> Vocabulary {
+        if w.is_empty() {
+            return self;
+        }
+        let langs = w.languages();
+        let no_prefixes = Prefixes::default();
+        let iri_of = |value: &str| w.expand(&no_prefixes, value);
+        let value_of = |iri: &str| no_prefixes.compact(iri).unwrap_or_else(|| iri.to_string());
+        let (mut actions, mut left, mut kinds) = (vec![], vec![], vec![]);
+        let mut seen: HashSet<String> = HashSet::new();
+        for p in w.profiles() {
+            let title = p
+                .title()
+                .pick(langs)
+                .or(p.iri())
+                .unwrap_or("unnamed profile");
+            let g = AttrValue::from(fill(group, &[("profile", title)]));
+            let entry = |t: &Term, hint: Option<String>| Suggestion {
+                value: value_of(&t.iri).into(),
+                label: t.display_label(langs).into(),
+                hint: hint.filter(|h| !h.is_empty()).map(AttrValue::from),
+                group: Some(g.clone()),
+            };
+            let definition = |t: &Term| t.definition.pick(langs).map(str::to_string);
+            for t in action_order(p) {
+                if seen.insert(t.iri.clone()) {
+                    actions.push(entry(t, Some(action_hint(w, t))));
+                }
+            }
+            for t in p.terms_of(TermKind::LeftOperand).filter(|t| !t.deprecated) {
+                if seen.insert(t.iri.clone()) {
+                    left.push(entry(t, definition(t)));
+                }
+            }
+            for t in p.terms_of(TermKind::PolicyClass).filter(|t| !t.deprecated) {
+                if seen.insert(t.iri.clone()) {
+                    kinds.push(entry(t, definition(t)));
+                }
+            }
+            for t in p.terms_of(TermKind::Operator).filter(|t| !t.deprecated) {
+                if !self.operators.iter().any(|o| iri_of(o) == t.iri) {
+                    self.operators.push(value_of(&t.iri).into());
+                }
+            }
+            for t in p.terms_of(TermKind::ConflictTerm).filter(|t| !t.deprecated) {
+                if !self.conflicts.iter().any(|c| iri_of(&c.value) == t.iri) {
+                    self.conflicts
+                        .push(Choice::new(&value_of(&t.iri), &t.display_label(langs)));
+                }
+            }
+        }
+        // Profile entries first; a listed entry with the same IRI goes.
+        let merge = |new: Vec<Suggestion>, old: Vec<Suggestion>| -> Vec<Suggestion> {
+            let iris: HashSet<String> = new.iter().map(|s| iri_of(&s.value)).collect();
+            new.into_iter()
+                .chain(
+                    old.into_iter()
+                        .filter(|s| !iris.contains(&iri_of(&s.value))),
+                )
+                .collect()
+        };
+        self.actions = merge(actions, std::mem::take(&mut self.actions));
+        self.left_operands = merge(left, std::mem::take(&mut self.left_operands));
+        self.policy_kinds = merge(kinds, std::mem::take(&mut self.policy_kinds));
         self
     }
 }
+
+/// A profile's actions, not deprecated, depth first along `includedIn`
+/// within the profile: an action right after the one it is included in.
+/// A tree goes where its first action in the document is; a cycle is cut
+/// where it closes.
+fn action_order(p: &ProfileVocab) -> Vec<&Term> {
+    let acts: Vec<&Term> = p
+        .terms_of(TermKind::Action)
+        .filter(|t| !t.deprecated)
+        .collect();
+    let at: HashMap<&str, usize> = acts
+        .iter()
+        .enumerate()
+        .map(|(i, t)| (t.iri.as_str(), i))
+        .collect();
+    let parent: Vec<Option<usize>> = acts
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            t.included_in
+                .iter()
+                .find_map(|p| at.get(p.as_str()).copied().filter(|&p| p != i))
+        })
+        .collect();
+    let mut children: Vec<Vec<usize>> = vec![vec![]; acts.len()];
+    for (i, p) in parent.iter().enumerate() {
+        if let Some(p) = p {
+            children[*p].push(i);
+        }
+    }
+    let mut done = vec![false; acts.len()];
+    // The climb that last passed each action, so a climb stops on a cycle.
+    let mut climbed: Vec<Option<usize>> = vec![None; acts.len()];
+    let mut out = Vec::with_capacity(acts.len());
+    for first in 0..acts.len() {
+        if done[first] {
+            continue;
+        }
+        // Up to the root of this action's tree, or to where a cycle closes.
+        let mut root = first;
+        climbed[root] = Some(first);
+        while let Some(p) = parent[root].filter(|&p| climbed[p] != Some(first) && !done[p]) {
+            climbed[p] = Some(first);
+            root = p;
+        }
+        let mut stack = vec![root];
+        while let Some(i) = stack.pop() {
+            if std::mem::replace(&mut done[i], true) {
+                continue;
+            }
+            out.push(acts[i]);
+            stack.extend(children[i].iter().rev().filter(|&&c| !done[c]));
+        }
+    }
+    out
+}
+
+/// "{definition} · part of {broader action}", with either part left out
+/// when the profile does not give it.
+fn action_hint(w: &Wording, t: &Term) -> String {
+    let langs = w.languages();
+    let parent = t.included_in.first().map(|i| match w.lookup(i) {
+        Some((p, _)) => p.display_label(langs),
+        None if i.starts_with(ODRL_NS) => wording::action(wording::local_name(i)),
+        None => wording::humanise(wording::local_name(i)),
+    });
+    let definition = t.definition.pick(langs);
+    match (definition, parent) {
+        (Some(d), Some(p)) => format!("{d} \u{b7} part of {p}"),
+        (Some(d), None) => d.to_string(),
+        (None, Some(p)) => format!("part of {p}"),
+        (None, None) => String::new(),
+    }
+}
+
+const ODRL_NS: &str = "http://www.w3.org/ns/odrl/2/";
 
 /// How a suggested value is written into a policy whose prefixes are
 /// `prefixes`: a full IRI as a compact IRI or bare ODRL term where the
 /// policy binds it, else in full; any other text as it is.
 pub(crate) fn written_form(value: &str, prefixes: &Prefixes) -> AttrValue {
-    let _ = prefixes;
-    AttrValue::from(value.to_string())
+    let written = value
+        .contains("://")
+        .then(|| prefixes.compact(value))
+        .flatten();
+    AttrValue::from(written.unwrap_or_else(|| value.to_string()))
 }
 
 /// Texts shown where a list is empty.
@@ -660,6 +802,7 @@ impl EditConfig {
     /// for a configuration without a profile yet: the terms of a profile
     /// set before are not taken out.
     pub fn with_wording(mut self, w: Rc<Wording>) -> EditConfig {
+        self.vocab = self.vocab.with_profiles_in(&w, &self.labels.group_profile);
         self.wording = w;
         self
     }
@@ -885,6 +1028,19 @@ mod tests {
     }
 
     #[test]
+    fn action_order_ends_on_an_included_in_cycle() {
+        let text = include_str!("../../../prose-core/tests/profiles/hostile/cycle.jsonld");
+        let p = ProfileVocab::parse(text).unwrap();
+        let order: Vec<&str> = action_order(&p).iter().map(|t| t.iri.as_str()).collect();
+        let ex = "https://example.org/cycle/";
+        // a's tree is entered at b (where the cycle closes), and c follows a.
+        assert_eq!(
+            order,
+            [format!("{ex}b"), format!("{ex}a"), format!("{ex}c")]
+        );
+    }
+
+    #[test]
     fn dedup_by_iri() {
         let v = Vocabulary::default().with_profiles(&odrl22());
         let uses: Vec<&Suggestion> = v.actions.iter().filter(|s| s.value == "use").collect();
@@ -894,8 +1050,10 @@ mod tests {
             uses[0].group.as_deref(),
             Some("From profile: ODRL Version 2.2")
         );
-        // An ODRL term is offered bare, so it is written bare.
-        assert!(values(&v.actions).contains(&"commercialize"));
+        // An ODRL term is offered bare, so it is written bare; one that
+        // ODRL 2.2 deprecates (commercialize) is not offered.
+        assert!(values(&v.actions[..2]).contains(&"distribute"));
+        assert!(!values(&v.actions).contains(&"commercialize"));
         assert_eq!(
             v.actions.iter().filter(|s| s.value == "distribute").count(),
             1

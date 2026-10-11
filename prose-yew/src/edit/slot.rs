@@ -12,7 +12,7 @@ use yew::prelude::*;
 
 use prose_core::edit::{EditEvent, IssueTarget, Severity, Slot, SlotKind};
 
-use super::config::{Suggestion, cls, merge_styles};
+use super::config::{Suggestion, cls, merge_styles, written_form};
 use super::suggest::filter_suggestions;
 use super::{Env, EnvRef, FocusKind, SlotFocus};
 
@@ -141,10 +141,20 @@ pub(crate) struct SlotEditorProps {
 
 fn options_for(env: &Env, slot: &Slot) -> Vec<Suggestion> {
     let v = &env.cfg.vocab;
+    // A profile term is listed by its full IRI and written as the policy's
+    // prefixes allow.
+    let written = |list: &[Suggestion]| -> Vec<Suggestion> {
+        list.iter()
+            .map(|s| Suggestion {
+                value: written_form(&s.value, &env.prefixes),
+                ..s.clone()
+            })
+            .collect()
+    };
     match slot.kind {
-        SlotKind::Action => v.actions.clone(),
-        SlotKind::LeftOperand => v.left_operands.clone(),
-        SlotKind::PolicyKind => v.policy_kinds.clone(),
+        SlotKind::Action => written(&v.actions),
+        SlotKind::LeftOperand => written(&v.left_operands),
+        SlotKind::PolicyKind => written(&v.policy_kinds),
         SlotKind::Party => v.parties.clone(),
         SlotKind::Asset => v.assets.clone(),
         SlotKind::PolicyRef => env

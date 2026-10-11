@@ -10,8 +10,10 @@ fn strip(s: &str) -> String {
 }
 
 /// Case-insensitive match on value and label after stripping `odrl:`:
-/// prefix matches first, then substring matches, each in list order. An
-/// empty query gives the first `max` options.
+/// prefix matches first, then substring matches, then matches in the hint
+/// text, each in list order. Groups keep the order in which they first
+/// appear, and the ranking applies within each group. An empty query gives
+/// the first `max` options.
 pub fn filter_suggestions<'a>(
     options: &'a [Suggestion],
     query: &str,
@@ -21,17 +23,39 @@ pub fn filter_suggestions<'a>(
     if q.is_empty() {
         return options.iter().take(max).collect();
     }
-    let mut prefix = vec![];
-    let mut inner = vec![];
+    // Per group, in first-seen order: (prefix, substring, hint) matches.
+    type Ranks<'a> = [Vec<&'a Suggestion>; 3];
+    let mut groups: Vec<(Option<&str>, Ranks<'a>)> = vec![];
     for o in options {
         let (v, l) = (strip(&o.value), strip(&o.label));
-        if v.starts_with(&q) || l.starts_with(&q) {
-            prefix.push(o);
+        let rank = if v.starts_with(&q) || l.starts_with(&q) {
+            0
         } else if v.contains(&q) || l.contains(&q) {
-            inner.push(o);
-        }
+            1
+        } else if o
+            .hint
+            .as_ref()
+            .is_some_and(|h| h.to_lowercase().contains(&q))
+        {
+            2
+        } else {
+            continue;
+        };
+        let g = o.group.as_deref();
+        let at = match groups.iter().position(|(k, _)| *k == g) {
+            Some(i) => i,
+            None => {
+                groups.push((g, Default::default()));
+                groups.len() - 1
+            }
+        };
+        groups[at].1[rank].push(o);
     }
-    prefix.into_iter().chain(inner).take(max).collect()
+    groups
+        .into_iter()
+        .flat_map(|(_, ranks)| ranks.into_iter().flatten())
+        .take(max)
+        .collect()
 }
 
 #[cfg(test)]

@@ -105,6 +105,8 @@ pub(crate) struct Env {
     pub on_focus_slot: Callback<Option<SlotFocus>>,
     /// (policy index, uid) of every policy that has one.
     pub policy_uids: Vec<(usize, AttrValue)>,
+    /// The prefixes the document binds, for writing picked IRIs.
+    pub prefixes: Rc<prose_core::profile::Prefixes>,
 }
 
 #[derive(Clone)]

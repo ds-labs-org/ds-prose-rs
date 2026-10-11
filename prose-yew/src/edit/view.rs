@@ -203,6 +203,7 @@ pub fn odrl_prose_view(props: &OdrlProseViewProps) -> Html {
     let cfg = props.config.clone();
     let edit = props.mode == EditMode::Edit;
     let prose = use_memo(props.doc.clone(), |d| sentences(d));
+    let prefixes = use_memo(props.doc.clone(), |d| prose_core::edit::prefixes(d));
     let root = use_node_ref();
     let live = use_state(AttrValue::default);
     let pending: Pending = use_mut_ref(|| None);
@@ -316,6 +317,7 @@ pub fn odrl_prose_view(props: &OdrlProseViewProps) -> Html {
                     .map(|u| (i, AttrValue::from(u.clone())))
             })
             .collect(),
+        prefixes: prefixes.clone(),
     });
     let mut index: HashMap<String, Vec<&Issue>> = HashMap::new();
     for i in props.issues.iter() {

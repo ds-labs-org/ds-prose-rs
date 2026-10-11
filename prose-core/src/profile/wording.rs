@@ -105,6 +105,12 @@ impl Wording {
     }
 }
 
+/// A local name a compact IRI may end with: not empty, no `/`, `#`, `:` or
+/// whitespace.
+fn is_local_name(s: &str) -> bool {
+    !s.is_empty() && !s.contains(['/', '#', ':']) && !s.contains(char::is_whitespace)
+}
+
 fn trim(iri: &str) -> &str {
     iri.trim_end_matches(['#', '/'])
 }
@@ -163,8 +169,24 @@ impl Prefixes {
     /// bare, any other as a compact IRI with a prefix bound here, never with
     /// an invented prefix. `None` when no bound prefix fits.
     pub fn compact(&self, iri: &str) -> Option<String> {
-        let _ = iri;
-        None
+        let fits = |written: String| {
+            (self.try_expand(&written).as_deref() == Some(iri)).then_some(written)
+        };
+        if let Some(local) = iri.strip_prefix(ns::ODRL)
+            && is_local_name(local)
+            && let Some(bare) = fits(local.to_string())
+        {
+            return Some(bare);
+        }
+        // The longest bound namespace that leaves a plain local name.
+        let (prefix, ns) = self
+            .entries
+            .iter()
+            .filter(|(k, v)| {
+                !k.contains(':') && iri.strip_prefix(v.as_str()).is_some_and(is_local_name)
+            })
+            .max_by_key(|(_, v)| v.len())?;
+        fits(format!("{prefix}:{}", &iri[ns.len()..]))
     }
 
     /// `None` for a compact IRI whose prefix nothing here binds.
