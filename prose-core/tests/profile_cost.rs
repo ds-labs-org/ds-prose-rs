@@ -398,3 +398,47 @@ fn many_graph_items_with_their_own_context() {
     });
     assert_eq!(r, Ok(1));
 }
+
+/// A policy @context of 50 000 prefixes.
+fn large_policy_prefixes() -> Prefixes {
+    let ctx: Vec<String> = (0..50_000)
+        .map(|i| format!(r#""p{i}":"https://e/{i}/""#))
+        .collect();
+    let v: Value =
+        serde_json::from_str(&format!(r#"{{"@context":{{{}}}}}"#, ctx.join(","))).unwrap();
+    Prefixes::of_document(&v)
+}
+
+#[test]
+fn compacting_many_iris_against_a_large_policy_context() {
+    // The editor writes each suggestion through compact: one call per
+    // profile term, each of which scanned every binding.
+    let n = quick("compact", || {
+        let p = large_policy_prefixes();
+        let mut n = 0;
+        for i in 0..20_000 {
+            n += usize::from(p.compact(&format!("https://e/{i}/t")).is_some());
+            n += usize::from(
+                p.compact(&format!("https://example.org/profile/t{i}"))
+                    .is_some(),
+            );
+        }
+        n
+    });
+    assert_eq!(n, 20_000);
+}
+
+#[test]
+fn glossing_many_terms_against_a_large_policy_context() {
+    // The edit view glosses each term it shows; each gloss copied the
+    // policy's prefixes.
+    let n = quick("gloss", || {
+        let p = large_policy_prefixes();
+        let w = prose_core::profile::Wording::new()
+            .with_profile(ProfileVocab::parse(&action("")).unwrap());
+        (0..20_000)
+            .filter(|_| prose_core::wording::gloss(&w, &p, "https://example.org/x").is_some())
+            .count()
+    });
+    assert_eq!(n, 20_000);
+}
