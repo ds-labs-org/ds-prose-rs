@@ -2049,3 +2049,39 @@ async fn a_closed_value_slot_takes_only_the_values_the_profile_lists() {
         vec![(value.into(), "ex:commercialResearch".into())]
     );
 }
+
+#[wasm_bindgen_test]
+async fn a_closed_value_typed_over_a_string_is_written_as_an_iri() {
+    let value = "policy[0].permission[0].constraint[0]#rightOperand[0]";
+    let json = STRICT_POLICY.replace(r#"[{"@id": "ex:academic"}]"#, r#"["ex:academic"]"#);
+    let log = Log::default();
+    let (c, _h) = mount_strict(strict_props(&json, &log, true, StrictEdit::Flag)).await;
+    let el = slot(&c, value);
+    type_into(&el, "ex:commercialResearch");
+    key(&el, "Enter", false, false);
+    settle().await;
+    assert_eq!(
+        set_iris(&log),
+        vec![(value.into(), "ex:commercialResearch".into())]
+    );
+    assert!(set_texts(&log).is_empty(), "{:?}", log.borrow());
+}
+
+#[wasm_bindgen_test]
+async fn the_list_of_a_closed_slot_closes_once_its_text_is_taken() {
+    let log = Log::default();
+    let (c, _h) = mount_strict(strict_props(STRICT_POLICY, &log, true, StrictEdit::Flag)).await;
+    let el = slot(&c, ACTION);
+    type_into(&el, "t");
+    settle().await;
+    assert!(c.query_selector("[role=listbox]").unwrap().is_some());
+    type_into(&slot(&c, ACTION), "train");
+    key(&slot(&c, ACTION), "Enter", false, false);
+    settle().await;
+    assert_eq!(set_texts(&log), vec![(ACTION.into(), "ex:train".into())]);
+    assert!(
+        c.query_selector("[role=listbox]").unwrap().is_none(),
+        "{}",
+        c.inner_html()
+    );
+}
