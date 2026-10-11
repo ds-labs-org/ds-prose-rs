@@ -1162,6 +1162,52 @@ mod tests {
     }
 
     #[test]
+    fn a_term_of_two_kinds_is_offered_in_each_list() {
+        let p = ProfileVocab::parse(&format!(
+            r#"{{
+                "@context": {{"odrl": "{ODRL}", "ex": "{EX}"}},
+                "@graph": [{{"@id": "ex:dual",
+                             "@type": ["odrl:Action", "odrl:LeftOperand"]}}]
+            }}"#
+        ))
+        .unwrap();
+        let v = Vocabulary::default().with_profiles(&Wording::new().with_profile(p));
+        let dual = format!("{EX}dual");
+        assert!(values(&v.actions).contains(&dual.as_str()));
+        assert!(values(&v.left_operands).contains(&dual.as_str()));
+    }
+
+    #[test]
+    fn many_operators_and_conflict_terms_take_linear_time() {
+        // A profile within the default limits: 10,000 operators and 10,000
+        // conflict terms. Extending the closed lists must cost about what
+        // reading the profile did, not the square of the term count.
+        let mut graph = vec![];
+        for i in 0..10_000 {
+            graph.push(format!(r#"{{"@id": "ex:o{i}", "@type": "odrl:Operator"}}"#));
+            graph.push(format!(
+                r#"{{"@id": "ex:c{i}", "@type": "odrl:ConflictTerm"}}"#
+            ));
+        }
+        let text = format!(
+            r#"{{"@context": {{"odrl": "{ODRL}", "ex": "{EX}"}}, "@graph": [{}]}}"#,
+            graph.join(",")
+        );
+        let start = std::time::Instant::now();
+        let w = Wording::new().with_profile(ProfileVocab::parse(&text).unwrap());
+        let parse = start.elapsed();
+        let start = std::time::Instant::now();
+        let v = Vocabulary::default().with_profiles(&w);
+        let extend = start.elapsed();
+        assert_eq!(v.operators.len(), 12 + 10_000);
+        assert_eq!(v.conflicts.len(), 4 + 10_000);
+        assert!(
+            extend <= parse * 4 + std::time::Duration::from_millis(200),
+            "with_profiles took {extend:?}, parsing {parse:?}"
+        );
+    }
+
+    #[test]
     fn deprecated_terms_are_offered_nowhere() {
         let p = ProfileVocab::parse(&format!(
             r#"{{
