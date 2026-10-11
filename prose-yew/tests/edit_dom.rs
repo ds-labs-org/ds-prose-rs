@@ -2085,3 +2085,26 @@ async fn the_list_of_a_closed_slot_closes_once_its_text_is_taken() {
         c.inner_html()
     );
 }
+
+#[wasm_bindgen_test]
+async fn giving_up_a_rejected_draft_on_blur_takes_the_message_away() {
+    let log = Log::default();
+    let (c, _h) = mount_strict(strict_props(STRICT_POLICY, &log, true, StrictEdit::Flag)).await;
+    type_into(&slot(&c, ACTION), "trian");
+    key(&slot(&c, ACTION), "Enter", false, false);
+    settle().await;
+    assert!(
+        c.query_selector(".prose-slot-wrap .prose-issue-error")
+            .unwrap()
+            .is_some()
+    );
+    fire_focusout(&slot(&c, ACTION));
+    settle().await;
+    assert!(
+        c.query_selector(".prose-slot-wrap .prose-issue-error")
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(slot(&c, ACTION).get_attribute("aria-invalid"), None);
+    assert_eq!(slot(&c, ACTION).text_content().as_deref(), Some("use"));
+}

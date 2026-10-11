@@ -731,7 +731,6 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         let navigated = navigated.clone();
         let invalid = invalid.clone();
         let rejected = invalid.is_some();
-        let is_closed = closed.is_some();
         Callback::from(move |e: KeyboardEvent| {
             // keyCode 229: Safari sends the Enter that confirms an IME
             // candidate after `compositionend`, with isComposing already false.
@@ -752,10 +751,9 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                     if *dirty.borrow() {
                         *refocus.borrow_mut() = true;
                     }
-                    // A closed slot decides whether the list stays open.
-                    if !is_closed {
-                        open.set(false);
-                    }
+                    // A closed slot that does not take the text opens the list
+                    // again from the commit.
+                    open.set(false);
                     commit.emit(How::Enter);
                 }
                 "Escape" => {
