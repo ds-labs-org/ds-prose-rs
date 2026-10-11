@@ -265,3 +265,63 @@ fn context_language_equals_turtle_language_tags() {
     assert!(jsonld.warnings().is_empty(), "{:?}", jsonld.warnings());
     assert_eq!(jsonld, ttl);
 }
+
+const RELATIVE_TTL: &str = "@prefix odrl: <http://www.w3.org/ns/odrl/2/> .\n\
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n\
+@prefix owl: <http://www.w3.org/2002/07/owl#> .\n\
+<> a owl:Ontology ; rdfs:label \"P\"@en .\n\
+<#train> a odrl:Action ; rdfs:label \"Train\"@en ; odrl:includedIn <use> .\n\
+<https://example.org/abs> a odrl:Action ; odrl:includedIn <#train> .\n";
+
+#[test]
+fn turtle_relative_iris_without_a_base_are_skipped_not_refused() {
+    // As in JSON-LD: what cannot be made absolute is skipped with a warning.
+    let v = ProfileVocab::parse(RELATIVE_TTL).unwrap();
+    let iris: Vec<&str> = v.terms().map(|t| t.iri.as_str()).collect();
+    assert_eq!(iris, vec!["https://example.org/abs"]);
+    assert_eq!(v.iri(), None);
+    assert!(
+        v.term("https://example.org/abs")
+            .unwrap()
+            .included_in
+            .is_empty()
+    );
+    assert!(
+        v.warnings()
+            .iter()
+            .any(|w| w.contains("relative") && w.contains("\"#train\"")),
+        "{:?}",
+        v.warnings()
+    );
+}
+
+#[test]
+fn turtle_relative_iris_resolve_against_a_given_base() {
+    let base = "https://example.org/p/profile.ttl";
+    let l = ProfileLimits::default();
+    let v = ProfileVocab::parse_with_base(RELATIVE_TTL, base, &l).unwrap();
+    assert!(v.warnings().is_empty(), "{:?}", v.warnings());
+    assert_eq!(v.iri(), Some(base));
+    let train = v.term("https://example.org/p/profile.ttl#train").unwrap();
+    assert_eq!(
+        train.included_in,
+        vec!["https://example.org/p/use".to_string()]
+    );
+    assert_eq!(
+        ProfileVocab::parse_turtle_with_base(RELATIVE_TTL, base, &l).unwrap(),
+        v
+    );
+    // The same profile in JSON-LD, read against the same base, is equal.
+    let jsonld = format!(
+        r##"{{"@context": {{"odrl": "{ODRL}", "owl": "http://www.w3.org/2002/07/owl#",
+              "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+              "odrl:includedIn": {{"@type": "@id"}}}},
+            "@graph": [
+              {{"@id": "", "@type": "owl:Ontology", "rdfs:label": {{"@value": "P", "@language": "en"}}}},
+              {{"@id": "#train", "@type": "odrl:Action",
+                "rdfs:label": {{"@value": "Train", "@language": "en"}}, "odrl:includedIn": "use"}},
+              {{"@id": "https://example.org/abs", "@type": "odrl:Action", "odrl:includedIn": "#train"}}
+            ]}}"##
+    );
+    assert_eq!(ProfileVocab::parse_with_base(&jsonld, base, &l).unwrap(), v);
+}

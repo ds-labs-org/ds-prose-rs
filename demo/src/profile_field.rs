@@ -627,6 +627,31 @@ mod tests {
     }
 
     #[test]
+    fn fetched_profile_reads_relative_iris_against_its_url() {
+        let ttl = "@prefix odrl: <http://www.w3.org/ns/odrl/2/> .\n\
+                   <#train> a odrl:Action .\n";
+        let s = reduce(&ProfileState::default(), ProfileMsg::Begin);
+        let s = reduce(
+            &s,
+            ProfileMsg::FetchedFrom {
+                generation: s.generation,
+                url: "https://e.org/p/profile.ttl".into(),
+                text: ttl.into(),
+                content_type: Some("text/turtle".into()),
+            },
+        );
+        let w = s.wording.as_ref().expect("applied");
+        assert!(w.0.lookup("https://e.org/p/profile.ttl#train").is_some());
+        // Editing the fetched text keeps its URL; a preset or a file does not.
+        let s = reduce(&s, ProfileMsg::Edit(format!("{ttl}\n")));
+        let s = reduce(&s, ProfileMsg::Apply);
+        assert!(s.wording.is_some(), "{:?}", s.error);
+        let s = reduce(&s, ProfileMsg::Use(ttl.into()));
+        assert!(s.wording.is_none());
+        assert!(s.error.is_some());
+    }
+
+    #[test]
     fn url_is_kept_by_clear() {
         let s = reduce(
             &ProfileState::default(),

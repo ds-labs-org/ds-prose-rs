@@ -439,3 +439,41 @@ fn context_language_tags_plain_strings() {
         vec![(None, "3".to_string())]
     );
 }
+
+#[test]
+fn relative_ids_resolve_against_a_given_base() {
+    let text = format!(
+        r##"{{"@context": {{"odrl": "{ODRL}", "owl": "http://www.w3.org/2002/07/owl#"}},
+            "@graph": [
+              {{"@id": "", "@type": "owl:Ontology"}},
+              {{"@id": "#train", "@type": "odrl:Action"}},
+              {{"@id": "tune", "@type": "odrl:Action"}},
+              {{"@context": {{"@base": "https://other.org/x/"}},
+                "@id": "own", "@type": "odrl:Action"}}
+            ]}}"##
+    );
+    let base = "https://example.org/p/profile.jsonld";
+    let v = ProfileVocab::parse_with_base(&text, base, &ProfileLimits::default()).unwrap();
+    assert!(v.warnings().is_empty(), "{:?}", v.warnings());
+    assert_eq!(v.iri(), Some(base));
+    // The document's own @base wins over the one given.
+    assert_eq!(
+        iris(&v),
+        vec![
+            "https://example.org/p/profile.jsonld#train",
+            "https://example.org/p/tune",
+            "https://other.org/x/own"
+        ]
+    );
+    // A base that is not absolute is not used, and says so.
+    let v =
+        ProfileVocab::parse_with_base(&text, "profile.jsonld", &ProfileLimits::default()).unwrap();
+    assert_eq!(iris(&v), vec!["https://other.org/x/own"]);
+    assert!(
+        v.warnings()
+            .iter()
+            .any(|w| w.contains("\"profile.jsonld\"")),
+        "{:?}",
+        v.warnings()
+    );
+}
