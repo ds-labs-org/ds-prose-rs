@@ -442,3 +442,31 @@ fn glossing_many_terms_against_a_large_policy_context() {
     });
     assert_eq!(n, 20_000);
 }
+
+#[test]
+fn a_policy_declaring_many_profiles() {
+    // check_profile de-duplicated them with a list and gave one issue each.
+    let ids: Vec<String> = (0..100_000)
+        .map(|i| format!(r#""urn:x:profile:{i}""#))
+        .collect();
+    let text = format!(
+        r#"{{"@type":"Set","uid":"urn:p","profile":[{},"urn:x:profile:0"],"permission":[{{"action":"use","target":"urn:a"}}]}}"#,
+        ids.join(",")
+    );
+    let issues = quick("declared profiles", move || {
+        let doc = prose_core::edit::read_model(&text).unwrap();
+        let w = prose_core::profile::Wording::new()
+            .with_profile(ProfileVocab::parse(&action("")).unwrap());
+        prose_core::edit::check_profile(&doc, &w)
+    });
+    // Twenty are named; one more issue counts the rest.
+    assert_eq!(issues.len(), 21);
+    assert_eq!(
+        issues[0].message,
+        "the policy declares the profile <urn:x:profile:0>, which is not loaded"
+    );
+    assert_eq!(
+        issues[20].message,
+        "the policy declares 99980 more profiles that are not loaded"
+    );
+}
