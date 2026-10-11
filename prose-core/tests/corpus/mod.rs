@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 use prose_core::edit::*;
 use prose_core::profile::{ProfileLimits, ProfileVocab, Wording};
+use prose_core::validate::{Level, Options, validate_json};
 use serde_json::Value;
 
 pub fn tests_dir() -> String {
@@ -140,4 +141,49 @@ pub fn compare_golden(rel: &str, got: &str) {
     }
     let want = std::fs::read_to_string(&path).unwrap_or_else(|_| panic!("missing golden {path}"));
     assert_eq!(got, want, "golden mismatch for {rel}");
+}
+
+/// Options as a hostile case writes them: strict unless the mode says
+/// otherwise, plus switches and per-rule levels.
+pub fn options_of(v: &Value) -> Options {
+    let mut o = match v.get("mode").and_then(Value::as_str) {
+        Some("advisory") => Options::advisory(),
+        _ => Options::strict(),
+    };
+    if let Some(on) = v.get("structural").and_then(Value::as_bool) {
+        o = o.structural(on);
+    }
+    if let Some(levels) = v.get("levels").and_then(Value::as_object) {
+        for (rule, level) in levels {
+            let level = match level.as_str().unwrap() {
+                "off" => Level::Off,
+                "info" => Level::Info,
+                "warning" => Level::Warning,
+                "error" => Level::Error,
+                other => panic!("level {other}"),
+            };
+            o = o.level(rule.parse().unwrap(), level);
+        }
+    }
+    o
+}
+
+/// Each hostile case of `rules` triggers its own rule and nothing else.
+pub fn hostile_trigger_only_their_rule(rules: &[&str]) {
+    let cases = hostile_cases();
+    for rule in rules {
+        let h = cases
+            .iter()
+            .find(|h| h.rule == *rule)
+            .unwrap_or_else(|| panic!("no hostile case for {rule}"));
+        let w = h
+            .profiles
+            .iter()
+            .cloned()
+            .fold(Wording::new(), |w, p| w.with_profile(p));
+        let report = validate_json(&h.policy, &w, &options_of(&h.options));
+        let fired: Vec<String> = report.findings.iter().map(|f| f.rule.to_string()).collect();
+        assert!(!fired.is_empty(), "{rule}: no finding");
+        assert!(fired.iter().all(|f| f == rule), "{rule}: {fired:?}");
+    }
 }
