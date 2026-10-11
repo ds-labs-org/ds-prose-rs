@@ -20,6 +20,11 @@
 //! [`Document`] plus a glossary per policy. With `Wording::default()` the
 //! document is exactly what [`render`] returns. See [`profile`].
 //!
+//! Validation: [`validate`] checks a policy against the loaded profiles,
+//! in the advisory mode [`edit::check_profile`] has always used, or in a
+//! strict mode that reads ODRL plus the loaded profiles as a closed
+//! vocabulary and reports a verdict.
+//!
 //! Features: `turtle` (off by default) also reads profiles written in
 //! Turtle, through oxttl.
 pub mod edit;

@@ -266,3 +266,110 @@
 //!     }
 //! }
 //! ```
+//! ```
+//! #![deny(unreachable_patterns)]
+//! #![allow(dead_code)]
+//! use prose_core::profile::OdrlVocab;
+//! fn f(x: &OdrlVocab) -> u8 {
+//!     match x {
+//!         OdrlVocab::Common => 0,
+//!         OdrlVocab::Core => 0,
+//!         _ => 1,
+//!     }
+//! }
+//! ```
+//! ```
+//! #![deny(unreachable_patterns)]
+//! #![allow(dead_code)]
+//! use prose_core::validate::Mode;
+//! fn f(x: &Mode) -> u8 {
+//!     match x {
+//!         Mode::Advisory => 0,
+//!         Mode::Strict => 0,
+//!         _ => 1,
+//!     }
+//! }
+//! ```
+//! ```
+//! #![deny(unreachable_patterns)]
+//! #![allow(dead_code)]
+//! use prose_core::validate::Tier;
+//! fn f(x: &Tier) -> u8 {
+//!     match x {
+//!         Tier::Profile => 0,
+//!         Tier::Odrl => 0,
+//!         Tier::Prose => 0,
+//!         Tier::Input => 0,
+//!         Tier::Heuristic => 0,
+//!         _ => 1,
+//!     }
+//! }
+//! ```
+//! ```
+//! #![deny(unreachable_patterns)]
+//! #![allow(dead_code)]
+//! use prose_core::validate::Basis;
+//! fn f(x: &Basis) -> u8 {
+//!     match x {
+//!         Basis::Standard => 0,
+//!         Basis::StandardDerived => 0,
+//!         Basis::Convention => 0,
+//!         Basis::Heuristic => 0,
+//!         Basis::Input => 0,
+//!         _ => 1,
+//!     }
+//! }
+//! ```
+//! ```
+//! #![deny(unreachable_patterns)]
+//! #![allow(dead_code)]
+//! use prose_core::validate::Verdict;
+//! fn f(x: &Verdict) -> u8 {
+//!     match x {
+//!         Verdict::Conforms => 0,
+//!         Verdict::Violations => 0,
+//!         Verdict::Incomplete => 0,
+//!         _ => 1,
+//!     }
+//! }
+//! ```
+//! ```
+//! #![deny(unreachable_patterns)]
+//! #![allow(dead_code)]
+//! use prose_core::validate::RuleId;
+//! fn f(x: &RuleId) -> u8 {
+//!     match x {
+//!         RuleId::ProfileNotLoaded => 0,
+//!         RuleId::ProfileImportNotLoaded => 0,
+//!         RuleId::ProfileUndeclaredInNamespace => 0,
+//!         RuleId::ProfileUnknownTerm => 0,
+//!         RuleId::ProfileWrongKind => 0,
+//!         RuleId::ProfileNotDeclared => 0,
+//!         RuleId::ProfileConflictTerm => 0,
+//!         RuleId::ProfileUnboundPrefix => 0,
+//!         RuleId::ProfileDeprecatedTerm => 0,
+//!         RuleId::OdrlPolicyUid => 0,
+//!         RuleId::OdrlNoRule => 0,
+//!         RuleId::OdrlOfferAssigner => 0,
+//!         RuleId::OdrlAgreementParties => 0,
+//!         RuleId::OdrlRuleTarget => 0,
+//!         RuleId::OdrlRuleAction => 0,
+//!         RuleId::OdrlConstraintShape => 0,
+//!         RuleId::OdrlSetOperatorCardinality => 0,
+//!         RuleId::OdrlConsequenceNesting => 0,
+//!         RuleId::OdrlInheritanceCycle => 0,
+//!         RuleId::ProseOperatorNotAllowed => 0,
+//!         RuleId::ProseValueNotAllowed => 0,
+//!         RuleId::ProseIriExpected => 0,
+//!         RuleId::ProseUnitNotAllowed => 0,
+//!         RuleId::ProseDatatypeLexical => 0,
+//!         RuleId::ProseDatatypeConflict => 0,
+//!         RuleId::ProseIllTypedLiteral => 0,
+//!         RuleId::InputUnreadable => 0,
+//!         RuleId::InputUnchecked => 0,
+//!         RuleId::InputReaderNote => 0,
+//!         RuleId::HeuristicOrderedOnUnordered => 0,
+//!         _ => 1,
+//!     }
+//! }
+//! ```
