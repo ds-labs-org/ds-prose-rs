@@ -104,6 +104,47 @@ fn compacted_equals_expanded() {
     assert_eq!(compacted, expanded);
 }
 
+/// `v` with every array and every object's keys in reverse order: the same
+/// graph, written in another order.
+fn reversed(v: &Value) -> Value {
+    match v {
+        Value::Array(a) => Value::Array(a.iter().rev().map(reversed).collect()),
+        Value::Object(o) => Value::Object(
+            o.iter()
+                .rev()
+                .map(|(k, x)| (k.clone(), reversed(x)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+#[test]
+fn equality_ignores_the_order_the_graph_is_written_in() {
+    let written = parse("research.jsonld");
+    let v: Value = serde_json::from_str(&profile_text("research.jsonld")).unwrap();
+    let other = from(reversed(&v)).unwrap();
+    // The order really differs: terms, labels in two languages, hint lists.
+    assert_ne!(iris(&written), iris(&other));
+    let train = |p: &ProfileVocab| {
+        p.term(&format!("{EX}train"))
+            .unwrap()
+            .label
+            .iter()
+            .map(|(l, t)| (l.map(String::from), t.to_string()))
+            .collect::<Vec<_>>()
+    };
+    assert_ne!(train(&written), train(&other));
+    assert_eq!(written, other);
+    // A real difference still tells them apart.
+    let mut changed = reversed(&v);
+    let s = serde_json::to_string(&changed)
+        .unwrap()
+        .replace("Trainieren", "Lernen");
+    changed = serde_json::from_str(&s).unwrap();
+    assert_ne!(written, from(changed).unwrap());
+}
+
 #[test]
 fn string_prefix_context_and_vocab() {
     let v = from(json!({

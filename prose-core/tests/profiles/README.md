@@ -8,6 +8,7 @@ Test input for `prose_core::profile`. They live here, not in
 | `research.jsonld` | a synthetic research-data profile, compacted JSON-LD | written for these tests |
 | `research-expanded.json` | the same 118 triples, expanded by rdflib 6.1.1, nodes and values put back in document order | generated from `research.jsonld` |
 | `research.ttl` | the same 118 triples in Turtle, same order | generated from `research.jsonld`; isomorphic with rdflib |
+| `research-rdflib.ttl` | the same 118 triples in Turtle, in rdflib's own order | `rdflib.Graph().parse("research.jsonld").serialize(format="turtle")`, rdflib 6.1.1 |
 | `research-policy.json` | an Agreement that uses the profile, plus the undeclared `ex:distill` | written for these tests |
 | `odrl22-excerpt.json` | 13 nodes of the ODRL 2.2 vocabulary, unchanged | W3C, see below |
 | `hostile/*` | inputs that are not profiles, or are written to hurt | written for these tests |

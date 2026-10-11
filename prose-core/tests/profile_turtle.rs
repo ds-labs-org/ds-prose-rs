@@ -35,6 +35,19 @@ fn turtle_equals_its_jsonld_twin() {
 }
 
 #[test]
+fn turtle_written_by_another_tool_equals_its_jsonld_twin() {
+    // rdflib wrote this twin in its own order: subjects sorted, objects
+    // grouped, language pairs and hint lists in another order.
+    let ttl = ProfileVocab::parse(&profile_text("research-rdflib.ttl")).unwrap();
+    let jsonld = ProfileVocab::parse(&profile_text("research.jsonld")).unwrap();
+    assert!(ttl.warnings().is_empty(), "{:?}", ttl.warnings());
+    let order = |p: &ProfileVocab| p.terms().map(|t| t.iri.clone()).collect::<Vec<_>>();
+    assert_ne!(order(&ttl), order(&jsonld));
+    assert_eq!(ttl, jsonld);
+    assert_eq!(ttl.summary(), jsonld.summary());
+}
+
+#[test]
 fn turtle_is_recognised_from_its_first_characters() {
     let body = format!("<https://example.org/a> a <{ODRL}Action> .\n");
     for text in [
