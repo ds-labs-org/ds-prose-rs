@@ -1373,3 +1373,14 @@ async fn a_value_picked_into_a_text_slot_is_written_as_an_iri() {
         Some("academic research")
     );
 }
+
+#[wasm_bindgen_test]
+async fn a_typed_slot_is_not_offered_unrelated_profile_values() {
+    // ex:dataSubjectCount says prose:datatype xsd:integer and suggests no
+    // values: the profile's IRI values do not fit it.
+    let (c, _log, _h) = mount_worded(RESEARCH_POLICY, Some(research_wording())).await;
+    let path = "policy[0].permission[0].action[0].refinement[0]#rightOperand[0]";
+    type_into(&slot(&c, path), "");
+    settle().await;
+    assert_eq!(shown_options(&c), vec![]);
+}
