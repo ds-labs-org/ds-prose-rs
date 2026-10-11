@@ -281,9 +281,10 @@ fn outside(env: &Env, slot: &Slot, closure: Closure, options: &[Suggestion]) -> 
         return false;
     }
     match closure {
-        Closure::Terms => {
-            strict(env).is_some_and(|v| v.admissible(&env.doc, &set_text(slot, &slot.raw)).is_err())
-        }
+        // Each ask reads the document: past the render's checks no note.
+        Closure::Terms => strict(env).is_some_and(|v| {
+            env.spend() && v.admissible(&env.doc, &set_text(slot, &slot.raw)).is_err()
+        }),
         Closure::Values => {
             let w = &env.cfg.wording;
             let same = |a: &str, b: &str| w.expand(&env.prefixes, a) == w.expand(&env.prefixes, b);
