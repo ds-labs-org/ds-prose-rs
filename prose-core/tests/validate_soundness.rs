@@ -310,3 +310,64 @@ fn a_level_set_in_advisory_switches_the_rule_on() {
     let r = validate_json(&text, &Wording::new(), &o);
     assert_eq!(r.findings.len(), 2, "{:?}", summary(&r));
 }
+
+#[test]
+fn a_declared_profile_matches_with_or_without_a_trailing_separator() {
+    let w = wording_of(&["research.jsonld"]);
+    for declared in [
+        RESEARCH.to_string(),
+        format!("{RESEARCH}/"),
+        format!("{RESEARCH}#"),
+    ] {
+        let text = json!({
+            "@context": ["http://www.w3.org/ns/odrl.jsonld",
+                         {"ex": "https://example.org/odrl/profile/research/"}],
+            "@type": "Set",
+            "uid": "urn:policy:trailing",
+            "profile": declared,
+            "permission": [{"target": "urn:asset:1", "action": "ex:train"}]
+        })
+        .to_string();
+        let r = validate_json(&text, &w, &Options::strict());
+        assert!(r.findings.is_empty(), "{declared}: {:?}", summary(&r));
+        assert_eq!(r.verdict, Verdict::Conforms);
+    }
+}
+
+#[test]
+fn an_ill_typed_literal_is_an_error_on_an_open_operand_too() {
+    // The open operand's hint makes it an Info; the literal is ill-typed
+    // all the same, as it would be without the hint.
+    let text = json!({
+        "@context": ["http://www.w3.org/ns/odrl.jsonld",
+                     {"ex": "https://example.org/odrl/profile/research/"}],
+        "@type": "Set",
+        "uid": "urn:policy:ill-typed",
+        "profile": RESEARCH,
+        "permission": [{"target": "urn:asset:1", "action": "use", "constraint": [{
+            "leftOperand": "ex:dataSubjectCount", "operator": "gteq",
+            "rightOperand": {"@value": "ten", "@type": "xsd:integer"}
+        }]}]
+    })
+    .to_string();
+    let at = "policy[0].permission[0].constraint[0]#rightOperand[0]";
+    let r = validate_json(&text, &wording_of(&["research.jsonld"]), &Options::strict());
+    assert_eq!(
+        summary(&r),
+        [
+            row("prose.datatype-lexical", at, Severity::Info, false),
+            row("prose.ill-typed-literal", at, Severity::Error, false),
+        ]
+    );
+    assert_eq!(r.verdict, Verdict::Violations);
+    // On a closed operand the hint's own error says it once.
+    let r = validate_json(
+        &text,
+        &wording_of(&["research-closed.jsonld"]),
+        &Options::strict(),
+    );
+    assert_eq!(
+        summary(&r),
+        [row("prose.datatype-lexical", at, Severity::Error, false)]
+    );
+}
