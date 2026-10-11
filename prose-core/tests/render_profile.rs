@@ -656,3 +656,41 @@ fn declared_profile_as_compact_iri_is_expanded() {
         "Written to the profile Research Data Profile (rp:research, version 0.1.0)."
     );
 }
+
+#[test]
+fn a_sibling_policys_context_does_not_leak() {
+    // The first policy binds ex elsewhere; the second binds nothing, so its
+    // ex: falls back to the profile's prefix, not to its sibling's.
+    let sibling = json!({
+        "@context": {"ex": "https://other.example/ns/"},
+        "@type": "Set",
+        "permission": [{"target": "urn:asset:1", "action": "use"}]
+    });
+    let second = json!({
+        "@type": "Set",
+        "permission": [{"target": "urn:asset:2", "action": "ex:fineTune"}]
+    });
+    for doc in [
+        json!([sibling.clone(), second.clone()]),
+        json!({"@graph": [sibling, second]}),
+    ] {
+        let r = read(&doc.to_string(), &research());
+        assert_eq!(
+            r.document.policies[1].rules[0].sentence, "Anyone may fine-tune urn:asset:2.",
+            "{doc}"
+        );
+    }
+}
+
+#[test]
+fn right_operand_id_aliases_are_iris() {
+    // The ODRL context aliases id and uid to @id, and the edit model reads
+    // them as IRIs.
+    for key in ["id", "uid"] {
+        assert_eq!(
+            condition("ex:researchPurpose", "eq", json!({key: "ex:clinical"})),
+            "the research purpose is equal to clinical research",
+            "{key}"
+        );
+    }
+}
