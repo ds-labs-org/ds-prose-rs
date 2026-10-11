@@ -16,4 +16,8 @@ pub const ALL: &[Preset] = &[
         label: "Set with prohibition",
         json: include_str!("../../prose-core/tests/fixtures/set.json"),
     },
+    Preset {
+        label: "Research agreement",
+        json: include_str!("../../prose-core/tests/profiles/research-policy.json"),
+    },
 ];

@@ -1,12 +1,15 @@
 //! The demo: an ODRL JSON-LD textarea and the prose it reads as, and an
-//! Edit tab where the prose itself is editable.
+//! Edit tab where the prose itself is editable. A Profile field above both
+//! tabs loads the ODRL profile they are worded with.
 mod edit;
 mod fixtures;
 pub mod profile_field;
 
 use edit::EditDemo;
+use profile_field::{MAX_BYTES, PRESETS, ProfileMsg, ProfileState};
 use prose_yew::OdrlProse;
-use web_sys::HtmlTextAreaElement;
+use wasm_bindgen_futures::{JsFuture, spawn_local};
+use web_sys::{HtmlInputElement, HtmlTextAreaElement};
 use yew::prelude::*;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -19,6 +22,7 @@ enum Tab {
 pub fn demo_app() -> Html {
     let json = use_state(|| AttrValue::from(fixtures::ALL[0].json));
     let tab = use_state(|| Tab::Read);
+    let profile = use_reducer(ProfileState::default);
     // Bumped on every preset, so the Edit tab loads it.
     let load = use_state(|| 0u32);
     let oninput = {
@@ -58,6 +62,7 @@ pub fn demo_app() -> Html {
             <h1>{ "ds-prose-rs demo" }</h1>
             <p>{ "PROSE: Prose Renderer for ODRL Semantic Encoding. Paste an ODRL policy as JSON-LD and read it as prose, or edit the prose itself. Nothing leaves this page." }</p>
             <div class="presets">{ for presets }</div>
+            { profile_section(&profile) }
             <div class="tabs" role="tablist">
                 { tab_button(Tab::Read, "Read") }
                 { tab_button(Tab::Edit, "Edit") }
@@ -70,12 +75,124 @@ pub fn demo_app() -> Html {
                     </section>
                     <section>
                         <h2>{ "Prose" }</h2>
-                        <OdrlProse json={(*json).clone()} />
+                        <OdrlProse json={(*json).clone()} wording={profile.wording.clone()} />
                     </section>
                 </div>
             } else {
-                <EditDemo source={(*json).clone()} load={*load} onchange={onchange} />
+                <EditDemo
+                    source={(*json).clone()}
+                    load={*load}
+                    onchange={onchange}
+                    wording={profile.wording.clone()}
+                />
             }
         </main>
+    }
+}
+
+/// The Profile field: the text, the buttons that fill or apply it, a file
+/// picker, and what is loaded or went wrong.
+fn profile_section(state: &UseReducerHandle<ProfileState>) -> Html {
+    let send = |m: ProfileMsg| {
+        let d = state.dispatcher();
+        Callback::from(move |_: MouseEvent| d.dispatch(m.clone()))
+    };
+    let oninput = {
+        let d = state.dispatcher();
+        Callback::from(move |e: InputEvent| {
+            if let Some(el) = e.target_dyn_into::<HtmlTextAreaElement>() {
+                d.dispatch(ProfileMsg::Edit(el.value()));
+            }
+        })
+    };
+    let onfile = {
+        let d = state.dispatcher();
+        // The generation `Begin` moves to; what a stale read brings is dropped.
+        let generation = state.generation.wrapping_add(1);
+        Callback::from(move |e: Event| {
+            let Some(input) = e.target_dyn_into::<HtmlInputElement>() else {
+                return;
+            };
+            let Some(file) = input.files().and_then(|f| f.get(0)) else {
+                return;
+            };
+            // Choosing the same file again is a change too.
+            input.set_value("");
+            d.dispatch(ProfileMsg::Begin);
+            if file.size() > MAX_BYTES as f64 {
+                let msg = format!(
+                    "{} is {} bytes; profiles over 4 MiB are not read.",
+                    file.name(),
+                    file.size()
+                );
+                d.dispatch(ProfileMsg::Failed { generation, msg });
+                return;
+            }
+            let d = d.clone();
+            spawn_local(async move {
+                let m = match JsFuture::from(file.text()).await {
+                    Ok(text) => ProfileMsg::FileRead {
+                        generation,
+                        text: text.as_string().unwrap_or_default(),
+                    },
+                    Err(_) => ProfileMsg::Failed {
+                        generation,
+                        msg: format!("{} could not be read.", file.name()),
+                    },
+                };
+                d.dispatch(m);
+            });
+        })
+    };
+    let presets = PRESETS.iter().map(|p| {
+        html! {
+            <button type="button" id={p.id} onclick={send(ProfileMsg::Use(p.text.to_string()))}>
+                { p.label }
+            </button>
+        }
+    });
+    let status = if state.loading {
+        "Reading the profile\u{2026}".to_string()
+    } else {
+        state
+            .status
+            .clone()
+            .unwrap_or_else(|| "No profile: the built-in wording.".to_string())
+    };
+    let notes = state.warnings.len();
+    html! {
+        <section class="profile">
+            <label for="profile-json">{ "Profile (JSON-LD or Turtle)" }</label>
+            <p class="hint">
+                { "The ODRL profile the policy is written to: its labels word the prose, its terms fill the edit suggestions, and a glossary follows each policy. Paste one and apply it, or pick one below." }
+            </p>
+            <textarea id="profile-json" rows="6" spellcheck="false" value={state.text.clone()} oninput={oninput} />
+            <div class="profile-actions">
+                <button type="button" id="profile-apply" onclick={send(ProfileMsg::Apply)}>{ "Apply" }</button>
+                { for presets }
+                <label class="file">
+                    { "Open a file\u{2026} " }
+                    <input
+                        type="file"
+                        id="profile-file"
+                        accept=".json,.jsonld,.ttl,application/ld+json,application/json,text/turtle"
+                        onchange={onfile}
+                    />
+                </label>
+                <button type="button" id="profile-clear" onclick={send(ProfileMsg::Clear)}>{ "Clear" }</button>
+            </div>
+            <p id="profile-status" role="status" aria-live="polite">{ status }</p>
+            if notes > 0 {
+                <details class="profile-warnings">
+                    <summary>
+                        { if notes == 1 { "1 note from reading the profile".to_string() } else { format!("{notes} notes from reading the profile") } }
+                    </summary>
+                    <ul>{ for state.warnings.iter().map(|w| html! { <li>{ w }</li> }) }</ul>
+                </details>
+            }
+            if let Some(e) = &state.error {
+                <p id="profile-error" class="prose-error" role="alert">{ e.clone() }</p>
+            }
+        </section>
     }
 }

@@ -2,8 +2,8 @@
 //! JSON-LD it writes, kept in step both ways.
 use std::rc::Rc;
 
-use prose_yew::prose_core::edit::{EditDoc, EditRules, read_model, write_jsonld};
-use prose_yew::{EditConfig, EditMode, OdrlProseView, use_prose_editor};
+use prose_yew::prose_core::edit::{EditDoc, EditRules, check_profile, read_model, write_jsonld};
+use prose_yew::{EditConfig, EditMode, OdrlProseView, SharedWording, use_prose_editor};
 use web_sys::HtmlTextAreaElement;
 use yew::prelude::*;
 
@@ -15,6 +15,19 @@ pub struct EditDemoProps {
     /// The JSON-LD the editor writes, reported after every change to the
     /// document so the Read tab (and a later visit to this tab) sees it.
     pub onchange: Callback<AttrValue>,
+    /// The profile from the Profile field. Changing it keeps the document
+    /// and its undo history.
+    #[prop_or_default]
+    pub wording: Option<SharedWording>,
+}
+
+/// A document compared by identity, as a memo key.
+struct DocKey(Rc<EditDoc>);
+
+impl PartialEq for DocKey {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
 }
 
 fn pretty(doc: &EditDoc) -> String {
@@ -24,7 +37,10 @@ fn pretty(doc: &EditDoc) -> String {
 #[function_component(EditDemo)]
 pub fn edit_demo(props: &EditDemoProps) -> Html {
     let rules = use_memo((), |_| EditRules::default());
-    let config = use_memo((), |_| EditConfig::default());
+    let config = use_memo(props.wording.clone(), |w| match w {
+        Some(w) => EditConfig::default().with_wording(w.0.clone()),
+        None => EditConfig::default(),
+    });
     let source = props.source.clone();
     // An unreadable source is reported, not swallowed: the editor starts empty,
     // the user's text stays in the JSON panel, and nothing is reported upward
@@ -102,6 +118,13 @@ pub fn edit_demo(props: &EditDemoProps) -> Html {
             Err(e) => error.set(Some(e.to_string())),
         })
     };
+    let issues = use_memo(
+        (DocKey(editor.doc.clone()), props.wording.clone()),
+        |(doc, w)| match w {
+            Some(w) => check_profile(&doc.0, &w.0),
+            None => Vec::new(),
+        },
+    );
     let undo = {
         let undo = editor.undo.clone();
         Callback::from(move |_| undo.emit(()))
@@ -122,6 +145,7 @@ pub fn edit_demo(props: &EditDemoProps) -> Html {
                     doc={editor.doc.clone()}
                     mode={EditMode::Edit}
                     config={config.clone()}
+                    issues={issues.clone()}
                     onedit={editor.onedit.clone()}
                 />
             </section>

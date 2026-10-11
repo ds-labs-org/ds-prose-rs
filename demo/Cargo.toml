@@ -18,9 +18,15 @@ path = "src/main.rs"
 
 [dependencies]
 prose-yew = { path = "../prose-yew", features = ["csr"] }
+# The Profile field reads Turtle as well as JSON-LD.
+prose-core = { path = "../prose-core", features = ["turtle"] }
 yew = { version = "0.23", features = ["csr"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-web-sys = { version = "0.3", features = ["HtmlTextAreaElement", "Window", "Document", "Element"] }
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = [
+    "HtmlTextAreaElement", "Window", "Document", "Element", "HtmlInputElement", "File",
+    "FileList", "Blob",
+] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3"

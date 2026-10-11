@@ -137,7 +137,7 @@ async fn sample_changes_read_prose_and_shows_glossary() {
 async fn turtle_and_odrl22_presets_apply() {
     let c = mount().await;
     click(&c, "#profile-sample-ttl").await;
-    assert!(textarea_value(&c, "textarea#profile-json").starts_with("@prefix"));
+    assert!(textarea_value(&c, "textarea#profile-json").contains("@prefix odrl:"));
     assert!(prose(&c).contains("may fine-tune"));
     click(&c, "#profile-odrl22").await;
     assert!(

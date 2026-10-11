@@ -28,3 +28,16 @@ textarea { width: 100%; font-family: ui-monospace, monospace; font-size: 0.85rem
 .ds-prose.prose-edit .prose-heading { font-size: 1.1rem; }
 .ds-prose.prose-edit .prose-toolbar { white-space: nowrap; }
 .ds-prose.prose-edit .prose-issue-error { color: #b91c1c; }
+.profile { border: 1px solid color-mix(in srgb, currentColor 25%, transparent); border-radius: 6px; padding: 0.6rem 0.9rem; margin: 0 0 1rem; }
+.profile > label { font-weight: 600; }
+.profile .hint { margin: 0.2rem 0 0.4rem; }
+.profile-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin: 0.5rem 0; }
+.profile-actions button { padding: 0.3rem 0.65rem; }
+.profile-actions .file { font-size: 0.9rem; }
+#profile-status { margin: 0.25rem 0; font-size: 0.9rem; }
+.profile-warnings { font-size: 0.85rem; }
+.prose-glossary { margin-top: 0.75rem; font-size: 0.9rem; }
+.prose-glossary dt { font-weight: 600; margin-top: 0.4rem; }
+.prose-glossary dt code { font-weight: 400; opacity: 0.75; }
+.prose-glossary dd { margin-left: 1rem; }
+.prose-glossary .prose-note, .prose-glossary .prose-kind-of, .prose-glossary .prose-implies, .prose-glossary .prose-from { opacity: 0.8; }

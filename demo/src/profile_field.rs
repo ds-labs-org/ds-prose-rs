@@ -4,7 +4,7 @@
 use std::rc::Rc;
 
 use prose_yew::SharedWording;
-use prose_yew::prose_core::profile::ProfileVocab;
+use prose_yew::prose_core::profile::{ProfileVocab, TermKind, Wording};
 use yew::Reducible;
 
 /// A profile larger than this is not read (prose-core's default limit).
@@ -70,14 +70,120 @@ pub struct ProfileState {
     pub loading: bool,
 }
 
-/// Not implemented yet.
-pub fn reduce(s: &ProfileState, _m: ProfileMsg) -> ProfileState {
-    s.clone()
+/// The state after `m`. A newer user action (Apply, a preset, Clear) also
+/// makes a load in flight stale.
+pub fn reduce(s: &ProfileState, m: ProfileMsg) -> ProfileState {
+    let mut n = s.clone();
+    match m {
+        ProfileMsg::Edit(text) => n.text = text,
+        ProfileMsg::Apply => {
+            n.generation = n.generation.wrapping_add(1);
+            n.loading = false;
+            apply(&mut n);
+        }
+        ProfileMsg::Use(text) => {
+            n.generation = n.generation.wrapping_add(1);
+            n.loading = false;
+            n.text = text;
+            apply(&mut n);
+        }
+        ProfileMsg::Begin => {
+            n.generation = n.generation.wrapping_add(1);
+            n.loading = true;
+        }
+        ProfileMsg::FileRead { generation, text } if generation == s.generation => {
+            n.loading = false;
+            n.text = text;
+            apply(&mut n);
+        }
+        // The field still holds what was applied, so that profile stays.
+        ProfileMsg::Failed { generation, msg } if generation == s.generation => {
+            n.loading = false;
+            n.error = Some(msg);
+        }
+        ProfileMsg::FileRead { .. } | ProfileMsg::Failed { .. } => {}
+        ProfileMsg::Clear => {
+            n = ProfileState {
+                generation: s.generation.wrapping_add(1),
+                ..ProfileState::default()
+            }
+        }
+    }
+    n
 }
 
-/// Not implemented yet.
-pub fn status_line(_p: &ProfileVocab) -> String {
-    String::new()
+/// Reads the field's text as the profile. Blank text is no profile; an
+/// unreadable one is an error and no profile, never the last good one.
+fn apply(n: &mut ProfileState) {
+    n.wording = None;
+    n.error = None;
+    n.status = None;
+    n.warnings.clear();
+    if n.text.trim().is_empty() {
+        return;
+    }
+    match ProfileVocab::parse(&n.text) {
+        Ok(p) => {
+            n.status = Some(status_line(&p));
+            n.warnings = p.warnings().to_vec();
+            n.wording = Some(SharedWording::from(Wording::new().with_profile(p)));
+        }
+        Err(e) => n.error = Some(sentence(&e.to_string())),
+    }
+}
+
+/// What is loaded, for the status line: "Using {title} {version}: 3
+/// actions, 1 operator." Only the kinds the edit suggestions use are
+/// counted; a profile with none of them gives its number of terms.
+pub fn status_line(p: &ProfileVocab) -> String {
+    let mut name = match (p.title().pick(&[]), p.iri()) {
+        (Some(t), _) => t.to_string(),
+        (None, Some(iri)) => iri.to_string(),
+        (None, None) => "an untitled profile".to_string(),
+    };
+    if let Some(v) = p.version()
+        && !name.contains(v)
+    {
+        name = format!("{name} {v}");
+    }
+    let s = p.summary();
+    let kinds = [
+        (TermKind::Action, "action", "actions"),
+        (TermKind::LeftOperand, "left operand", "left operands"),
+        (TermKind::Operator, "operator", "operators"),
+        (TermKind::RightOperand, "value", "values"),
+        (TermKind::ConflictTerm, "conflict term", "conflict terms"),
+    ];
+    let counts: Vec<String> = kinds
+        .iter()
+        .filter_map(|&(k, one, many)| match s.count(k) {
+            0 => None,
+            n => Some(count(n, one, many)),
+        })
+        .collect();
+    let what = if counts.is_empty() {
+        count(s.terms, "term", "terms")
+    } else {
+        counts.join(", ")
+    };
+    format!("Using {name}: {what}.")
+}
+
+fn count(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
+/// A reader message as a sentence: capitalised, with a full stop.
+fn sentence(msg: &str) -> String {
+    let mut c = msg.chars();
+    let mut out = match c.next() {
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+        None => return String::new(),
+    };
+    if !out.ends_with('.') {
+        out.push('.');
+    }
+    out
 }
 
 impl Reducible for ProfileState {
