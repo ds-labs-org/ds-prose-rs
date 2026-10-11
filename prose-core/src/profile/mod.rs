@@ -54,6 +54,7 @@ mod triples;
 mod turtle;
 mod wording;
 
+pub(crate) use ns::is_odrl_context;
 pub use odrl_terms::{OdrlTerm, OdrlVocab, odrl_term, odrl_terms};
 pub use text::LangText;
 pub(crate) use wording::Budget;

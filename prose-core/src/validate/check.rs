@@ -5,7 +5,8 @@ use super::lexical::lexical;
 use super::{Expected, Finding, Fix, Level, Mode, Options, RuleId, TermRef};
 use crate::edit::*;
 use crate::profile::{
-    OdrlVocab, OperandHints, Prefixes, ProfileVocab, Term, TermKind, Wording, odrl_term,
+    OdrlVocab, OperandHints, Prefixes, ProfileVocab, Term, TermKind, Wording, is_odrl_context,
+    odrl_term,
 };
 use crate::read::join_with;
 use crate::words::local_name;
@@ -44,8 +45,9 @@ impl Index {
 
 /// Every finding about `doc`, in document order.
 pub(crate) fn run(doc: &EditDoc, w: &Wording, index: &Index, o: &Options) -> Vec<Finding> {
-    // Advisory with no profile says nothing, as check_profile always has.
-    if o.mode() == Mode::Advisory && w.is_empty() {
+    // Advisory with no profile says nothing, as check_profile always has,
+    // unless a level set by hand asks for something.
+    if o.mode() == Mode::Advisory && w.is_empty() && o.levels.is_empty() {
         return Vec::new();
     }
     let mut c = Checker {
@@ -56,6 +58,7 @@ pub(crate) fn run(doc: &EditDoc, w: &Wording, index: &Index, o: &Options) -> Vec
         prefixes: prefixes(doc),
         cur: None,
         unsure: false,
+        context_unread: false,
         cycles: Vec::new(),
         remote: Vec::new(),
         out: Vec::new(),
@@ -64,6 +67,7 @@ pub(crate) fn run(doc: &EditDoc, w: &Wording, index: &Index, o: &Options) -> Vec
         c.inheritance(doc);
     }
     c.imports();
+    c.contexts(doc);
     for note in &doc.warnings {
         c.emit(
             RuleId::InputReaderNote,
@@ -100,6 +104,10 @@ struct Checker<'a> {
     /// A loaded profile builds on one that is not loaded: no policy's
     /// vocabulary is complete.
     unsure: bool,
+    /// The document has a `@context` the reader does not apply (remote,
+    /// imported or nested), which may bind any prefix or term: no policy's
+    /// terms read as they would in JSON-LD for certain.
+    context_unread: bool,
     /// Per policy: on an inheritance cycle within the document. Empty when
     /// the structural tier is off.
     cycles: Vec<bool>,
@@ -236,6 +244,97 @@ fn fix_slot(label: String, safe: bool, slot: SlotPath, expect: NodeId, value: St
     }
 }
 
+/// A `@context` the reader does not apply.
+enum Unread {
+    /// A remote context, or one an `@import` names.
+    Remote(String),
+    /// A context on a node below a policy.
+    Nested,
+}
+
+/// Where a JSON value sits, for which of its `@context`s the reader applies
+/// ([`Prefixes::of_document`]): those of a top-level node and of its
+/// `@graph` items, nothing below.
+#[derive(Clone, Copy, PartialEq)]
+enum Depth {
+    Top,
+    GraphItem,
+    Below,
+}
+
+/// The `@context`s of `doc`'s JSON that the reader does not apply, each
+/// once, in document order. Linear in the size of the JSON; no recursion.
+fn unread_contexts(doc: &EditDoc) -> Vec<Unread> {
+    let roots: Vec<&serde_json::Value> = match &doc.origin {
+        Some(o) => vec![o.value()],
+        None => doc
+            .policies
+            .iter()
+            .filter_map(|p| p.origin.as_ref().map(|o| o.value()))
+            .collect(),
+    };
+    let mut todo: Vec<(&serde_json::Value, Depth)> = Vec::new();
+    for root in roots {
+        match root {
+            serde_json::Value::Array(a) => todo.extend(a.iter().map(|v| (v, Depth::Top))),
+            other => todo.push((other, Depth::Top)),
+        }
+    }
+    let mut out: Vec<Unread> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut nested = false;
+    while let Some((v, depth)) = todo.pop() {
+        match v {
+            serde_json::Value::Array(a) => todo.extend(a.iter().rev().map(|x| (x, depth))),
+            serde_json::Value::Object(o) => {
+                for (k, x) in o.iter().rev() {
+                    match k.as_str() {
+                        "@context" if depth == Depth::Below => {
+                            if !nested {
+                                nested = true;
+                                out.push(Unread::Nested);
+                            }
+                        }
+                        "@context" => {
+                            let list: Vec<&serde_json::Value> = match x {
+                                serde_json::Value::Array(a) => a.iter().collect(),
+                                other => vec![other],
+                            };
+                            for c in list {
+                                let remote = match c {
+                                    serde_json::Value::String(s) => {
+                                        (!is_odrl_context(s)).then_some(s.as_str())
+                                    }
+                                    serde_json::Value::Object(d) => {
+                                        d.get("@import").and_then(|i| i.as_str())
+                                    }
+                                    _ => None,
+                                };
+                                if let Some(iri) = remote
+                                    && seen.insert(iri.to_string())
+                                {
+                                    out.push(Unread::Remote(iri.to_string()));
+                                }
+                            }
+                        }
+                        "@graph" if depth == Depth::Top => match x {
+                            serde_json::Value::Array(a) => {
+                                todo.extend(a.iter().rev().map(|g| (g, Depth::GraphItem)))
+                            }
+                            other => todo.push((other, Depth::GraphItem)),
+                        },
+                        // A JSON literal's content is data, not JSON-LD.
+                        "@value" => {}
+                        _ => todo.push((x, Depth::Below)),
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 fn slot(node: &NodePath, field: Field) -> IssueTarget {
     IssueTarget::Slot(SlotPath {
         node: node.clone(),
@@ -352,6 +451,11 @@ impl<'a> Checker<'a> {
             }
             None => {
                 if let (Some(what), Some(p)) = (pos.what(), self.undeclared_in(written)) {
+                    // Strict: a declared profile that is missing may
+                    // declare it in the same namespace.
+                    if self.options.mode() == Mode::Strict && self.incomplete() {
+                        return;
+                    }
                     let msg = format!(
                         "the {what} \"{written}\" is not declared by the loaded profile {}",
                         profile_name(p)
@@ -372,11 +476,14 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        if self.options.mode() != Mode::Strict {
-            return;
-        }
+        // What follows is off in advisory mode unless a level set by hand
+        // switches a rule on.
         let iri = self.expand(written);
-        if let Some(prefix) = self.unbound_prefix(written, &iri) {
+        // A context that is not read may bind the prefix.
+        if let Some(prefix) = self
+            .unbound_prefix(written, &iri)
+            .filter(|_| !self.context_unread)
+        {
             let msg = format!(
                 "the policy's @context does not bind the prefix \"{prefix}\" of \"{written}\"; only a loaded profile's own prefixes read it as <{iri}>"
             );
@@ -407,11 +514,23 @@ impl<'a> Checker<'a> {
         // its own: say nothing rather than guess.
         let unsure = self.incomplete();
         let odrl = odrl_term(&iri, self.options.odrl());
-        let kinds: Vec<TermKind> = match (resolved, odrl) {
-            (Some((t, _)), o) => t.kinds.iter().copied().chain(o.map(|o| o.kind)).collect(),
-            (None, Some(o)) => vec![o.kind],
-            (None, None) => Vec::new(),
+        // Every loaded profile that declares the term, first loaded first:
+        // the term is every kind any of them gives it.
+        let declaring: Vec<&'a ProfileVocab> = match resolved {
+            Some((t, _)) => self
+                .profiles
+                .iter()
+                .copied()
+                .filter(|q| q.term(&t.iri).is_some())
+                .collect(),
+            None => Vec::new(),
         };
+        let kinds: Vec<TermKind> = declaring
+            .iter()
+            .filter_map(|q| q.term(&iri))
+            .flat_map(|t| t.kinds.iter().copied())
+            .chain(odrl.map(|o| o.kind))
+            .collect();
         if kinds.is_empty() {
             match pos {
                 Pos::Value | Pos::Unit => {}
@@ -478,13 +597,16 @@ impl<'a> Checker<'a> {
         }
         match resolved {
             Some((t, p)) => {
-                // A profile's term: the policy must name the profile (IM 2.1,
-                // 3.2). ODRL's own terms need no declaration, whoever
-                // redeclares them.
+                // A profile's term: the policy must name a profile that
+                // declares it (IM 2.1, 3.2); any one of them will do. ODRL's
+                // own terms need no declaration, whoever redeclares them, and
+                // a profile without an IRI cannot be named.
                 if let Some(piri) = p.iri()
                     && !t.iri.starts_with(ODRL)
                     && !unsure
-                    && !self.declares(piri)
+                    && !declaring
+                        .iter()
+                        .any(|q| q.iri().is_none_or(|i| self.declares(i)))
                 {
                     let msg = format!(
                         "\"{written}\" comes from the profile <{piri}>, which the policy does not declare"
@@ -506,7 +628,8 @@ impl<'a> Checker<'a> {
                 }
             }
             None => {
-                if odrl.is_some_and(|o| o.deprecated) {
+                // Advisory mode never reads the ODRL table.
+                if self.options.mode() == Mode::Strict && odrl.is_some_and(|o| o.deprecated) {
                     let msg = format!("\"{written}\" is deprecated in ODRL 2.2");
                     self.emit_term(
                         RuleId::ProfileDeprecatedTerm,
@@ -587,6 +710,47 @@ impl<'a> Checker<'a> {
                     });
                 }
             }
+        }
+    }
+
+    /// The `@context`s the reader does not apply: a remote one other than
+    /// ODRL's, an `@import`, or one on a node below a policy. Each may bind
+    /// any prefix or term, so the terms are not read for certain as a
+    /// JSON-LD processor reads them: a gap, never fetched.
+    fn contexts(&mut self, doc: &EditDoc) {
+        let found = unread_contexts(doc);
+        if found.is_empty() {
+            return;
+        }
+        self.unsure = true;
+        self.context_unread = true;
+        for what in found.iter().take(MAX_NAMED) {
+            let (msg, term) = match what {
+                Unread::Remote(iri) => (
+                    format!(
+                        "the @context <{iri}> is not read, so the prefixes and terms it may define could not be checked"
+                    ),
+                    Some(TermRef {
+                        written: iri.clone(),
+                        iri: iri.clone(),
+                    }),
+                ),
+                Unread::Nested => (
+                    "a @context inside the policy is not read, so the prefixes and terms it may define could not be checked"
+                        .to_string(),
+                    None,
+                ),
+            };
+            if let Some(f) = self.emit(RuleId::InputUnchecked, false, IssueTarget::Doc, msg) {
+                f.term = term;
+            }
+        }
+        if found.len() > MAX_NAMED {
+            let msg = format!(
+                "{} more @contexts are not read, so the prefixes and terms they may define could not be checked",
+                found.len() - MAX_NAMED
+            );
+            self.emit(RuleId::InputUnchecked, false, IssueTarget::Doc, msg);
         }
     }
 
@@ -1026,9 +1190,8 @@ impl<'a> Checker<'a> {
             self.hint_operator(path, a, h);
             self.hint_datatype(path, a, h);
         }
-        if self.options.mode() != Mode::Strict {
-            return;
-        }
+        // The rest is off in advisory mode unless a level set by hand
+        // switches a rule on.
         if let Some(h) = hints {
             self.hint_values(path, a, h);
             self.hint_unit(path, a, h);
@@ -1201,9 +1364,10 @@ impl<'a> Checker<'a> {
             return;
         }
         let names: Vec<String> = h.units.iter().map(|u| local_name(u).to_string()).collect();
+        let binding = h.closed && self.options.mode() == Mode::Strict;
         let msg = format!(
             "the profile {} the units {} for \"{}\"",
-            if h.closed { "allows only" } else { "suggests" },
+            if binding { "allows only" } else { "suggests" },
             join_with(&names, "or"),
             a.left
         );
