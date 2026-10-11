@@ -22,7 +22,11 @@ pub(crate) struct Triple {
     pub o: Object,
 }
 
-/// Warnings in first-seen order, each once.
+/// The most warnings one profile keeps; past it, one more line says so.
+/// Each quotes the input, and a host lists them all.
+const MAX_WARNINGS: usize = 100;
+
+/// Warnings in first-seen order, each once, at most [`MAX_WARNINGS`].
 #[derive(Default)]
 pub(crate) struct Notes {
     pub list: Vec<String>,
@@ -33,6 +37,12 @@ impl Notes {
     /// Adds `msg` once. Warnings quote the text they are about, so every
     /// invisible character in one is written as `\u{..}`.
     pub fn warn(&mut self, msg: impl Into<String>) {
+        if self.list.len() >= MAX_WARNINGS {
+            if self.list.len() == MAX_WARNINGS {
+                self.list.push("more warnings were not listed".to_string());
+            }
+            return;
+        }
         let msg: String = msg.into();
         let msg = match msg.chars().any(invisible) {
             false => msg,
