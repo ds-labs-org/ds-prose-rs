@@ -81,7 +81,13 @@ pub(crate) fn vocab(parsed: Parsed, limits: &ProfileLimits) -> Result<ProfileVoc
         prefixes: prefixes.into_iter().collect(),
         ..ProfileVocab::default()
     };
-    if let Some(p) = b.profile_node() {
+    // An anonymous header still gives the title, but never the IRI.
+    let header = b.profile_header();
+    v.iri = header
+        .clone()
+        .filter(|h| named(h))
+        .or_else(|| b.most_defined_by());
+    if let Some(p) = header.or_else(|| v.iri.clone()) {
         v.title = b.text(&p, &b.label_chain(), limits.max_label_chars);
         v.description = b.text(&p, &b.definition_chain(), limits.max_text_chars);
         v.version = [
@@ -95,13 +101,16 @@ pub(crate) fn vocab(parsed: Parsed, limits: &ProfileLimits) -> Result<ProfileVoc
             format!("{}imports", ns::OWL),
             format!("{}isProfileOf", ns::PROF),
         ] {
-            v.imports
-                .extend(g.iris(&p, &pred).into_iter().map(String::from));
+            v.imports.extend(
+                g.iris(&p, &pred)
+                    .into_iter()
+                    .filter(|i| named(i))
+                    .map(String::from),
+            );
         }
-        v.iri = Some(p);
     }
     for &s in &g.order {
-        if s.starts_with("_:") {
+        if !named(s) {
             continue;
         }
         let kinds = b.kinds(s, &mut notes);
@@ -121,6 +130,12 @@ pub(crate) fn vocab(parsed: Parsed, limits: &ProfileLimits) -> Result<ProfileVoc
     b.cycles(&mut notes);
     v.warnings = notes.list;
     Ok(v)
+}
+
+/// Not a blank node. Blank node labels are made up by the reader (at random
+/// in Turtle), so they never become a term, a profile IRI or a link.
+fn named(iri: &str) -> bool {
+    !iri.starts_with("_:")
 }
 
 fn rdfs(local: &str) -> String {
@@ -279,8 +294,13 @@ impl Builder<'_, '_> {
 
     fn term(&self, s: &str, kinds: Vec<TermKind>) -> Term {
         let g = self.g;
-        let iris =
-            |p: String| -> Vec<String> { g.iris(s, &p).into_iter().map(String::from).collect() };
+        let iris = |p: String| -> Vec<String> {
+            g.iris(s, &p)
+                .into_iter()
+                .filter(|i| named(i))
+                .map(String::from)
+                .collect()
+        };
         let mut t = Term::new(s.to_string());
         t.kinds = kinds;
         t.label = self.text(s, &self.label_chain(), self.limits.max_label_chars);
@@ -393,29 +413,31 @@ impl Builder<'_, '_> {
         }
     }
 
-    /// The profile's own node: typed `owl:Ontology`, `prof:Profile` or
-    /// `odrl:Profile`, else the IRI named most often in `rdfs:isDefinedBy`
-    /// (the first such on a tie).
-    fn profile_node(&self) -> Option<String> {
+    /// The profile's own node: the first typed `owl:Ontology`,
+    /// `prof:Profile` or `odrl:Profile`, possibly a blank node.
+    fn profile_header(&self) -> Option<String> {
         let g = self.g;
         let classes = [
             format!("{}Ontology", ns::OWL),
             format!("{}Profile", ns::PROF),
             odrl("Profile"),
         ];
-        if let Some(s) = g
-            .order
+        g.order
             .iter()
             .find(|s| classes.iter().any(|c| g.has_type(s, c)))
-        {
-            return Some(s.to_string());
-        }
+            .map(|s| s.to_string())
+    }
+
+    /// The IRI named most often in `rdfs:isDefinedBy` (the first such on a
+    /// tie).
+    fn most_defined_by(&self) -> Option<String> {
+        let g = self.g;
         let defined_by = rdfs("isDefinedBy");
         // Counted in a map, with first-seen order kept for the tie.
         let mut order: Vec<&str> = Vec::new();
         let mut counts: HashMap<&str, usize> = HashMap::new();
         for s in &g.order {
-            for o in g.iris(s, &defined_by) {
+            for o in g.iris(s, &defined_by).into_iter().filter(|o| named(o)) {
                 let n = counts.entry(o).or_insert_with(|| {
                     order.push(o);
                     0

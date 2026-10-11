@@ -94,6 +94,8 @@ impl ProfileVocab {
 
     /// The profile's own IRI: the node typed `owl:Ontology`, `prof:Profile`
     /// or `odrl:Profile`, else the IRI most terms name in `rdfs:isDefinedBy`.
+    /// A blank node is never an IRI here; an anonymous header still gives
+    /// the title and description.
     pub fn iri(&self) -> Option<&str> {
         self.iri.as_deref()
     }
