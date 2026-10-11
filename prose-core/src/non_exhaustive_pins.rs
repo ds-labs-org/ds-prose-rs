@@ -42,6 +42,17 @@
 //! ```
 //! #![deny(unreachable_patterns)]
 //! #![allow(dead_code)]
+//! use prose_core::edit::StrictEdit;
+//! fn f(x: &StrictEdit) -> u8 {
+//!     match x {
+//!         StrictEdit::Flag => 0,
+//!         StrictEdit::RefuseTerms => 0,
+//!         _ => 1,
+//!     }
+//! }
+//! ```
+//! #![deny(unreachable_patterns)]
+//! #![allow(dead_code)]
 //! use prose_core::edit::NewItem;
 //! fn f(x: &NewItem) -> u8 {
 //!     match x {

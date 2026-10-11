@@ -125,6 +125,46 @@ impl EditDoc {
         *self = work;
         Ok(())
     }
+
+    /// As [`EditDoc::apply`], and then, when `gate` is given, strict mode's
+    /// reducer gate ([`Validator::admissible`]): an event `apply` would
+    /// accept is refused as [`EditError::OutsideProfile`] when it writes a
+    /// term the loaded profiles do not allow in that slot. The reducer's own
+    /// errors come first. With `None` it is `apply`. Atomic.
+    ///
+    /// [`Validator::admissible`]: crate::validate::Validator::admissible
+    pub fn apply_gated(
+        &mut self,
+        ev: &EditEvent,
+        rules: &EditRules,
+        gate: Option<&crate::validate::Validator>,
+    ) -> Result<(), EditError> {
+        let mut work = self.clone();
+        super::apply::apply_event(&mut work, ev, rules)?;
+        if let Some(v) = gate {
+            v.admissible(self, ev).map_err(EditError::OutsideProfile)?;
+        }
+        *self = work;
+        Ok(())
+    }
+
+    /// Applies `evs` in order, each through [`EditDoc::apply_gated`] on the
+    /// document the ones before it made: all of them or, on the first
+    /// error, none, with the index of the event that failed. A fix of
+    /// several events is one change.
+    pub fn apply_all(
+        &mut self,
+        evs: &[EditEvent],
+        rules: &EditRules,
+        gate: Option<&crate::validate::Validator>,
+    ) -> Result<(), (usize, EditError)> {
+        let mut work = self.clone();
+        for (i, ev) in evs.iter().enumerate() {
+            work.apply_gated(ev, rules, gate).map_err(|e| (i, e))?;
+        }
+        *self = work;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

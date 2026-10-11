@@ -1,9 +1,11 @@
 //! Events and the one generic reducer that applies them.
 use std::fmt;
 
+use super::issue::{Issue, IssueTarget, Severity};
 use super::model::*;
 use super::path::*;
 use super::rules::{EditRules, odrl_position};
+use crate::validate::Validator;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
@@ -95,10 +97,61 @@ pub enum EditEvent {
 #[non_exhaustive]
 pub enum EditError {
     NoSuchPath(String),
-    Stale { expected: NodeId, found: NodeId },
+    Stale {
+        expected: NodeId,
+        found: NodeId,
+    },
     NotAllowed(String),
     Locked(String),
     Invalid(String),
+    /// Refused by strict mode's reducer gate (see
+    /// [`EditDoc::apply_gated`]): the event writes a term the loaded
+    /// profiles do not allow there. The finding says which rule and why.
+    OutsideProfile(Box<crate::validate::Finding>),
+}
+
+impl EditError {
+    /// A refusal placed at the slot `ev` writes, as the editor shows an
+    /// issue; `None` for the reducer's own errors, which are not about a
+    /// slot's value.
+    pub fn issue(&self, ev: &EditEvent) -> Option<Issue> {
+        let EditError::OutsideProfile(f) = self else {
+            return None;
+        };
+        let target = match ev {
+            EditEvent::SetText { slot, .. }
+            | EditEvent::SetChoice { slot, .. }
+            | EditEvent::SetIri { slot, .. } => IssueTarget::Slot(slot.clone()),
+            _ => f.target.clone(),
+        };
+        Some(Issue {
+            target,
+            severity: Severity::Error,
+            message: f.message.clone(),
+        })
+    }
+}
+
+/// What strict mode does with an event the loaded profiles do not allow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum StrictEdit {
+    /// Commit it; the validator marks it as an error.
+    #[default]
+    Flag,
+    /// Refuse it in the reducer, as [`EditError::OutsideProfile`].
+    RefuseTerms,
+}
+
+impl StrictEdit {
+    /// The gate to hand [`EditDoc::apply_gated`]: `validator` under
+    /// `RefuseTerms`, none under `Flag`.
+    pub fn gate(self, validator: Option<&Validator>) -> Option<&Validator> {
+        match self {
+            StrictEdit::RefuseTerms => validator,
+            StrictEdit::Flag => None,
+        }
+    }
 }
 
 impl fmt::Display for EditError {
@@ -113,6 +166,9 @@ impl fmt::Display for EditError {
             EditError::NotAllowed(why) => write!(f, "not allowed: {why}"),
             EditError::Locked(why) => write!(f, "kept as written: {why}"),
             EditError::Invalid(why) => write!(f, "invalid: {why}"),
+            EditError::OutsideProfile(finding) => {
+                write!(f, "outside the profile: {}", finding.message)
+            }
         }
     }
 }

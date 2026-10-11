@@ -210,6 +210,25 @@ impl Validator {
         Report::new(&self.options, &self.wording, findings)
     }
 
+    /// Whether strict mode's reducer gate lets `ev` through on `doc`, the
+    /// document it would be applied to. `Err` names the finding when `ev`
+    /// writes a term into a vocabulary slot (an action, a left operand, an
+    /// operator, a unit, a conflict strategy or a policy type) that a
+    /// refusable rule ([`RuleInfo::refusable`]) reports as an error there.
+    ///
+    /// The check is slot-local: it looks at the written value only, never at
+    /// what depends on it. Always `Ok` in advisory mode, for the empty
+    /// string, for free text, right operands and structural events, and
+    /// while the policy's vocabulary is incomplete. It reuses the index
+    /// built by [`Validator::new`]. See [`EditDoc::apply_gated`].
+    pub fn admissible(
+        &self,
+        doc: &EditDoc,
+        ev: &crate::edit::EditEvent,
+    ) -> Result<(), Box<Finding>> {
+        check::admissible(doc, &self.wording, &self.index, &self.options, ev)
+    }
+
     /// As [`Validator::validate`], for a policy given as JSON-LD text. Never
     /// fails: a text that is not a policy is an `input.unreadable` finding.
     pub fn validate_json(&self, json: &str) -> Report {

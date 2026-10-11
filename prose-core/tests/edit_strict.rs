@@ -174,7 +174,7 @@ fn refuse_other_vocabulary_slots() {
             "profile.wrong-kind",
         ),
         (
-            choice(&doc, &format!("{PURPOSE}#operator"), "foo:op"),
+            choice(&doc, &format!("{COUNT}#operator"), "foo:op"),
             "profile.unknown-term",
         ),
         // The operand is closed: only eq, isAnyOf and isNoneOf.
@@ -857,7 +857,7 @@ fn a_refusal_names_its_finding() {
     let ev = choice(&doc, &format!("{COUNT}#operator"), "eq");
     let f = v.admissible(&doc, &ev).unwrap_err();
     assert_eq!(f.rule, RuleId::ProseOperatorNotAllowed);
-    assert_eq!(f.node, Some(expect_at(&doc, &sp(COUNT))));
+    assert_eq!(f.node, Some(doc.node(&np(COUNT)).unwrap().id()));
     let expected = f.expected.as_ref().expect("what is allowed");
     assert!(expected.closed);
     assert_eq!(

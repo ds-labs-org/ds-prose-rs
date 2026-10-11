@@ -63,19 +63,7 @@ pub(crate) fn run(doc: &EditDoc, w: &Wording, index: &Index, o: &Options) -> Vec
     if o.mode() == Mode::Advisory && w.is_empty() && o.levels.is_empty() {
         return Vec::new();
     }
-    let mut c = Checker {
-        w,
-        profiles: w.profiles().collect(),
-        index,
-        options: o,
-        prefixes: prefixes(doc),
-        cur: None,
-        unsure: false,
-        context_unread: false,
-        cycles: Vec::new(),
-        remote: Vec::new(),
-        out: Vec::new(),
-    };
+    let mut c = Checker::new(doc, w, index, o);
     if o.level_of(RuleId::OdrlInheritanceCycle, false) != Level::Off {
         c.inheritance(doc);
     }
@@ -104,6 +92,96 @@ pub(crate) fn run(doc: &EditDoc, w: &Wording, index: &Index, o: &Options) -> Vec
         }
     }
     out
+}
+
+/// Whether `ev` may be applied under strict mode's reducer gate: `Err`
+/// with the finding when it writes a term into a vocabulary slot that a
+/// refusable rule reports as an error there.
+///
+/// Slot-local: only the written value is checked, never what depends on
+/// it, so a new left operand is not refused for the operator or values the
+/// constraint already has. Everything else is admitted: the empty string,
+/// free text, right operands, structural events, an event on a path that
+/// is not there (the reducer refuses it), every event in advisory mode, and
+/// every event while the policy's vocabulary is incomplete.
+pub(crate) fn admissible(
+    doc: &EditDoc,
+    w: &Wording,
+    index: &Index,
+    o: &Options,
+    ev: &EditEvent,
+) -> Result<(), Box<Finding>> {
+    if o.mode() != Mode::Strict {
+        return Ok(());
+    }
+    let (slot, value) = match ev {
+        EditEvent::SetText { slot, value, .. } | EditEvent::SetChoice { slot, value, .. } => {
+            (slot, value.as_str())
+        }
+        _ => return Ok(()),
+    };
+    if value.is_empty() {
+        return Ok(());
+    }
+    let pos = match slot.field {
+        Field::Kind => Pos::PolicyKind,
+        Field::Conflict => Pos::Conflict,
+        Field::Name => Pos::Action,
+        Field::LeftOperand => Pos::LeftOperand,
+        Field::Operator => Pos::Operator,
+        Field::Unit => Pos::Unit,
+        _ => return Ok(()),
+    };
+    let Some(policy) = doc.policies.get(slot.node.policy) else {
+        return Ok(());
+    };
+    let atomic = match (pos, doc.node(&slot.node)) {
+        (Pos::PolicyKind | Pos::Conflict, Some(NodeRef::Policy(_))) => None,
+        (Pos::Action, Some(NodeRef::Action(_))) => None,
+        (
+            Pos::LeftOperand | Pos::Operator | Pos::Unit,
+            Some(NodeRef::Constraint(ConstraintNode::Atomic(a))),
+        ) => Some(a),
+        _ => return Ok(()),
+    };
+    if policy.locked.is_some() {
+        return Ok(());
+    }
+    let mut c = Checker::new(doc, w, index, o);
+    c.imports();
+    c.contexts(doc);
+    c.enter(NodePath::policy(slot.node.policy), policy);
+    if c.incomplete() {
+        return Ok(());
+    }
+    c.out.clear();
+    let id = doc.node(&slot.node).map(|n| n.id()).unwrap_or_default();
+    c.term(&slot.node, id, slot.field, value, pos);
+    // The left operand's hints bind the operator and the unit written
+    // under it; they are read as the constraint stands, with the new value.
+    if let Some(a) = atomic
+        && matches!(pos, Pos::Operator | Pos::Unit)
+        && let Some(h) = c
+            .resolve(&a.left)
+            .filter(|(t, _)| t.kinds.contains(&TermKind::LeftOperand))
+            .map(|(t, _)| &t.hints)
+    {
+        let mut written = a.clone();
+        if pos == Pos::Operator {
+            written.operator = value.to_string();
+            c.hint_operator(&slot.node, &written, h);
+        } else {
+            written.unit = Some(value.to_string());
+            c.hint_unit(&slot.node, &written, h);
+        }
+    }
+    let here = IssueTarget::Slot(slot.clone());
+    match c.out.into_iter().find(|f| {
+        f.severity == Severity::Error && !f.gap && f.rule.info().refusable && f.target == here
+    }) {
+        Some(f) => Err(Box::new(f)),
+        None => Ok(()),
+    }
 }
 
 struct Checker<'a> {
@@ -356,6 +434,22 @@ fn slot(node: &NodePath, field: Field) -> IssueTarget {
 }
 
 impl<'a> Checker<'a> {
+    fn new(doc: &EditDoc, w: &'a Wording, index: &'a Index, o: &'a Options) -> Checker<'a> {
+        Checker {
+            w,
+            profiles: w.profiles().collect(),
+            index,
+            options: o,
+            prefixes: prefixes(doc),
+            cur: None,
+            unsure: false,
+            context_unread: false,
+            cycles: Vec::new(),
+            remote: Vec::new(),
+            out: Vec::new(),
+        }
+    }
+
     /// `written` as an expanded IRI.
     fn expand(&self, written: &str) -> String {
         self.w.expand(&self.prefixes, written)
@@ -816,7 +910,28 @@ impl<'a> Checker<'a> {
             self.unchecked(IssueTarget::Node(path), p.id, msg);
             return;
         }
-        // Each profile that is not loaded once, the first MAX_NAMED by name.
+        self.enter(path.clone(), p);
+        self.policy_structure(&path, p);
+        self.term(&path, p.id, Field::Kind, &p.kind, Pos::PolicyKind);
+        if let Some(c) = &p.conflict {
+            self.term(&path, p.id, Field::Conflict, c, Pos::Conflict);
+        }
+        self.entities(&path, &p.assigner, &p.assignee, &p.target);
+        self.actions(&path, &p.action);
+        for (list, rules) in [
+            (RuleList::Permission, &p.permission),
+            (RuleList::Prohibition, &p.prohibition),
+            (RuleList::Obligation, &p.obligation),
+        ] {
+            self.rules(&path, list, rules);
+        }
+        self.cur = None;
+    }
+
+    /// Makes the unlocked policy at `path` the one being checked: reports
+    /// the profiles it declares that are not loaded, and records what its
+    /// terms and rules are checked against.
+    fn enter(&mut self, path: NodePath, p: &PolicyNode) {
         let mut declared: HashSet<&str> = HashSet::new();
         for id in &p.profile {
             if !id.is_empty()
@@ -871,21 +986,6 @@ impl<'a> Checker<'a> {
             target: !p.target.is_empty(),
             action: !p.action.is_empty(),
         });
-        self.policy_structure(&path, p);
-        self.term(&path, p.id, Field::Kind, &p.kind, Pos::PolicyKind);
-        if let Some(c) = &p.conflict {
-            self.term(&path, p.id, Field::Conflict, c, Pos::Conflict);
-        }
-        self.entities(&path, &p.assigner, &p.assignee, &p.target);
-        self.actions(&path, &p.action);
-        for (list, rules) in [
-            (RuleList::Permission, &p.permission),
-            (RuleList::Prohibition, &p.prohibition),
-            (RuleList::Obligation, &p.obligation),
-        ] {
-            self.rules(&path, list, rules);
-        }
-        self.cur = None;
     }
 
     /// Works out, once, which policies inherit from themselves and which

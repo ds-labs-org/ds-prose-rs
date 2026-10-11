@@ -17,7 +17,7 @@ mod path;
 mod rules;
 mod segments;
 
-pub use apply::{EditError, EditEvent, FocusTarget, NewItem, focus_after};
+pub use apply::{EditError, EditEvent, FocusTarget, NewItem, StrictEdit, focus_after};
 pub use check::check_profile;
 pub use issue::{Issue, IssueTarget, Severity};
 pub use jsonld_read::{read_model, read_model_value};
