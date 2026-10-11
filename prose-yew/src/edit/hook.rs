@@ -94,3 +94,155 @@ pub fn use_prose_editor(initial: impl FnOnce() -> EditDoc, rules: Rc<EditRules>)
         last_error: state.last_error.clone(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use prose_core::edit::{SlotPath, read_model};
+    use prose_core::profile::{ProfileVocab, Wording};
+    use prose_core::validate::{Options, Validator};
+    use std::sync::Arc;
+
+    const ACTION: &str = "policy[0].permission[0].action[0]#name";
+
+    fn doc() -> EditDoc {
+        read_model(
+            r#"{
+              "@context": ["http://www.w3.org/ns/odrl.jsonld",
+                           {"ex": "https://example.org/odrl/profile/research/",
+                            "foo": "https://example.net/foo/"}],
+              "@type": "Set", "uid": "urn:policy:s",
+              "profile": "https://example.org/odrl/profile/research",
+              "permission": [{"target": "urn:asset:1", "action": "use"},
+                             {"target": "urn:asset:2", "action": "read"}]
+            }"#,
+        )
+        .unwrap()
+    }
+
+    fn gate() -> Validator {
+        let text = include_str!("../../../prose-core/tests/profiles/research-closed.jsonld");
+        let w = Wording::new().with_profile(ProfileVocab::parse(text).unwrap());
+        Validator::new(Arc::new(w), Options::strict())
+    }
+
+    fn state() -> Rc<State> {
+        Rc::new(State {
+            doc: Rc::new(doc()),
+            history: vec![],
+            last_error: None,
+            refused: None,
+        })
+    }
+
+    fn set(d: &EditDoc, slot: &str, value: &str) -> EditEvent {
+        let slot: SlotPath = slot.parse().unwrap();
+        EditEvent::SetText {
+            expect: d.node(&slot.node).unwrap().id(),
+            slot,
+            value: value.into(),
+        }
+    }
+
+    fn rules() -> Rc<EditRules> {
+        Rc::new(EditRules::default())
+    }
+
+    #[test]
+    fn without_a_gate_a_foreign_action_is_committed() {
+        let s = state();
+        let ev = set(&s.doc, ACTION, "foo:bar");
+        let s = s.reduce(Action::Edit(ev, rules(), None));
+        assert_eq!(s.history.len(), 1);
+        assert!(s.last_error.is_none() && s.refused.is_none());
+        assert_ne!(*s.doc, doc());
+    }
+
+    #[test]
+    fn a_gate_refuses_it_and_records_the_event() {
+        let s = state();
+        let ev = set(&s.doc, ACTION, "foo:bar");
+        let after = s
+            .clone()
+            .reduce(Action::Edit(ev.clone(), rules(), Some(gate())));
+        // No new document, no history entry (the Rc is the same).
+        assert!(Rc::ptr_eq(&after.doc, &s.doc));
+        assert!(after.history.is_empty());
+        assert!(matches!(
+            &after.last_error,
+            Some(EditError::OutsideProfile(f)) if f.rule.as_str() == "profile.unknown-term"
+        ));
+        let (refused, error) = after.refused.clone().expect("the refused event");
+        assert_eq!(refused, ev);
+        assert_eq!(Some(&error), after.last_error.as_ref());
+    }
+
+    #[test]
+    fn a_good_edit_or_a_new_document_clears_the_refusal() {
+        let s = state();
+        let bad = set(&s.doc, ACTION, "foo:bar");
+        let s = s.reduce(Action::Edit(bad, rules(), Some(gate())));
+        assert!(s.refused.is_some());
+        let good = set(&s.doc, ACTION, "ex:train");
+        let ok = s.clone().reduce(Action::Edit(good, rules(), Some(gate())));
+        assert!(ok.refused.is_none() && ok.last_error.is_none());
+        assert_eq!(ok.history.len(), 1);
+        let replaced = s.reduce(Action::Set(doc()));
+        assert!(replaced.refused.is_none() && replaced.last_error.is_none());
+    }
+
+    #[test]
+    fn undo_is_not_gated_and_clears_the_refusal() {
+        let s = state();
+        // The document already violates the profile: the edit is committed
+        // by a host that flags, then undone through a gate.
+        let ev = set(&s.doc, ACTION, "foo:bar");
+        let s = s.reduce(Action::Edit(ev, rules(), None));
+        let bad = set(&s.doc, "policy[0].permission[1].action[0]#name", "foo:baz");
+        let s = s.reduce(Action::Edit(bad, rules(), Some(gate())));
+        assert!(s.refused.is_some());
+        let undone = s.reduce(Action::Undo);
+        assert!(undone.history.is_empty());
+        assert!(undone.refused.is_none() && undone.last_error.is_none());
+        assert_eq!(*undone.doc, doc());
+    }
+
+    #[test]
+    fn apply_all_is_one_history_entry() {
+        let s = state();
+        let a = set(&s.doc, ACTION, "ex:train");
+        let b = set(
+            &s.doc,
+            "policy[0].permission[1].action[0]#name",
+            "ex:fineTune",
+        );
+        let s = s.reduce(Action::All(vec![a, b], rules(), Some(gate())));
+        assert_eq!(s.history.len(), 1, "one undo step");
+        assert!(s.refused.is_none());
+        let undone = s.reduce(Action::Undo);
+        assert_eq!(*undone.doc, doc());
+    }
+
+    #[test]
+    fn apply_all_that_fails_changes_nothing_and_names_the_event() {
+        let s = state();
+        let a = set(&s.doc, ACTION, "ex:train");
+        let b = set(&s.doc, "policy[0].permission[1].action[0]#name", "foo:bar");
+        let after = s
+            .clone()
+            .reduce(Action::All(vec![a, b.clone()], rules(), Some(gate())));
+        assert!(Rc::ptr_eq(&after.doc, &s.doc));
+        assert!(after.history.is_empty());
+        let (refused, error) = after.refused.clone().expect("the failing event");
+        assert_eq!(refused, b, "the event that failed, not the first");
+        assert!(matches!(error, EditError::OutsideProfile(_)));
+    }
+
+    #[test]
+    fn an_empty_list_of_events_changes_nothing() {
+        let s = state();
+        let after = s.clone().reduce(Action::All(vec![], rules(), None));
+        assert!(Rc::ptr_eq(&after.doc, &s.doc));
+        assert!(after.history.is_empty() && after.refused.is_none());
+    }
+}
