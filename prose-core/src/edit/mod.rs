@@ -37,6 +37,13 @@ pub use segments::{
 /// The prefixes `doc`'s JSON-LD binds: those of [`EditDoc::origin`], then of
 /// each policy's origin; the first binding of a prefix wins.
 pub fn prefixes(doc: &EditDoc) -> crate::profile::Prefixes {
-    let _ = doc;
-    crate::profile::Prefixes::default()
+    let mut out = crate::profile::Prefixes::default();
+    let origins = doc
+        .origin
+        .iter()
+        .chain(doc.policies.iter().filter_map(|p| p.origin.as_ref()));
+    for o in origins {
+        out.merge(crate::profile::Prefixes::of_document(o.value()));
+    }
+    out
 }

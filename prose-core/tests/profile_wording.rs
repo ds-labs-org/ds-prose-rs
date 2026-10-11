@@ -227,3 +227,11 @@ fn edit_prefixes_reads_origins() {
     let built = EditDoc::new(vec![]);
     assert_eq!(prose_core::edit::prefixes(&built), Prefixes::default());
 }
+
+#[test]
+fn wording_can_cross_threads() {
+    fn send_sync<T: Send + Sync>() {}
+    send_sync::<Wording>();
+    send_sync::<Prefixes>();
+    send_sync::<ProfileVocab>();
+}

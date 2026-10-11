@@ -1,6 +1,6 @@
 //! The loaded profiles and language preferences one reading uses, and how a
 //! policy's compact terms expand.
-use super::{ProfileVocab, Term};
+use super::{ProfileVocab, Term, ns};
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -19,13 +19,28 @@ impl Wording {
         Wording::default()
     }
 
-    pub fn with_profile(self, p: ProfileVocab) -> Wording {
-        let _ = p;
+    /// Adds a profile after those already loaded. A term an earlier profile
+    /// already declares keeps the earlier definition, and is reported in
+    /// [`Wording::conflicts`].
+    pub fn with_profile(mut self, p: ProfileVocab) -> Wording {
+        for t in p.terms() {
+            if let Some((_, first)) = self.lookup(&t.iri) {
+                let msg = format!(
+                    "\"{}\" is declared by both {} and {}; the first loaded is used",
+                    t.iri,
+                    name(first),
+                    name(&p)
+                );
+                self.conflicts.push(msg);
+            }
+        }
+        self.profiles.push(Arc::new(p));
         self
     }
 
-    pub fn with_languages(self, langs: Vec<String>) -> Wording {
-        let _ = langs;
+    /// The label languages to prefer, most preferred first.
+    pub fn with_languages(mut self, langs: Vec<String>) -> Wording {
+        self.languages = langs;
         self
     }
 
@@ -33,51 +48,202 @@ impl Wording {
         &self.languages
     }
 
+    /// The loaded profiles, in load order.
     pub fn profiles(&self) -> impl Iterator<Item = &ProfileVocab> {
         self.profiles.iter().map(|p| &**p)
     }
 
+    /// The term with this expanded IRI, and the profile that declares it.
     pub fn lookup(&self, iri: &str) -> Option<(&Term, &ProfileVocab)> {
-        let _ = iri;
-        None
+        self.profiles
+            .iter()
+            .find_map(|p| p.term(iri).map(|t| (t, &**p)))
     }
 
+    /// [`Wording::lookup`] for a term as a policy writes it.
     pub fn lookup_written(&self, p: &Prefixes, written: &str) -> Option<(&Term, &ProfileVocab)> {
         self.lookup(&self.expand(p, written))
     }
 
+    /// `written` as an IRI: a full IRI as it is; a compact one with the
+    /// policy's prefixes, then the loaded profiles' own prefixes in load
+    /// order; a bare word or `odrl:` term in the ODRL namespace unless the
+    /// policy binds it otherwise. An unbound prefix is kept as written.
     pub fn expand(&self, p: &Prefixes, written: &str) -> String {
-        let _ = p;
+        if let Some(iri) = p.try_expand(written) {
+            return iri;
+        }
+        if let Some((prefix, suffix)) = written.split_once(':') {
+            for vocab in self.profiles() {
+                if let Some((_, iri)) = vocab.prefixes.iter().find(|(k, _)| k == prefix) {
+                    return format!("{iri}{suffix}");
+                }
+            }
+        }
         written.to_string()
     }
 
+    /// Whether the profile `profile_iri` is loaded. A trailing `#` or `/` is
+    /// ignored; ODRL's core profile is always covered.
     pub fn covers(&self, profile_iri: &str) -> bool {
-        let _ = profile_iri;
-        false
+        let want = trim(profile_iri);
+        if want == trim(ns::ODRL) || want == format!("{}core", ns::ODRL) {
+            return true;
+        }
+        self.profiles().any(|p| p.iri().map(trim) == Some(want))
     }
 
+    /// One message for every term two loaded profiles both declare.
     pub fn conflicts(&self) -> &[String] {
         &self.conflicts
     }
 
+    /// Whether no profile is loaded: the wording is the built-in one.
     pub fn is_empty(&self) -> bool {
         self.profiles.is_empty()
     }
 }
 
+fn trim(iri: &str) -> &str {
+    iri.trim_end_matches(['#', '/'])
+}
+
+fn name(p: &ProfileVocab) -> String {
+    match p.iri() {
+        Some(i) => format!("<{i}>"),
+        None => "an unnamed profile".to_string(),
+    }
+}
+
 /// The prefixes and term definitions a policy document's `@context` binds.
+/// Only inline contexts are read; the W3C ODRL context, named as a remote
+/// context, adds the prefixes it is known to bind.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Prefixes {
+    /// (prefix or term, IRI), each key once.
     entries: Vec<(String, String)>,
 }
 
 impl Prefixes {
+    /// The contexts of `v`, of its `@graph` items, or of each node of a
+    /// top-level array, in document order; the first binding of a key wins.
+    /// Within one `@context` the later entry wins, as in JSON-LD.
     pub fn of_document(v: &Value) -> Prefixes {
-        let _ = v;
-        Prefixes::default()
+        let mut nodes: Vec<&Value> = Vec::new();
+        let tops: Vec<&Value> = match v {
+            Value::Array(a) => a.iter().collect(),
+            other => vec![other],
+        };
+        for top in tops {
+            nodes.push(top);
+            if let Some(g) = top.get("@graph") {
+                match g {
+                    Value::Array(a) => nodes.extend(a),
+                    other => nodes.push(other),
+                }
+            }
+        }
+        let mut out = Prefixes::default();
+        for n in nodes {
+            if let Some(c) = n.get("@context") {
+                out.merge(Prefixes::of_context(c));
+            }
+        }
+        out
     }
 
+    /// `term` as an IRI; see [`Wording::expand`]. Without a profile, an
+    /// unbound prefix is kept as written.
     pub fn expand(&self, term: &str) -> String {
-        term.to_string()
+        self.try_expand(term).unwrap_or_else(|| term.to_string())
+    }
+
+    /// `None` for a compact IRI whose prefix nothing here binds.
+    pub(crate) fn try_expand(&self, term: &str) -> Option<String> {
+        match term.split_once(':') {
+            Some((prefix, suffix)) => {
+                if prefix == "_" || suffix.starts_with("//") {
+                    return Some(term.to_string());
+                }
+                if let Some(iri) = self.get(prefix) {
+                    return Some(format!("{iri}{suffix}"));
+                }
+                (prefix == "odrl").then(|| ns::odrl(suffix))
+            }
+            None => Some(
+                self.get(term)
+                    .map_or_else(|| ns::odrl(term), str::to_string),
+            ),
+        }
+    }
+
+    fn get(&self, key: &str) -> Option<&str> {
+        self.entries
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    }
+
+    /// Adds `other`'s keys that are not bound here yet.
+    pub(crate) fn merge(&mut self, other: Prefixes) {
+        for (k, v) in other.entries {
+            if self.get(&k).is_none() {
+                self.entries.push((k, v));
+            }
+        }
+    }
+
+    fn set(&mut self, key: &str, iri: String) {
+        match self.entries.iter_mut().find(|(k, _)| k == key) {
+            Some(e) => e.1 = iri,
+            None => self.entries.push((key.to_string(), iri)),
+        }
+    }
+
+    /// One `@context` value: a string, an object, or an array of them.
+    fn of_context(c: &Value) -> Prefixes {
+        let mut out = Prefixes::default();
+        let list: Vec<&Value> = match c {
+            Value::Array(a) => a.iter().collect(),
+            other => vec![other],
+        };
+        for c in list {
+            match c {
+                Value::String(s) if ns::is_odrl_context(s) => {
+                    for (p, iri) in ns::ODRL_CONTEXT {
+                        out.set(p, iri.to_string());
+                    }
+                }
+                Value::Object(o) => {
+                    for (k, v) in o.iter().filter(|(k, _)| !k.starts_with('@')) {
+                        let iri = match v {
+                            Value::String(s) => Some(s.as_str()),
+                            Value::Object(d) => d.get("@id").and_then(Value::as_str),
+                            _ => None,
+                        };
+                        match iri {
+                            Some(i) if !i.starts_with('@') => out.set(k, i.to_string()),
+                            _ => out.entries.retain(|(e, _)| e != k),
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        // Values written as compact IRIs ("fineTune": "ex:fineTune"); a few
+        // passes resolve chains.
+        for _ in 0..4 {
+            let snapshot = out.clone();
+            for e in &mut out.entries {
+                if let Some((prefix, suffix)) = e.1.split_once(':')
+                    && prefix != e.0
+                    && !suffix.starts_with("//")
+                    && let Some(iri) = snapshot.get(prefix)
+                {
+                    e.1 = format!("{iri}{suffix}");
+                }
+            }
+        }
+        out
     }
 }

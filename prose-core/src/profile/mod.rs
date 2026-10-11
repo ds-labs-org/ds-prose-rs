@@ -39,8 +39,8 @@ pub struct ProfileVocab {
     terms: Vec<Term>,
     /// Term IRI -> index in `terms`.
     index: std::collections::HashMap<String, usize>,
-    /// Read by `Wording` (a later commit).
-    #[allow(dead_code)]
+    /// The prefixes the profile text bound: `Wording` expands a policy's
+    /// compact terms with them when the policy does not bind the prefix.
     prefixes: Vec<(String, String)>,
     warnings: Vec<String>,
 }
