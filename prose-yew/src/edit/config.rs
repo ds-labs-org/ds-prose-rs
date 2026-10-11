@@ -304,6 +304,7 @@ fn action_hint(w: &Wording, t: &Term) -> String {
 }
 
 const ODRL_NS: &str = "http://www.w3.org/ns/odrl/2/";
+const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
 
 /// How a suggested value is written into a policy whose prefixes are
 /// `prefixes`: a full IRI as a compact IRI or bare ODRL term where the
@@ -504,6 +505,16 @@ pub struct Labels {
     pub from_profile: AttrValue,
     /// Shown for a term the profile marks `owl:deprecated`.
     pub deprecated: AttrValue,
+    /// The operator select's two groups, when the profile suggests
+    /// operators for the left operand.
+    pub suggested_operators: AttrValue,
+    pub other_operators: AttrValue,
+    /// The heading of profile values offered for a left operand the profile
+    /// suggests no values for.
+    pub profile_values: AttrValue,
+    /// (xsd datatype IRI, placeholder) for a value slot whose left operand
+    /// names a datatype.
+    pub datatype_placeholders: Vec<(AttrValue, AttrValue)>,
 }
 
 impl Default for Labels {
@@ -558,6 +569,20 @@ impl Default for Labels {
             usage_note: a("Usage: {note}"),
             from_profile: a("From {profile}"),
             deprecated: a("Deprecated in the profile"),
+            suggested_operators: a("Suggested by the profile"),
+            other_operators: a("Other operators"),
+            profile_values: a("Profile values (not specific to this operand)"),
+            datatype_placeholders: [
+                ("integer", "whole number"),
+                ("decimal", "number"),
+                ("boolean", "true or false"),
+                ("date", "YYYY-MM-DD"),
+                ("dateTime", "YYYY-MM-DDThh:mm:ss"),
+                ("duration", "duration, e.g. P2Y"),
+            ]
+            .iter()
+            .map(|(t, p)| (a(&format!("{XSD}{t}")), a(p)))
+            .collect(),
         }
     }
 }

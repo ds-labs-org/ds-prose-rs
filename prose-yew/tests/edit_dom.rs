@@ -997,3 +997,273 @@ async fn an_answered_event_removes_its_expiry_listeners() {
         "the host answered; nothing waits any more"
     );
 }
+
+// --- profiles -------------------------------------------------------------------
+
+use prose_core::profile::{ProfileVocab, Wording};
+
+const RESEARCH: &str = include_str!("../../prose-core/tests/profiles/research.jsonld");
+const RESEARCH_POLICY: &str = include_str!("../../prose-core/tests/profiles/research-policy.json");
+
+fn research_wording() -> Rc<Wording> {
+    Rc::new(Wording::new().with_profile(ProfileVocab::parse(RESEARCH).unwrap()))
+}
+
+#[derive(Properties, PartialEq, Clone)]
+struct WordedProps {
+    json: AttrValue,
+    log: Log,
+    /// Compared by identity, as a host keeps one per loaded profile.
+    wording: Option<WordingRef>,
+}
+
+#[derive(Clone)]
+struct WordingRef(Rc<Wording>);
+
+impl PartialEq for WordingRef {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+/// A host with an undo button whose configuration follows its `wording`,
+/// as the demo's Edit tab builds it.
+#[function_component(WordedHost)]
+fn worded_host(p: &WordedProps) -> Html {
+    let json = p.json.clone();
+    let editor = use_prose_editor(
+        move || read_model(&json).expect("a readable fixture"),
+        Rc::new(EditRules::default()),
+    );
+    let config = use_memo(p.wording.clone(), |w| match w {
+        Some(w) => EditConfig::default().with_wording(w.0.clone()),
+        None => EditConfig::default(),
+    });
+    let onedit = {
+        let log = p.log.clone();
+        let inner = editor.onedit.clone();
+        Callback::from(move |ev: EditEvent| {
+            log.borrow_mut().push(ev.clone());
+            inner.emit(ev);
+        })
+    };
+    let undo = {
+        let undo = editor.undo.clone();
+        Callback::from(move |_| undo.emit(()))
+    };
+    html! {
+        <>
+            <button id="worded-undo" type="button" disabled={!editor.can_undo} onclick={undo}>{ "Undo" }</button>
+            <OdrlProseView
+                doc={editor.doc.clone()}
+                mode={EditMode::Edit}
+                config={config}
+                onedit={onedit}
+            />
+        </>
+    }
+}
+
+async fn mount_worded(
+    json: &str,
+    wording: Option<Rc<Wording>>,
+) -> (Element, Log, yew::AppHandle<WordedHost>) {
+    let container = document().create_element("div").unwrap();
+    document().body().unwrap().append_child(&container).unwrap();
+    let log: Log = Rc::new(RefCell::new(vec![]));
+    let props = WordedProps {
+        json: json.to_string().into(),
+        log: log.clone(),
+        wording: wording.map(WordingRef),
+    };
+    let handle =
+        yew::Renderer::<WordedHost>::with_root_and_props(container.clone(), props).render();
+    settle().await;
+    (container, log, handle)
+}
+
+fn mousedown(el: &Element) {
+    let init = MouseEventInit::new();
+    init.set_bubbles(true);
+    init.set_cancelable(true);
+    el.dispatch_event(&MouseEvent::new_with_mouse_event_init_dict("mousedown", &init).unwrap())
+        .unwrap();
+}
+
+/// The options of the open list: (label without the hint, class, depth).
+fn shown_options(c: &Element) -> Vec<(String, String)> {
+    let list = c.query_selector_all("[role=option]").unwrap();
+    (0..list.length())
+        .map(|i| {
+            let el = list.item(i).unwrap().dyn_into::<Element>().unwrap();
+            let label = el
+                .first_child()
+                .and_then(|n| n.text_content())
+                .unwrap_or_default();
+            (label, el.class_name())
+        })
+        .collect()
+}
+
+#[wasm_bindgen_test]
+async fn typing_fi_lists_fine_tune_first_and_pick_writes_ex_fine_tune_or_iri() {
+    let distill = "policy[0].permission[1].action[0]#name";
+    let (c, log, _h) = mount_worded(RESEARCH_POLICY, Some(research_wording())).await;
+    let el = slot(&c, distill);
+    type_into(&el, "fi");
+    settle().await;
+    let options = shown_options(&c);
+    assert_eq!(options[0].0, "Fine-tune", "{options:?}");
+    // The profile's group is headed by its title.
+    let group = q(&c, "[role=listbox] [role=group]");
+    let heading = group.get_attribute("aria-labelledby").unwrap();
+    assert_eq!(
+        q(&c, &format!("[id=\"{heading}\"]"))
+            .text_content()
+            .as_deref(),
+        Some("From profile: Research Data Profile")
+    );
+    // The definition is the hint.
+    let first = c
+        .query_selector_all("[role=option]")
+        .unwrap()
+        .item(0)
+        .unwrap();
+    assert!(
+        first
+            .text_content()
+            .unwrap()
+            .contains("To adapt an already trained model"),
+        "{:?}",
+        first.text_content()
+    );
+    mousedown(&first.dyn_into::<Element>().unwrap());
+    settle().await;
+    // The policy binds ex:, so the pick is written as a compact IRI.
+    assert_eq!(
+        set_texts(&log),
+        vec![(distill.to_string(), "ex:fineTune".to_string())]
+    );
+
+    // A policy that does not bind the prefix gets the full IRI.
+    let json = r#"{"@type": "Set", "uid": "urn:p", "permission": [{"action": "use"}]}"#;
+    let (c, log, _h) = mount_worded(json, Some(research_wording())).await;
+    let path = "policy[0].permission[0].action[0]#name";
+    type_into(&slot(&c, path), "fi");
+    settle().await;
+    let first = q(&c, "[role=option]");
+    mousedown(&first);
+    settle().await;
+    assert_eq!(
+        set_texts(&log),
+        vec![(
+            path.to_string(),
+            "https://example.org/odrl/profile/research/fineTune".to_string()
+        )]
+    );
+}
+
+#[wasm_bindgen_test]
+async fn right_operand_slot_offers_academic_then_indented_clinical() {
+    let (c, log, _h) = mount_worded(RESEARCH_POLICY, Some(research_wording())).await;
+    let path = "policy[0].permission[0].constraint[0]#rightOperand[1]";
+    let el = slot(&c, path);
+    type_into(&el, "");
+    settle().await;
+    let options = shown_options(&c);
+    let labels: Vec<&str> = options.iter().map(|(l, _)| l.as_str()).collect();
+    assert_eq!(
+        labels,
+        [
+            "Academic research",
+            "Clinical research",
+            "Commercial research"
+        ],
+        "{options:?}"
+    );
+    assert!(!options[0].1.contains("prose-suggestion-nested"));
+    assert!(
+        options[1].1.contains("prose-suggestion-nested"),
+        "{options:?}"
+    );
+    assert!(!options[2].1.contains("prose-suggestion-nested"));
+    // No group heading: these are the left operand's own values.
+    assert!(
+        c.query_selector("[role=listbox] [role=group]")
+            .unwrap()
+            .is_none()
+    );
+    let third = c
+        .query_selector_all("[role=option]")
+        .unwrap()
+        .item(2)
+        .unwrap();
+    mousedown(&third.dyn_into::<Element>().unwrap());
+    settle().await;
+    assert_eq!(
+        set_texts(&log),
+        vec![(path.to_string(), "ex:commercialResearch".to_string())]
+    );
+
+    // A left operand without suggested values gets every profile value,
+    // under a heading that says they are not specific to it.
+    let json = RESEARCH_POLICY.replace("ex:researchPurpose", "purpose");
+    let (c, _log, _h) = mount_worded(&json, Some(research_wording())).await;
+    type_into(&slot(&c, path), "");
+    settle().await;
+    let group = q(&c, "[role=listbox] [role=group]");
+    let heading = group.get_attribute("aria-labelledby").unwrap();
+    assert_eq!(
+        q(&c, &format!("[id=\"{heading}\"]"))
+            .text_content()
+            .as_deref(),
+        Some("Profile values (not specific to this operand)")
+    );
+    assert_eq!(shown_options(&c).len(), 3);
+}
+
+#[wasm_bindgen_test]
+async fn switching_wording_rerenders_without_resetting_doc_or_undo() {
+    let (c, _log, mut handle) = mount_worded(RESEARCH_POLICY, None).await;
+    let action = "policy[0].permission[0].action[0]#name";
+    let before = slot(&c, action).get_attribute("title").unwrap();
+    assert_ne!(before, "fine-tune");
+    // An edit, then a profile is loaded.
+    let uid = slot(&c, "policy[0]#uid");
+    type_into(&uid, "urn:policy:changed");
+    fire_focusout(&uid);
+    settle().await;
+    let undo = q(&c, "#worded-undo");
+    assert!(!undo.has_attribute("disabled"));
+    let log: Log = Rc::new(RefCell::new(vec![]));
+    handle.update(WordedProps {
+        json: RESEARCH_POLICY.into(),
+        log: log.clone(),
+        wording: Some(WordingRef(research_wording())),
+    });
+    settle().await;
+    assert_eq!(
+        slot(&c, action).get_attribute("title").as_deref(),
+        Some("fine-tune")
+    );
+    assert_eq!(
+        slot(&c, "policy[0]#uid").text_content().as_deref(),
+        Some("urn:policy:changed")
+    );
+    let undo = q(&c, "#worded-undo");
+    assert!(!undo.has_attribute("disabled"), "the undo history is kept");
+    // And unloaded again: the built-in wording, the edit still there.
+    handle.update(WordedProps {
+        json: RESEARCH_POLICY.into(),
+        log,
+        wording: None,
+    });
+    settle().await;
+    assert_eq!(slot(&c, action).get_attribute("title").unwrap(), before);
+    click(&q(&c, "#worded-undo"));
+    settle().await;
+    assert_eq!(
+        slot(&c, "policy[0]#uid").text_content().as_deref(),
+        Some("urn:policy:research-1")
+    );
+}

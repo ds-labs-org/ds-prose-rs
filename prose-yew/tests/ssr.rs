@@ -856,3 +856,197 @@ async fn read_mode_term_title_has_definition() {
     let plain = render_view(props(doc, EditMode::Read, EditConfig::default())).await;
     assert!(!plain.contains("data-iri"));
 }
+
+// --- profiles: the edit dropdowns ----------------------------------------------
+
+const REFINEMENT_OP: &str = "policy[0].permission[0].action[0].refinement[0]#operator";
+
+async fn research_edit(json: &str, issues: Vec<Issue>) -> String {
+    let doc = Rc::new(read_model(json).unwrap());
+    let cfg = EditConfig::default().with_wording(research_wording());
+    let mut p = props(doc, EditMode::Edit, cfg);
+    p.issues = Rc::new(issues);
+    render_view(p).await
+}
+
+/// The `<select>` element for `slot`, from its opening tag to `</select>`.
+fn select_of<'a>(html: &'a str, slot: &str) -> &'a str {
+    let at = html
+        .find(&format!("data-slot=\"{slot}\""))
+        .unwrap_or_else(|| panic!("no {slot} in:\n{html}"));
+    let start = html[..at].rfind("<select").unwrap();
+    let end = at + html[at..].find("</select>").unwrap();
+    &html[start..end]
+}
+
+fn with_refinement(op: &str) -> String {
+    profile_file("research-policy.json")
+        .replace(r#""operator": "gteq""#, &format!(r#""operator": "{op}""#))
+}
+
+#[tokio::test]
+async fn operator_select_suggested_and_other_optgroups() {
+    let html = research_edit(&profile_file("research-policy.json"), vec![]).await;
+    let sel = select_of(&html, REFINEMENT_OP);
+    let suggested = sel
+        .find("<optgroup label=\"Suggested by the profile\">")
+        .unwrap_or_else(|| panic!("{sel}"));
+    let other = sel
+        .find("<optgroup label=\"Other operators\">")
+        .unwrap_or_else(|| panic!("{sel}"));
+    assert!(suggested < other);
+    let (first, second) = (&sel[suggested..other], &sel[other..]);
+    // prose:operator of ex:dataSubjectCount: gteq and gt.
+    assert!(
+        first.contains("<option value=\"gteq\" selected=\"selected\">"),
+        "{first}"
+    );
+    assert!(first.contains("<option value=\"gt\">"), "{first}");
+    assert_eq!(first.matches("<option").count(), 2, "{first}");
+    assert!(second.contains("<option value=\"eq\">"), "{second}");
+    assert!(!second.contains("value=\"gteq\""), "{second}");
+    // The profile's own operator, written as the policy binds ex:.
+    assert!(
+        second.contains(
+            "<option value=\"ex:withinRegion\">is within region (ex:withinRegion)</option>"
+        ),
+        "{second}"
+    );
+    // ex:retentionPeriod suggests lteq and lt.
+    let sel = select_of(&html, "policy[0].permission[0].constraint[1]#operator");
+    let other = sel.find("Other operators").unwrap();
+    assert!(sel[..other].contains("value=\"lteq\"") && sel[..other].contains("value=\"lt\""));
+    assert!(!sel[..other].contains("value=\"eq\""), "{sel}");
+}
+
+#[tokio::test]
+async fn operator_select_flat_without_hints_includes_profile_operator() {
+    let json = r#"{"@context": {"ex": "https://example.org/odrl/profile/research/"},
+        "@type": "Set", "permission": [{"action": "use",
+        "constraint": [{"leftOperand": "count", "operator": "eq", "rightOperand": 1}]}]}"#;
+    let html = research_edit(json, vec![]).await;
+    let sel = select_of(&html, "policy[0].permission[0].constraint[0]#operator");
+    assert!(!sel.contains("<optgroup"), "{sel}");
+    assert!(
+        sel.contains(
+            "<option value=\"ex:withinRegion\">is within region (ex:withinRegion)</option>"
+        ),
+        "{sel}"
+    );
+    // A policy that does not bind ex: gets the full IRI.
+    let json = r#"{"@type": "Set", "permission": [{"action": "use",
+        "constraint": [{"leftOperand": "count", "operator": "eq", "rightOperand": 1}]}]}"#;
+    let html = research_edit(json, vec![]).await;
+    let sel = select_of(&html, "policy[0].permission[0].constraint[0]#operator");
+    assert!(
+        sel.contains("<option value=\"https://example.org/odrl/profile/research/withinRegion\">"),
+        "{sel}"
+    );
+    // The same label without the raw term when show_raw_terms is off.
+    let doc = Rc::new(read_model(json).unwrap());
+    let mut cfg = EditConfig::default().with_wording(research_wording());
+    cfg.show_raw_terms = false;
+    let html = render_view(props(doc, EditMode::Edit, cfg)).await;
+    assert!(html.contains(">is within region</option>"), "{html}");
+}
+
+#[tokio::test]
+async fn current_operator_outside_list_kept() {
+    // eq is not among the suggested ones: it stays selected under "Other".
+    let html = research_edit(&with_refinement("eq"), vec![]).await;
+    let sel = select_of(&html, REFINEMENT_OP);
+    let other = sel.find("Other operators").unwrap();
+    assert!(
+        sel[other..].contains("<option value=\"eq\" selected=\"selected\">"),
+        "{sel}"
+    );
+    // An operator in no list is the first option, outside the groups.
+    let html = research_edit(&with_refinement("odrl:weird"), vec![]).await;
+    let sel = select_of(&html, REFINEMENT_OP);
+    let weird = sel
+        .find("<option value=\"odrl:weird\" selected=\"selected\">")
+        .unwrap_or_else(|| panic!("{sel}"));
+    assert!(weird < sel.find("<optgroup").unwrap(), "{sel}");
+    assert!(sel.contains("odrl:weird (not in the list)"));
+}
+
+#[tokio::test]
+async fn conflict_select_has_profile_term() {
+    let html = research_edit(&profile_file("research-policy.json"), vec![]).await;
+    let sel = select_of(&html, "policy[0]#conflict");
+    assert!(
+        sel.contains("<option value=\"ex:ignore\">Ignore conflicts</option>"),
+        "{sel}"
+    );
+    let json = profile_file("research-policy.json")
+        .replace(r#""uid":"#, r#""conflict": "ex:ignore", "uid":"#);
+    let html = research_edit(&json, vec![]).await;
+    let sel = select_of(&html, "policy[0]#conflict");
+    assert!(
+        sel.contains("<option value=\"ex:ignore\" selected=\"selected\">Ignore conflicts</option>"),
+        "{sel}"
+    );
+    assert!(!sel.contains("not in the list"), "{sel}");
+}
+
+#[tokio::test]
+async fn literal_slot_placeholder_from_datatype() {
+    let html = research_edit(&profile_file("research-policy.json"), vec![]).await;
+    let tag = |path: &str| -> String {
+        spans_with(&html, &format!("data-slot=\"{path}\""))[0]
+            .split('>')
+            .next()
+            .unwrap()
+            .to_string()
+    };
+    let count = tag("policy[0].permission[0].action[0].refinement[0]#rightOperand[0]");
+    assert!(
+        count.contains("data-placeholder=\"whole number\""),
+        "{count}"
+    );
+    assert!(
+        count.contains("aria-placeholder=\"whole number\""),
+        "{count}"
+    );
+    let period = tag("policy[0].permission[0].constraint[1]#rightOperand[0]");
+    assert!(
+        period.contains("data-placeholder=\"duration, e.g. P2Y\""),
+        "{period}"
+    );
+    // No datatype hint: the configured placeholder.
+    let purpose = tag("policy[0].permission[0].constraint[0]#rightOperand[0]");
+    assert!(purpose.contains("data-placeholder=\"value\""), "{purpose}");
+    // The host can change the words.
+    let doc = Rc::new(read_model(&profile_file("research-policy.json")).unwrap());
+    let mut cfg = EditConfig::default();
+    cfg.labels.datatype_placeholders = vec![(
+        "http://www.w3.org/2001/XMLSchema#integer".into(),
+        "Ganzzahl".into(),
+    )];
+    let cfg = cfg.with_wording(research_wording());
+    let html = render_view(props(doc, EditMode::Edit, cfg)).await;
+    assert!(html.contains("data-placeholder=\"Ganzzahl\""));
+}
+
+#[tokio::test]
+async fn issue_from_check_profile_inline() {
+    let json = profile_file("research-policy.json");
+    let doc = read_model(&json).unwrap();
+    let issues = prose_core::edit::check_profile(&doc, &research_wording());
+    assert!(!issues.is_empty());
+    let html = research_edit(&json, issues).await;
+    let distill = spans_with(
+        &html,
+        "data-slot=\"policy[0].permission[1].action[0]#name\"",
+    );
+    let tag = distill[0].split('>').next().unwrap();
+    assert!(tag.contains("prose-slot-warning"), "{tag}");
+    assert!(
+        tag.contains(
+            "aria-describedby=\"prose-issue-slot:policy[0].permission[1].action[0]#name-0\""
+        ),
+        "{tag}"
+    );
+    assert!(html.contains("prose-issue prose-issue-warning"), "{html}");
+    assert!(html.contains("ex:distill"));
+}
