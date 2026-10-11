@@ -1067,3 +1067,44 @@ async fn issue_from_check_profile_inline() {
     assert!(html.contains("prose-issue prose-issue-warning"), "{html}");
     assert!(html.contains("ex:distill"));
 }
+
+#[tokio::test]
+async fn a_full_iri_operator_selects_its_listed_option() {
+    // The policy binds ex:, so the option is written ex:withinRegion; the
+    // same operator written in full is that option, not a foreign value.
+    let json = with_refinement("https://example.org/odrl/profile/research/withinRegion");
+    let html = research_edit(&json, vec![]).await;
+    let sel = select_of(&html, REFINEMENT_OP);
+    assert!(!sel.contains("not in the list"), "{sel}");
+    assert_eq!(sel.matches("withinRegion\"").count(), 1, "{sel}");
+    assert!(
+        sel.contains("<option value=\"ex:withinRegion\" selected=\"selected\">"),
+        "{sel}"
+    );
+}
+
+#[tokio::test]
+async fn a_curie_operator_the_profile_resolves_selects_its_listed_option() {
+    // The policy does not bind ex:; the profile's own prefix resolves it.
+    let json = r#"{"@type": "Set", "uid": "urn:p", "permission": [{"action": "use",
+        "constraint": [{"leftOperand": "count", "operator": "ex:withinRegion", "rightOperand": 1}]}]}"#;
+    let html = research_edit(json, vec![]).await;
+    let sel = select_of(&html, "policy[0].permission[0].constraint[0]#operator");
+    assert!(!sel.contains("not in the list"), "{sel}");
+    assert_eq!(sel.matches("withinRegion\"").count(), 1, "{sel}");
+}
+
+#[tokio::test]
+async fn a_full_iri_conflict_selects_its_listed_option() {
+    let json = profile_file("research-policy.json").replace(
+        r#""uid":"#,
+        r#""conflict": "https://example.org/odrl/profile/research/ignore", "uid":"#,
+    );
+    let html = research_edit(&json, vec![]).await;
+    let sel = select_of(&html, "policy[0]#conflict");
+    assert!(!sel.contains("not in the list"), "{sel}");
+    assert!(
+        sel.contains("<option value=\"ex:ignore\" selected=\"selected\">"),
+        "{sel}"
+    );
+}
