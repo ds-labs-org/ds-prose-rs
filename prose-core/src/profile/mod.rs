@@ -414,7 +414,8 @@ pub struct ProfileLimits {
     /// The IRIs and literals read from the text, counted in bytes after
     /// prefixes and term definitions are expanded; past this the profile
     /// is refused. A short prefix bound to a long namespace would otherwise
-    /// make a small text cost gigabytes.
+    /// make a small text cost gigabytes. A value past `max_values_per_key`
+    /// is not kept, but its subject and property still count.
     pub max_expanded_bytes: usize,
 }
 

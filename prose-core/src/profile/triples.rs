@@ -48,7 +48,9 @@ pub(crate) struct Parsed {
 /// Collects triples and caps the values one subject has for one property.
 pub(crate) struct Sink<'a> {
     pub parsed: Parsed,
-    counts: HashMap<(String, String), usize>,
+    /// Subject -> property -> values seen. Nested, so a lookup borrows the
+    /// strings instead of copying them.
+    counts: HashMap<String, HashMap<String, usize>>,
     /// The prefixes in `parsed.prefixes`, for a constant-time check.
     bound: HashSet<String>,
     limits: &'a ProfileLimits,
@@ -95,10 +97,20 @@ impl<'a> Sink<'a> {
         if self.over() {
             return;
         }
-        let n = self
-            .counts
-            .entry((s.to_string(), p.to_string()))
-            .or_insert(0);
+        // Looking a value up costs its subject and property, kept or not:
+        // a value past the cap below was still read, so that much counts.
+        self.charge(s.len() + p.len());
+        if self.over() {
+            return;
+        }
+        let per_s = match self.counts.get_mut(s) {
+            Some(m) => m,
+            None => self.counts.entry(s.to_string()).or_default(),
+        };
+        let n = match per_s.get_mut(p) {
+            Some(n) => n,
+            None => per_s.entry(p.to_string()).or_insert(0),
+        };
         *n += 1;
         if *n > self.limits.max_values_per_key {
             let max = self.limits.max_values_per_key;
@@ -107,7 +119,7 @@ impl<'a> Sink<'a> {
             ));
             return;
         }
-        // Only what is kept counts; a value past the cap above costs nothing.
+        // A kept value also costs what it holds.
         let o_len = match &o {
             Object::Iri(i) => i.len(),
             Object::Literal {
@@ -120,7 +132,7 @@ impl<'a> Sink<'a> {
                     + datatype.as_deref().map_or(0, str::len)
             }
         };
-        self.charge(s.len() + p.len() + o_len);
+        self.charge(o_len);
         if self.over() {
             return;
         }
