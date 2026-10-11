@@ -8,8 +8,13 @@ use crate::profile::{TermKind, Wording};
 use crate::read::join_with;
 use crate::words::local_name;
 use crate::words_ctx::{WordCtx, profile_name};
+use std::collections::HashSet;
 
 const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
+
+/// The most profiles that are not loaded one policy's issues name; one
+/// more issue counts the rest.
+const MAX_NAMED: usize = 20;
 
 /// What the loaded profiles in `wording` say about `doc`, in document
 /// order: advisory [`Issue`]s, never a refusal. A term undeclared in a
@@ -84,16 +89,30 @@ impl Checker<'_> {
         if p.locked.is_some() {
             return;
         }
-        let mut declared: Vec<&str> = Vec::new();
+        // Each profile that is not loaded once, the first MAX_NAMED by name.
+        let mut declared: HashSet<&str> = HashSet::new();
         for id in &p.profile {
-            if !id.is_empty() && !self.ctx.covers(id) && !declared.contains(&id.as_str()) {
-                declared.push(id);
+            if !id.is_empty()
+                && !self.ctx.covers(id)
+                && declared.insert(id)
+                && declared.len() <= MAX_NAMED
+            {
                 self.push(
                     IssueTarget::Node(path.clone()),
                     Severity::Warning,
                     format!("the policy declares the profile <{id}>, which is not loaded"),
                 );
             }
+        }
+        if declared.len() > MAX_NAMED {
+            self.push(
+                IssueTarget::Node(path.clone()),
+                Severity::Warning,
+                format!(
+                    "the policy declares {} more profiles that are not loaded",
+                    declared.len() - MAX_NAMED
+                ),
+            );
         }
         self.term(&path, Field::Kind, &p.kind, None);
         if let Some(c) = &p.conflict {
