@@ -30,6 +30,7 @@
 //! server renderer, so set `EditConfig::base_css` to `false` and ship
 //! [`BASE_CSS`] yourself there.
 mod choice;
+mod closed;
 mod config;
 mod css;
 mod hook;

@@ -524,6 +524,33 @@ pub struct Labels {
     /// (xsd datatype IRI, placeholder) for a value slot whose left operand
     /// names a datatype.
     pub datatype_placeholders: Vec<(AttrValue, AttrValue)>,
+    /// Strict validation. The note under a field whose value the profile
+    /// does not allow.
+    pub not_in_profile: AttrValue,
+    /// Announced when a closed field is left with text it does not take and
+    /// goes back to its value: `{kept}` is that value, `{typed}` the text.
+    pub kept_previous: AttrValue,
+    /// As `kept_previous`, for a field that was empty.
+    pub kept_empty: AttrValue,
+    /// The operator select's groups under a closed left operand.
+    pub allowed_group: AttrValue,
+    pub not_allowed_group: AttrValue,
+    /// The selected option when it is one the profile does not allow;
+    /// `{label}` is its label.
+    pub not_allowed_option: AttrValue,
+    /// Shown under a closed field that was left with text it does not take;
+    /// `{typed}`, `{field}` and `{profile}`.
+    pub not_allowed_term: AttrValue,
+    /// Appended to that message when a listed entry is close; `{suggestion}`.
+    pub did_you_mean: AttrValue,
+    /// The problems panel: its heading, the button that moves to a finding,
+    /// the verdict, and the counts (`{errors}`, `{warnings}`, `{notes}`).
+    pub problems_heading: AttrValue,
+    pub go_to: AttrValue,
+    pub status_conforms: AttrValue,
+    pub status_violations: AttrValue,
+    pub status_incomplete: AttrValue,
+    pub counts: AttrValue,
 }
 
 impl Default for Labels {
@@ -592,6 +619,20 @@ impl Default for Labels {
             .iter()
             .map(|(t, p)| (a(&format!("{XSD}{t}")), a(p)))
             .collect(),
+            not_in_profile: a("(not in the profile)"),
+            kept_previous: a("Kept \"{kept}\"; \"{typed}\" is not in the profile"),
+            kept_empty: a("\"{typed}\" is not in the profile; the field stays empty"),
+            allowed_group: a("Allowed by the profile"),
+            not_allowed_group: a("Not allowed by the profile"),
+            not_allowed_option: a("{label} (not allowed)"),
+            not_allowed_term: a("\"{typed}\" is not an allowed {field} in {profile}."),
+            did_you_mean: a("Did you mean {suggestion}?"),
+            problems_heading: a("Problems"),
+            go_to: a("Go to"),
+            status_conforms: a("Conforms"),
+            status_violations: a("Does not conform"),
+            status_incomplete: a("Cannot be certified: part of the vocabulary was not checked"),
+            counts: a("errors: {errors}, warnings: {warnings}, notes: {notes}"),
         }
     }
 }

@@ -1,7 +1,7 @@
 //! Filtering of vocabulary suggestions. Pure, so it is tested on the host.
 use super::config::Suggestion;
 
-fn strip(s: &str) -> String {
+pub(super) fn strip(s: &str) -> String {
     let lower = s.to_lowercase();
     lower
         .strip_prefix("odrl:")
