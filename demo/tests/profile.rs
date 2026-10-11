@@ -435,7 +435,8 @@ async fn answer_without_length_is_cut_at_4_mib() {
     // pulled. Other tests' requests pass through.
     let stub = js_sys::Function::new_no_args(
         "window.__pulls = 0;
-         const real = Window.prototype.fetch;
+         const real = window.fetch;
+         window.__realFetch = real;
          window.fetch = function (req, init) {
            const url = typeof req === 'string' ? req : req.url;
            if (url !== 'https://example.org/huge.jsonld') return real.call(this, req, init);
@@ -458,7 +459,7 @@ async fn answer_without_length_is_cut_at_4_mib() {
     settle().await;
     click(&c, "#profile-load").await;
     until(&c, "the error", |c| has(c, "#profile-error")).await;
-    js_sys::Function::new_no_args("delete window.fetch;")
+    js_sys::Function::new_no_args("window.fetch = window.__realFetch;")
         .call0(&JsValue::NULL)
         .unwrap();
     let pulls = js_sys::Reflect::get(&web_sys::window().unwrap(), &"__pulls".into())
