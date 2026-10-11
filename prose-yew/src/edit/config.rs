@@ -170,7 +170,14 @@ impl Vocabulary {
         let iri_of = |value: &str| w.expand(&no_prefixes, value);
         let value_of = |iri: &str| no_prefixes.compact(iri).unwrap_or_else(|| iri.to_string());
         let (mut actions, mut left, mut kinds) = (vec![], vec![], vec![]);
-        let mut seen: HashSet<String> = HashSet::new();
+        // What each list holds already, by IRI: a term of two kinds goes
+        // in both lists, and each check costs one lookup.
+        let (mut seen_actions, mut seen_left, mut seen_kinds) =
+            (HashSet::new(), HashSet::new(), HashSet::new());
+        let mut seen_operators: HashSet<String> =
+            self.operators.iter().map(|o| iri_of(o)).collect();
+        let mut seen_conflicts: HashSet<String> =
+            self.conflicts.iter().map(|c| iri_of(&c.value)).collect();
         for p in w.profiles() {
             let title = p
                 .title()
@@ -186,27 +193,27 @@ impl Vocabulary {
             };
             let definition = |t: &Term| t.definition.pick(langs).map(str::to_string);
             for t in action_order(p) {
-                if seen.insert(t.iri.clone()) {
+                if seen_actions.insert(t.iri.clone()) {
                     actions.push(entry(t, Some(action_hint(w, t))));
                 }
             }
             for t in p.terms_of(TermKind::LeftOperand).filter(|t| !t.deprecated) {
-                if seen.insert(t.iri.clone()) {
+                if seen_left.insert(t.iri.clone()) {
                     left.push(entry(t, definition(t)));
                 }
             }
             for t in p.terms_of(TermKind::PolicyClass).filter(|t| !t.deprecated) {
-                if seen.insert(t.iri.clone()) {
+                if seen_kinds.insert(t.iri.clone()) {
                     kinds.push(entry(t, definition(t)));
                 }
             }
             for t in p.terms_of(TermKind::Operator).filter(|t| !t.deprecated) {
-                if !self.operators.iter().any(|o| iri_of(o) == t.iri) {
+                if seen_operators.insert(t.iri.clone()) {
                     self.operators.push(value_of(&t.iri).into());
                 }
             }
             for t in p.terms_of(TermKind::ConflictTerm).filter(|t| !t.deprecated) {
-                if !self.conflicts.iter().any(|c| iri_of(&c.value) == t.iri) {
+                if seen_conflicts.insert(t.iri.clone()) {
                     self.conflicts
                         .push(Choice::new(&value_of(&t.iri), &t.display_label(langs)));
                 }
