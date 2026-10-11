@@ -642,3 +642,16 @@ fn options_hash_as_memo_keys() {
     .collect();
     assert_eq!(set.len(), 4);
 }
+
+#[test]
+fn odrl_vocabulary_is_an_option() {
+    use prose_core::profile::OdrlVocab;
+    assert_eq!(
+        Options::strict().odrl_vocabulary(OdrlVocab::Common),
+        Options::strict()
+    );
+    let core = Options::strict().odrl_vocabulary(OdrlVocab::Core);
+    assert_ne!(core, Options::strict());
+    assert_eq!(core.odrl(), OdrlVocab::Core);
+    assert_eq!(Options::strict().odrl(), OdrlVocab::Common);
+}

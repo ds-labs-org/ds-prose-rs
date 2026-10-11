@@ -914,6 +914,37 @@ mod tests {
     use super::*;
 
     #[test]
+    fn vocabulary_defaults_are_odrl_terms() {
+        // Strict validation knows ODRL by its built-in table; every term
+        // the editor offers by default must be in it, of the right kind.
+        use prose_core::profile::{OdrlVocab, odrl_term};
+        let v = Vocabulary::default();
+        let kind = |raw: &str| {
+            odrl_term(
+                &format!("http://www.w3.org/ns/odrl/2/{raw}"),
+                OdrlVocab::Common,
+            )
+            .unwrap_or_else(|| panic!("{raw} is not an ODRL term"))
+            .kind
+        };
+        for s in &v.actions {
+            assert_eq!(kind(&s.value), TermKind::Action, "{}", s.value);
+        }
+        for s in &v.left_operands {
+            assert_eq!(kind(&s.value), TermKind::LeftOperand, "{}", s.value);
+        }
+        for s in &v.policy_kinds {
+            assert_eq!(kind(&s.value), TermKind::PolicyClass, "{}", s.value);
+        }
+        for o in &v.operators {
+            assert_eq!(kind(o), TermKind::Operator, "{o}");
+        }
+        for c in v.conflicts.iter().filter(|c| !c.value.is_empty()) {
+            assert_eq!(kind(&c.value), TermKind::ConflictTerm, "{}", c.value);
+        }
+    }
+
+    #[test]
     fn fill_substitutes_known_keys_only() {
         assert_eq!(
             fill("Remove {noun} {n} {x}", &[("noun", "rule"), ("n", "2")]),
