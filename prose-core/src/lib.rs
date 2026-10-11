@@ -16,6 +16,7 @@
 //! guessed at.
 pub mod edit;
 mod model;
+pub mod profile;
 mod read;
 mod words;
 
