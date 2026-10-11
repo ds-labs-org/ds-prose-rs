@@ -3,7 +3,9 @@
 use super::lexical::lexical;
 use super::{Expected, Finding, Fix, Mode, Options, RuleId, TermRef};
 use crate::edit::*;
-use crate::profile::{OdrlVocab, Prefixes, ProfileVocab, Term, TermKind, Wording, odrl_term};
+use crate::profile::{
+    OdrlVocab, OperandHints, Prefixes, ProfileVocab, Term, TermKind, Wording, odrl_term,
+};
 use crate::read::join_with;
 use crate::words::local_name;
 use crate::words_ctx::{namespace, profile_name};
@@ -780,39 +782,66 @@ impl<'a> Checker<'a> {
             self.term(path, a.id, Field::Unit, u, Pos::Unit);
         }
         // The left operand's ds-prose hints, when a loaded profile has any.
-        let Some(hints) = self
+        let hints = self
             .resolve(&a.left)
             .filter(|(t, _)| t.kinds.contains(&TermKind::LeftOperand))
-            .map(|(t, _)| &t.hints)
-        else {
-            return;
-        };
-        if !a.operator.is_empty()
-            && !hints.operators.is_empty()
-            && !hints.operators.contains(&self.expand(&a.operator))
-        {
-            let names: Vec<String> = hints
-                .operators
-                .iter()
-                .map(|o| local_name(o).to_string())
-                .collect();
-            let msg = format!(
-                "the profile suggests the operators {} for \"{}\"",
-                join_with(&names, "or"),
-                a.left
-            );
-            let op = a.operator.clone();
-            self.emit_term(
-                RuleId::ProseOperatorNotAllowed,
-                false,
-                path,
-                a.id,
-                Field::Operator,
-                &op,
-                msg,
-            );
+            .map(|(t, _)| &t.hints);
+        if let Some(h) = hints {
+            self.hint_operator(path, a, h);
+            self.hint_datatype(path, a, h);
         }
-        let Some((fits, noun)) = hints
+        if self.options.mode() != Mode::Strict {
+            return;
+        }
+        if let Some(h) = hints {
+            self.hint_values(path, a, h);
+            self.hint_unit(path, a, h);
+            self.datatype_conflict(path, a, h);
+        }
+        self.ill_typed(path, a, hints.and_then(|h| h.datatype.as_deref()));
+        self.ordered_on_unordered(path, a);
+    }
+
+    /// The operator, against `prose:operator`.
+    fn hint_operator(&mut self, path: &NodePath, a: &AtomicConstraint, h: &OperandHints) {
+        if a.operator.is_empty()
+            || h.operators.is_empty()
+            || h.operators.contains(&self.expand(&a.operator))
+        {
+            return;
+        }
+        let names: Vec<String> = h
+            .operators
+            .iter()
+            .map(|o| local_name(o).to_string())
+            .collect();
+        let binding = h.closed && self.options.mode() == Mode::Strict;
+        let msg = format!(
+            "the profile {} the operators {} for \"{}\"",
+            if binding { "allows only" } else { "suggests" },
+            join_with(&names, "or"),
+            a.left
+        );
+        if let Some(f) = self.emit_term(
+            RuleId::ProseOperatorNotAllowed,
+            h.closed,
+            path,
+            a.id,
+            Field::Operator,
+            &a.operator,
+            msg,
+        ) {
+            f.expected = Some(Expected {
+                operators: h.operators.clone(),
+                closed: h.closed,
+                ..Expected::default()
+            });
+        }
+    }
+
+    /// Each literal value, against the lexical space of `prose:datatype`.
+    fn hint_datatype(&mut self, path: &NodePath, a: &AtomicConstraint, h: &OperandHints) {
+        let Some((fits, noun)) = h
             .datatype
             .as_deref()
             .and_then(|d| d.strip_prefix(XSD))
@@ -820,25 +849,261 @@ impl<'a> Checker<'a> {
         else {
             return;
         };
-        if let RightOperand::Values(values) = &a.right {
-            for (k, l) in values.iter().enumerate() {
-                if matches!(l, Literal::Iri(_)) {
-                    continue;
-                }
-                let raw = l.raw();
-                if !fits(&raw) {
-                    let msg = format!(
-                        "\"{raw}\" is not {noun}, which the profile expects for \"{}\"",
-                        a.left
-                    );
-                    self.emit(
-                        RuleId::ProseDatatypeLexical,
-                        false,
-                        slot(path, Field::RightOperand(k)),
-                        msg,
-                    );
+        let RightOperand::Values(values) = &a.right else {
+            return;
+        };
+        for (k, l) in values.iter().enumerate() {
+            if matches!(l, Literal::Iri(_)) {
+                continue;
+            }
+            let raw = l.raw();
+            if !fits(&raw) {
+                let msg = format!(
+                    "\"{raw}\" is not {noun}, which the profile expects for \"{}\"",
+                    a.left
+                );
+                if let Some(f) = self.emit(
+                    RuleId::ProseDatatypeLexical,
+                    h.closed,
+                    slot(path, Field::RightOperand(k)),
+                    msg,
+                ) {
+                    f.expected = Some(Expected {
+                        datatype: h.datatype.clone(),
+                        closed: h.closed,
+                        ..Expected::default()
+                    });
                 }
             }
+        }
+    }
+
+    /// Each value, against `prose:rightOperand` and the values narrower
+    /// than those. On an open operand only an IRI value is looked at, and
+    /// only to say so; on a closed one every value must be allowed, and a
+    /// string naming an allowed IRI should be that IRI.
+    fn hint_values(&mut self, path: &NodePath, a: &AtomicConstraint, h: &OperandHints) {
+        if h.value_tree.is_empty() {
+            return;
+        }
+        let allowed: HashSet<&str> = h.value_tree.iter().map(|(v, _)| v.as_str()).collect();
+        let expected = || Expected {
+            values: h.value_tree.iter().map(|(v, _)| v.clone()).collect(),
+            closed: h.closed,
+            ..Expected::default()
+        };
+        let values = match &a.right {
+            RightOperand::Values(v) => v,
+            RightOperand::Reference(_) => {
+                let msg = format!(
+                    "the right operand is only referenced (rightOperandReference), so the values the profile allows for \"{}\" could not be checked",
+                    a.left
+                );
+                if h.closed {
+                    self.unchecked(IssueTarget::Node(path.clone()), a.id, msg);
+                }
+                return;
+            }
+            RightOperand::Missing => return,
+        };
+        for (k, l) in values.iter().enumerate() {
+            let raw = l.raw();
+            let field = Field::RightOperand(k);
+            if let Literal::Iri(_) = l {
+                if allowed.contains(self.expand(&raw).as_str()) {
+                    continue;
+                }
+            } else if !h.closed {
+                continue;
+            } else if allowed.contains(self.expand(&raw).as_str()) {
+                let msg = format!(
+                    "\"{raw}\" names a value the profile allows for \"{}\", but as a plain string; write it as an IRI ({{\"@id\": \"{raw}\"}})",
+                    a.left
+                );
+                let fix = fix_slot(
+                    "Write it as an IRI".to_string(),
+                    true,
+                    SlotPath {
+                        node: path.clone(),
+                        field,
+                    },
+                    a.id,
+                    raw.clone(),
+                );
+                if let Some(f) =
+                    self.emit_term(RuleId::ProseIriExpected, true, path, a.id, field, &raw, msg)
+                {
+                    f.expected = Some(expected());
+                    f.fixes.push(fix);
+                }
+                continue;
+            }
+            let msg = format!(
+                "\"{raw}\" is not a value the profile allows for \"{}\"",
+                a.left
+            );
+            if let Some(f) = self.emit_term(
+                RuleId::ProseValueNotAllowed,
+                h.closed,
+                path,
+                a.id,
+                field,
+                &raw,
+                msg,
+            ) {
+                f.expected = Some(expected());
+            }
+        }
+    }
+
+    /// The unit, against `prose:unit`.
+    fn hint_unit(&mut self, path: &NodePath, a: &AtomicConstraint, h: &OperandHints) {
+        let Some(u) = a.unit.as_deref().filter(|u| !u.is_empty()) else {
+            return;
+        };
+        if h.units.is_empty() || h.units.contains(&self.expand(u)) {
+            return;
+        }
+        let names: Vec<String> = h.units.iter().map(|u| local_name(u).to_string()).collect();
+        let msg = format!(
+            "the profile {} the units {} for \"{}\"",
+            if h.closed { "allows only" } else { "suggests" },
+            join_with(&names, "or"),
+            a.left
+        );
+        if let Some(f) = self.emit_term(
+            RuleId::ProseUnitNotAllowed,
+            h.closed,
+            path,
+            a.id,
+            Field::Unit,
+            u,
+            msg,
+        ) {
+            f.expected = Some(Expected {
+                units: h.units.clone(),
+                closed: h.closed,
+                ..Expected::default()
+            });
+        }
+    }
+
+    /// A typed value, or the constraint's own `odrl:dataType`, naming
+    /// another datatype than `prose:datatype`.
+    fn datatype_conflict(&mut self, path: &NodePath, a: &AtomicConstraint, h: &OperandHints) {
+        let Some(want) = h.datatype.as_deref() else {
+            return;
+        };
+        let expected = || Expected {
+            datatype: Some(want.to_string()),
+            closed: h.closed,
+            ..Expected::default()
+        };
+        if let RightOperand::Values(values) = &a.right {
+            for (k, l) in values.iter().enumerate() {
+                let Literal::Typed { value, datatype } = l else {
+                    continue;
+                };
+                let got = self.expand(datatype);
+                if got != want {
+                    let msg = format!(
+                        "\"{value}\" is typed <{got}>, but the profile gives \"{}\" the datatype <{want}>",
+                        a.left
+                    );
+                    if let Some(f) = self.emit(
+                        RuleId::ProseDatatypeConflict,
+                        h.closed,
+                        slot(path, Field::RightOperand(k)),
+                        msg,
+                    ) {
+                        f.expected = Some(expected());
+                    }
+                }
+            }
+        }
+        let own = a
+            .origin
+            .as_ref()
+            .and_then(|o| o.value().get("dataType"))
+            .and_then(|d| d.as_str().or_else(|| d.get("@id").and_then(|i| i.as_str())));
+        if let Some(own) = own {
+            let got = self.expand(own);
+            if got != want {
+                let msg = format!(
+                    "the constraint's dataType is <{got}>, but the profile gives \"{}\" the datatype <{want}>",
+                    a.left
+                );
+                if let Some(f) = self.emit(
+                    RuleId::ProseDatatypeConflict,
+                    h.closed,
+                    IssueTarget::Node(path.clone()),
+                    msg,
+                ) {
+                    f.expected = Some(expected());
+                }
+            }
+        }
+    }
+
+    /// A typed literal outside its own datatype's lexical space (RDF 1.1
+    /// calls it ill-typed). One typed with the left operand's
+    /// `prose:datatype` is left to [`Checker::hint_datatype`].
+    fn ill_typed(&mut self, path: &NodePath, a: &AtomicConstraint, hinted: Option<&str>) {
+        let RightOperand::Values(values) = &a.right else {
+            return;
+        };
+        for (k, l) in values.iter().enumerate() {
+            let Literal::Typed { value, datatype } = l else {
+                continue;
+            };
+            let iri = self.expand(datatype);
+            if hinted == Some(iri.as_str()) {
+                continue;
+            }
+            let Some((fits, noun)) = iri.strip_prefix(XSD).and_then(lexical) else {
+                continue;
+            };
+            if !fits(value) {
+                let msg = format!(
+                    "\"{value}\" is not {noun}, so the literal typed {datatype} is ill-typed"
+                );
+                self.emit(
+                    RuleId::ProseIllTypedLiteral,
+                    false,
+                    slot(path, Field::RightOperand(k)),
+                    msg,
+                );
+            }
+        }
+    }
+
+    /// An ordering operator with an IRI or a boolean value: likely a
+    /// mistake, though no standard rules it out.
+    fn ordered_on_unordered(&mut self, path: &NodePath, a: &AtomicConstraint) {
+        let op = self.expand(&a.operator);
+        let ordering = op
+            .strip_prefix(ODRL)
+            .is_some_and(|l| matches!(l, "gt" | "gteq" | "lt" | "lteq"));
+        let unordered = match &a.right {
+            RightOperand::Values(v) => v
+                .iter()
+                .any(|l| matches!(l, Literal::Iri(_) | Literal::Bool(_))),
+            _ => false,
+        };
+        if ordering && unordered {
+            let msg = format!(
+                "\"{}\" orders values, but \"{}\" is compared with an IRI or a boolean, which have no order",
+                a.operator, a.left
+            );
+            self.emit_term(
+                RuleId::HeuristicOrderedOnUnordered,
+                false,
+                path,
+                a.id,
+                Field::Operator,
+                &a.operator,
+                msg,
+            );
         }
     }
 }
