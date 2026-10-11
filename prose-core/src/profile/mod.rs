@@ -7,8 +7,8 @@
 //! plain text before it is kept.
 //!
 //! Profiles are read as JSON-LD without a JSON-LD processor: inline
-//! `@context` prefixes, `@vocab`, `@base` and simple term definitions are
-//! followed, remote contexts are not. With the `turtle` feature, a text
+//! `@context` prefixes, `@vocab`, `@base`, `@language` and simple term
+//! definitions are followed, remote contexts are not. With the `turtle` feature, a text
 //! that is not JSON is read as Turtle. Every syntax is first read into a
 //! private triple list, and term semantics work on that list only, so a
 //! Turtle profile and its JSON-LD twin read as equal [`ProfileVocab`]s.

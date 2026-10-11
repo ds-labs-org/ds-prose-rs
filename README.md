@@ -83,7 +83,11 @@ What a profile changes:
   vocabulary but cannot change what a sentence says about it.
 - **Terms are matched by expanded IRI**, never by local name: `ex:purpose`
   and `odrl:purpose` are two terms. A compact term is expanded with the
-  policy's own `@context` first, then the profile's prefixes.
+  policy's own `@context` first, then the profile's prefixes. Compact
+  values inside a policy's `@context` (`"fineTune": "ex:fineTune"`) are
+  expanded while a budget lasts, 64 KiB plus 16 times the bytes of the
+  document's contexts; past it a value stays as written, so many short
+  terms bound to one long namespace cannot fill the memory.
 - **A glossary per policy.** `Reading::glossary[i]` lists every term of
   policy `i` that a loaded profile explains, once, in reading order: label,
   definition, usage note, what it is a kind of, what it implies, which
@@ -105,16 +109,22 @@ profile.
 
 | format | read by | notes |
 |---|---|---|
-| JSON-LD, compacted (`{"@context": ..., "@graph": [...]}` or one node) | always | no JSON-LD processor: string prefixes, `@vocab`, `@base` and simple term definitions (`{"@id": ..., "@type": "@id"}`) in an inline `@context` are followed; a remote, scoped or `@import` context is not, with one warning naming it |
+| JSON-LD, compacted (`{"@context": ..., "@graph": [...]}` or one node) | always | no JSON-LD processor: string prefixes, `@vocab`, `@base`, `@language` and simple term definitions (`{"@id": ..., "@type": "@id"}`) in an inline `@context` are followed; a remote, scoped or `@import` context is not, with one warning naming it |
 | JSON-LD, expanded (a top-level array, like W3C's `ODRL22.json` or DPV's `.jsonld`) | always | |
-| Turtle | the `turtle` cargo feature (off by default; on in the npm build and the demo) | parsed by [oxttl](https://crates.io/crates/oxttl) into the same triples as JSON-LD, so a Turtle profile and its JSON-LD twin read as equal `ProfileVocab`s |
+| Turtle | the `turtle` cargo feature (off by default; on in the npm build and the demo) | parsed by [oxttl](https://crates.io/crates/oxttl) into the same triples as JSON-LD, so a Turtle profile and its JSON-LD twin read as equal `ProfileVocab`s, in whatever order a tool wrote them |
 | N-Triples | with the `turtle` feature | N-Triples is a subset of Turtle, so it is read as Turtle |
 | RDF/XML, others | no | RDF/XML is refused with `ProfileError::UnsupportedFormat`; with the `turtle` feature any other non-JSON text is tried as Turtle and fails with `ProfileError::Turtle`, without it with `UnsupportedFormat` |
 
 `ProfileVocab::parse` tells the syntax from the first characters: `{`, or
 `[` followed by a JSON value, is JSON-LD; anything else is Turtle when the
 feature is on. `ProfileVocab::parse_turtle` skips the guess, for a host that
-has a `text/turtle` content type. An unbound `odrl`, `rdf`, `rdfs`, `owl`,
+has a `text/turtle` content type. A relative IRI (`<#train>`, `"@id": "#train"`)
+is made absolute by the document's own `@base`, else by the base a host
+passes to `ProfileVocab::parse_with_base` or `parse_turtle_with_base` (the
+URL the profile was fetched from; the demo does this). Without either, the
+node or value is skipped with a warning, in both syntaxes; a Turtle text
+whose terms are all relative is refused as `ProfileError::Turtle`, naming
+the first relative IRI. An unbound `odrl`, `rdf`, `rdfs`, `owl`,
 `skos`, `dct`, `dcterms`, `xsd`, `prof` or `prose` prefix falls back to its
 well-known namespace, with one warning each; an author's own binding always
 wins. The W3C context `http://www.w3.org/ns/odrl.jsonld` binds the ones it
@@ -130,8 +140,12 @@ asset relations and logical operands by `rdfs:subPropertyOf`); a label
 local name); a definition (`skos:definition`, else `rdfs:comment`, else
 `dct:description`); a usage note; `odrl:includedIn`, `skos:broader`,
 `odrl:implies`, `skos:exactMatch` and `owl:deprecated`. Labels are picked by
-language: an exact tag, then the primary subtag (`de-CH` reads `de`), then
-`en`, then untagged, then the first (`Wording::with_languages`). The
+language (`Wording::with_languages`), one preference at a time, most
+preferred first: the exact tag, then the tag shortened subtag by subtag
+(RFC 4647 lookup: `de-CH` reads `de`), then another region of the same
+language; then `en`, then untagged, then the first. Two `ProfileVocab`s
+are equal when they hold the same vocabulary as a graph: the order of
+terms, of language variants and of IRI lists does not count. The
 profile's own IRI, title, version and `owl:imports` are recorded; imports
 are never fetched.
 
@@ -182,14 +196,24 @@ A profile is third-party input, often fetched from a URL the user typed.
   explicit stack, never by recursion (oxttl keeps its own stack on the
   heap); `max_values_per_key` 256; `max_expanded_bytes` 32 MiB, counted
   after prefixes and term definitions are expanded, so a short prefix bound
-  to a long namespace cannot turn a small text into gigabytes. Past a limit
+  to a long namespace cannot turn a small text into gigabytes (a value past
+  `max_values_per_key` is not kept but still counts its subject and
+  property, and `@vocab` and `@base` count once where they are set). Past a limit
   the profile is refused with `LimitExceeded`; a half-read vocabulary is
   never returned. `includedIn` and `broader` cycles end with a warning.
+  At most 100 warnings are kept, then one line says more were left out.
   `ProfileVocab::parse_with` takes other limits.
 - **Plain text only.** Labels, definitions and notes have HTML tags
-  stripped, entities decoded, bidi, zero-width and control characters
-  removed, whitespace collapsed, and length capped (`max_label_chars` 200,
-  `max_text_chars` 4,000). The components render them as text nodes.
+  stripped, entities decoded, control characters and every default-ignorable
+  code point (bidi controls, zero-width, tag and variation characters,
+  fillers) removed, whitespace collapsed, and length capped
+  (`max_label_chars` 200, `max_text_chars` 4,000). The components render
+  them as text nodes.
+- **Clean IRIs only.** An IRI that holds whitespace, an invisible character
+  or one of `<>"{}|\^` and the backquote (none of which an IRI may hold) is
+  skipped with a warning, so an unlabelled term's display label, made from
+  its IRI, cannot carry a bidi override either. Warnings quote what they are
+  about with invisible characters written as `\u{..}`.
 - **No network access.** `prose-core`, `prose-yew` and the npm packages
   never fetch: the host fetches the profile and passes its text. Remote
   contexts and `owl:imports` are not followed. Only the demo fetches, when
@@ -209,7 +233,8 @@ drive. It knows ODRL and nothing about any particular engine or wire format.
 - Paths: `NodePath`, `SlotPath` and `ListPath` address a node, one editable
   piece of text, or a list, with `Display` and `FromStr`. The segment names are
   ODRL's, for example `policy[0].permission[1].duty[0].consequence[0]#rightOperand[2]`.
-- `EditEvent` and `EditDoc::apply`: set text, set a choice, add, remove, move,
+- `EditEvent` and `EditDoc::apply`: set text, set a choice, set an IRI (a
+  right-operand value picked as `{"@id": ...}`), add, remove, move,
   change a rule's kind, wrap and unwrap a constraint. Each event names the id it
   expects to find, so a stale event is refused rather than misapplied. For
   `Add` that id is the owner of the list (`EditDoc::list_owner_id` gives it),
@@ -233,7 +258,8 @@ drive. It knows ODRL and nothing about any particular engine or wire format.
   each slot's `display` (its `raw` value is unchanged, so what is written back
   is too); `check_profile(doc, &wording)` returns advisory `Issue`s (an
   undeclared term in a loaded profile's namespace, a deprecated term, a
-  declared profile that is not loaded, an operator outside the `prose:`
+  declared profile that is not loaded (the first 20 by name, then one issue
+  counting the rest), an operator outside the `prose:`
   suggestions, a value that fails the `prose:datatype`); `left_operand_at`
   says which left operand a right-operand, unit or reference slot belongs
   to; `prefixes(doc)` reads the prefixes the document binds. The reducer
@@ -267,8 +293,8 @@ Changed in 0.4 (profiles; additive except for struct literals):
 
 - New: the `profile` module, `render_with` and `render_value_with` (they
   return a `Reading`), `wording::gloss` and `wording::operator_with`, and in
-  `edit` `sentences_with`, `check_profile`, `left_operand_at` and
-  `prefixes`. In `prose-yew`: `SharedWording`, `ProseGlossary`,
+  `edit` `sentences_with`, `check_profile`, `left_operand_at`, `prefixes`
+  and the `EditEvent::SetIri` variant. In `prose-yew`: `SharedWording`, `ProseGlossary`,
   `Vocabulary::with_profiles` and `EditConfig::with_wording`. In the npm
   packages: `ProseHandle.setProfile`, and on `<ds-odrl-prose>` the `profile`
   input and the `profileLoaded` and `profileError` outputs.
@@ -281,8 +307,10 @@ Changed in 0.4 (profiles; additive except for struct literals):
   (`Suggestion::new` sets `None`); `Labels` gained `group_core`,
   `group_profile`, `glossary_heading`, `kind_of`, `implies`, `usage_note`,
   `from_profile`, `deprecated`, `suggested_operators`, `other_operators`,
-  `profile_values` and `datatype_placeholders`. Code that uses `html!` or
-  `..Default::default()` is unaffected.
+  `profile_values` and `datatype_placeholders`. Code that builds the props
+  with `html!`, or `EditConfig` and `Labels` with `..Default::default()`, is
+  unaffected. `Suggestion` has no `Default`: build it with
+  `Suggestion::new`, or add `group: None` to the literal.
 - `prose-core` has an optional `turtle` feature (oxttl and oxrdf; on
   wasm32 also getrandom with `js`). It is off by default, so a host that
   does not ask for it gets no new dependency. `prose-wasm` and the demo turn
@@ -413,18 +441,22 @@ With a profile, in Edit mode:
   a model.
 - A right-operand slot suggests the `prose:rightOperand` values of its left
   operand (with their narrower values indented), or else every profile
-  right operand under "Profile values (not specific to this operand)". The
-  slot stays free text. Its placeholder comes from `prose:datatype`
+  right operand under "Profile values (not specific to this operand)",
+  unless the left operand's `prose:datatype` is a literal type (an integer,
+  a duration) that those IRIs cannot fit. The slot stays free text. Its placeholder comes from `prose:datatype`
   (`Labels::datatype_placeholders`), and a unit slot suggests
   `prose:unit`.
 - The operator select adds the profile's operators. When the left operand
   names `prose:operator`s, the options split into two `<optgroup>`s,
-  "Suggested by the profile" and "Other operators"; nothing is hidden, and a
-  current value outside the list stays selectable. The conflict select adds
-  the profile's conflict terms.
+  "Suggested by the profile" and "Other operators" (left out when nothing
+  is left for it); nothing is hidden, and a current value outside the list
+  stays selectable. A value written another way than its option (in full,
+  or as a CURIE the profile resolves) selects that option. The conflict
+  select adds the profile's conflict terms.
 - A picked profile term is written as a compact IRI only when the policy's
   own `@context` binds its namespace, else as the full IRI; a picked
-  right-operand value is written as `{"@id": ...}`. No prefix is invented.
+  right-operand value is written as `{"@id": ...}` (`EditEvent::SetIri`),
+  whatever the slot held before. No prefix is invented.
 - In Read mode, a profile term carries `title="{label}: {definition}
   ({raw})"` and `data-iri`.
 
