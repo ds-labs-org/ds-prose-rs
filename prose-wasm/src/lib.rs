@@ -13,6 +13,8 @@ fn props(json: &str, class: Option<String>) -> OdrlProseProps {
     OdrlProseProps {
         json: AttrValue::from(json.to_owned()),
         class: class.map(Classes::from).unwrap_or_default(),
+        wording: None,
+        glossary: true,
     }
 }
 

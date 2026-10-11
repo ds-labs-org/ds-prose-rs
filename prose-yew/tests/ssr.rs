@@ -24,6 +24,8 @@ async fn v01_snapshots() {
         let html = ssr::<OdrlProse>(OdrlProseProps {
             json: fixture(name).into(),
             class: Classes::new(),
+            wording: None,
+            glossary: true,
         })
         .await;
         let path = format!("{}/tests/snapshots/{name}.html", env!("CARGO_MANIFEST_DIR"));
@@ -644,4 +646,212 @@ async fn a_host_that_plans_operator_switches_gets_every_operator_offered() {
     let html = render_view(props(many, EditMode::Edit, cfg)).await;
     assert!(html.contains("<option value=\"eq\""), "{html}");
     assert!(html.contains("<option value=\"neq\""), "{html}");
+}
+
+// --- profiles: the read-only glossary and the read-mode titles ------------------
+
+use prose_core::profile::{ProfileVocab, Wording};
+use prose_yew::SharedWording;
+
+fn profile_file(name: &str) -> String {
+    std::fs::read_to_string(format!(
+        "{}/../prose-core/tests/profiles/{name}",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .unwrap()
+}
+
+fn research_wording() -> Rc<Wording> {
+    let p = ProfileVocab::parse(&profile_file("research.jsonld")).unwrap();
+    Rc::new(Wording::new().with_profile(p))
+}
+
+fn prose_props(json: String, wording: Option<Rc<Wording>>, glossary: bool) -> OdrlProseProps {
+    OdrlProseProps {
+        json: json.into(),
+        class: Classes::new(),
+        wording: wording.map(SharedWording),
+        glossary,
+    }
+}
+
+/// Compares with, or (with WRITE_SNAPSHOTS set and the file missing) writes,
+/// `tests/snapshots/{name}.html`.
+fn snapshot(name: &str, html: &str) {
+    let path = format!("{}/tests/snapshots/{name}.html", env!("CARGO_MANIFEST_DIR"));
+    if std::env::var("WRITE_SNAPSHOTS").is_ok() && !std::path::Path::new(&path).exists() {
+        std::fs::write(&path, html).unwrap();
+    }
+    let want = std::fs::read_to_string(&path)
+        .unwrap_or_else(|_| panic!("no snapshot {path}; got:\n{html}"));
+    assert_eq!(html, want, "snapshot {name}");
+}
+
+#[tokio::test]
+async fn no_wording_snapshots_unchanged() {
+    for name in ["offer", "agreement", "set"] {
+        let want = std::fs::read_to_string(format!(
+            "{}/tests/snapshots/{name}.html",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .unwrap();
+        for wording in [None, Some(Rc::new(Wording::default()))] {
+            let html = ssr::<OdrlProse>(prose_props(fixture(name), wording, true)).await;
+            assert_eq!(html, want, "snapshot {name}");
+        }
+    }
+    // The editing view: an empty wording changes nothing either.
+    for name in ["offer", "agreement", "set"] {
+        for mode in [EditMode::Read, EditMode::Edit] {
+            let plain = render_view(props(doc_of(name), mode, EditConfig::default())).await;
+            let empty = EditConfig::default().with_wording(Rc::new(Wording::default()));
+            let worded = render_view(props(doc_of(name), mode, empty)).await;
+            assert_eq!(plain, worded, "{name} {mode:?}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn odrl_prose_with_wording_renders_glossary_details() {
+    let json = profile_file("research-policy.json");
+    let html = ssr::<OdrlProse>(prose_props(json.clone(), Some(research_wording()), true)).await;
+    // The sentences use the profile's labels.
+    assert!(html.contains("may fine-tune"), "{html}");
+    for needle in [
+        "<details class=\"prose-glossary\" open>",
+        "<summary>Terms from the profile</summary>",
+        "<dt><span>Fine-tune</span> <code>ex:fineTune</code></dt>",
+        "<dd>To adapt an already trained model using the Asset.</dd>",
+        "<dd class=\"prose-note\">Usage: Fine-tuning implies that the Asset may be read.</dd>",
+        "<dd class=\"prose-kind-of\">A kind of: Train</dd>",
+        "<dd class=\"prose-implies\">Implies: ",
+        "<dd class=\"prose-from\">From Research Data Profile</dd>",
+        "<code>ex:researchPurpose</code>",
+        "<code>ex:clinical</code>",
+    ] {
+        assert!(html.contains(needle), "{needle} missing in:\n{html}");
+    }
+    // One glossary per policy, inside it, after the rules.
+    assert_eq!(html.matches("prose-glossary").count(), 1);
+    let rules = html.find("prose-rules").unwrap();
+    let glossary = html.find("prose-glossary").unwrap();
+    let section_end = html.find("</section>").unwrap();
+    assert!(rules < glossary && glossary < section_end);
+    // Not declared by the profile: no entry.
+    assert!(!html.contains("<code>ex:distill</code>"));
+    snapshot("profile_research", &html);
+
+    // Turned off: the worded sentences without the glossary.
+    let off = ssr::<OdrlProse>(prose_props(json, Some(research_wording()), false)).await;
+    assert!(off.contains("may fine-tune"));
+    assert!(!off.contains("prose-glossary"), "{off}");
+}
+
+#[tokio::test]
+async fn glossary_is_capped_per_policy() {
+    // 40 declared actions, all used by one policy.
+    let mut graph = vec![];
+    let mut actions = vec![];
+    for i in 0..40 {
+        graph.push(format!(
+            r#"{{"@id": "ex:a{i}", "@type": "odrl:Action", "rdfs:label": "Action {i}"}}"#
+        ));
+        actions.push(format!(r#""ex:a{i}""#));
+    }
+    let profile = format!(
+        r#"{{"@context": {{"odrl": "http://www.w3.org/ns/odrl/2/", "ex": "https://example.org/many/",
+            "rdfs": "http://www.w3.org/2000/01/rdf-schema#"}}, "@graph": [{}]}}"#,
+        graph.join(",")
+    );
+    let w = Rc::new(Wording::new().with_profile(ProfileVocab::parse(&profile).unwrap()));
+    let policy = format!(
+        r#"{{"@context": {{"ex": "https://example.org/many/"}}, "@type": "Set",
+            "permission": [{{"action": [{}]}}]}}"#,
+        actions.join(",")
+    );
+    let html = ssr::<OdrlProse>(prose_props(policy, Some(w), true)).await;
+    assert_eq!(html.matches("<dt>").count(), 30, "{html}");
+}
+
+#[tokio::test]
+async fn glossary_escapes_markup() {
+    let profile = r#"{
+        "@context": {"odrl": "http://www.w3.org/ns/odrl/2/", "ex": "https://example.org/x/",
+                     "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+                     "skos": "http://www.w3.org/2004/02/skos/core#"},
+        "@graph": [{"@id": "ex:act", "@type": "odrl:Action",
+                    "rdfs:label": "Act &lt;b&gt;",
+                    "skos:definition": "&lt;script&gt;alert(1)&lt;/script&gt; <img src=x onerror=alert(2)>"}]
+    }"#;
+    let w = Rc::new(Wording::new().with_profile(ProfileVocab::parse(profile).unwrap()));
+    let policy = r#"{"@context": {"ex": "https://example.org/x/"}, "@type": "Set",
+        "permission": [{"action": "ex:act"}]}"#;
+    let html = ssr::<OdrlProse>(prose_props(policy.to_string(), Some(w.clone()), true)).await;
+    assert!(html.contains("prose-glossary"), "{html}");
+    assert!(!html.contains("<script"), "{html}");
+    assert!(!html.contains("<img"), "{html}");
+    assert!(!html.contains("<b>"), "{html}");
+    assert!(
+        html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"),
+        "{html}"
+    );
+
+    // The same text as a read-mode title is an attribute value, escaped.
+    let doc = Rc::new(read_model(policy).unwrap());
+    let cfg = EditConfig::default().with_wording(w);
+    let html = render_view(props(doc, EditMode::Read, cfg)).await;
+    assert!(!html.contains("<script"), "{html}");
+    assert!(html.contains("&lt;script&gt;"), "{html}");
+}
+
+#[tokio::test]
+async fn read_mode_term_title_has_definition() {
+    let doc = Rc::new(read_model(&profile_file("research-policy.json")).unwrap());
+    let cfg = EditConfig::default().with_wording(research_wording());
+    let html = render_view(props(doc.clone(), EditMode::Read, cfg)).await;
+    let terms = spans_with(
+        &html,
+        "data-iri=\"https://example.org/odrl/profile/research/fineTune\"",
+    );
+    assert_eq!(terms.len(), 1, "{html}");
+    let tag = terms[0].split('>').next().unwrap();
+    assert!(
+        tag.contains(
+            "title=\"Fine-tune: To adapt an already trained model using the Asset. (ex:fineTune)\""
+        ),
+        "{tag}"
+    );
+    let id = tag
+        .split("aria-describedby=\"")
+        .nth(1)
+        .and_then(|r| r.split('"').next())
+        .expect("aria-describedby");
+    let target = html
+        .find(&format!("id=\"{id}\""))
+        .unwrap_or_else(|| panic!("no element {id}"));
+    assert!(
+        html[target..].starts_with(&format!("id=\"{id}\" hidden"))
+            || html[..target].ends_with("hidden "),
+        "{html}"
+    );
+    assert!(html[target..].contains("To adapt an already trained model using the Asset."));
+    // The sentence itself reads with the label.
+    assert!(
+        terms[0].starts_with(tag) && terms[0][tag.len()..].starts_with(">fine-tune"),
+        "{}",
+        terms[0]
+    );
+    // A term no profile declares keeps the raw title and no description.
+    let distill = spans_with(&html, "title=\"ex:distill\"");
+    assert_eq!(distill.len(), 1, "{html}");
+    assert!(
+        !distill[0]
+            .split('>')
+            .next()
+            .unwrap()
+            .contains("aria-describedby")
+    );
+    // Without a profile the same view is unchanged.
+    let plain = render_view(props(doc, EditMode::Read, EditConfig::default())).await;
+    assert!(!plain.contains("data-iri"));
 }

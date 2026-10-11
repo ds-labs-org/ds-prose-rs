@@ -494,6 +494,16 @@ pub struct Labels {
     pub group_core: AttrValue,
     /// The heading of one profile's suggestions; `{profile}` is its title.
     pub group_profile: AttrValue,
+    /// The glossary's summary line.
+    pub glossary_heading: AttrValue,
+    /// Glossary lines: `{terms}` is a list of labels, `{note}` the usage
+    /// note, `{profile}` the profile's title.
+    pub kind_of: AttrValue,
+    pub implies: AttrValue,
+    pub usage_note: AttrValue,
+    pub from_profile: AttrValue,
+    /// Shown for a term the profile marks `owl:deprecated`.
+    pub deprecated: AttrValue,
 }
 
 impl Default for Labels {
@@ -542,6 +552,12 @@ impl Default for Labels {
             placeholders: Placeholders::default(),
             group_core: a("ODRL core"),
             group_profile: a("From profile: {profile}"),
+            glossary_heading: a("Terms from the profile"),
+            kind_of: a("A kind of: {terms}"),
+            implies: a("Implies: {terms}"),
+            usage_note: a("Usage: {note}"),
+            from_profile: a("From {profile}"),
+            deprecated: a("Deprecated in the profile"),
         }
     }
 }

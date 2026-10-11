@@ -19,8 +19,27 @@ pub use edit::{
 };
 /// The core crate, so hosts can reach `prose_yew::prose_core::edit::*`.
 pub use prose_core;
-use prose_core::{Condition, Document, Policy, ProseError, Rule, RuleKind};
+use prose_core::profile::Wording;
+use prose_core::{Condition, Document, Policy, PolicyGlossary, ProseError, Rule, RuleKind};
+use std::rc::Rc;
 use yew::prelude::*;
+
+/// A [`Wording`] shared by components. Compared by identity, so a component
+/// renders again only when the host hands it another one.
+#[derive(Clone, Debug)]
+pub struct SharedWording(pub Rc<Wording>);
+
+impl PartialEq for SharedWording {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl From<Wording> for SharedWording {
+    fn from(w: Wording) -> Self {
+        SharedWording(Rc::new(w))
+    }
+}
 
 #[derive(Properties, PartialEq, Clone)]
 pub struct OdrlProseProps {
@@ -28,6 +47,28 @@ pub struct OdrlProseProps {
     pub json: AttrValue,
     #[prop_or_default]
     pub class: Classes,
+    /// The loaded profiles. `None` reads as before.
+    #[prop_or_default]
+    pub wording: Option<SharedWording>,
+    /// A glossary of the profile terms after each policy. Only shown with
+    /// a profile that explains a term the policy uses.
+    #[prop_or(true)]
+    pub glossary: bool,
+}
+
+#[derive(Properties, PartialEq, Clone)]
+pub struct GlossaryProps {
+    pub glossary: PolicyGlossary,
+    #[prop_or_default]
+    pub labels: Rc<Labels>,
+}
+
+/// The profile terms one policy uses, as a `<details class="prose-glossary">`
+/// with a `<dl>`. Nothing when the glossary is empty.
+#[function_component(ProseGlossary)]
+pub fn prose_glossary(props: &GlossaryProps) -> Html {
+    let _ = props;
+    Html::default()
 }
 
 #[function_component(OdrlProse)]
