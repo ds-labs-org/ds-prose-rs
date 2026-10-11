@@ -225,7 +225,9 @@ fn profile_section(state: &UseReducerHandle<ProfileState>, policy: &str) -> Html
                 </label>
                 <button type="button" id="profile-clear" onclick={send(ProfileMsg::Clear)}>{ "Clear" }</button>
             </div>
-            <form class="profile-url" onsubmit={onload}>
+            // novalidate: a relative URL is valid here (it is resolved
+            // against the base URI), not to the browser's type="url" check.
+            <form class="profile-url" novalidate=true onsubmit={onload}>
                 <label for="profile-url">{ "Profile URL" }</label>
                 <input
                     type="url"
