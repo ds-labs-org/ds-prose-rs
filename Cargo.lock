@@ -714,9 +714,12 @@ dependencies = [
 name = "prose-wasm"
 version = "0.3.1"
 dependencies = [
+ "gloo-timers",
  "prose-core",
  "prose-yew",
+ "serde_json",
  "wasm-bindgen",
+ "wasm-bindgen-test",
  "web-sys",
  "yew",
 ]
