@@ -1296,4 +1296,132 @@ mod tests {
             self.vocab.actions.first().and_then(|s| s.group.as_deref())
         }
     }
+
+    fn research_closed() -> Wording {
+        let text = include_str!("../../../prose-core/tests/profiles/research-closed.jsonld");
+        Wording::new().with_profile(ProfileVocab::parse(text).unwrap())
+    }
+
+    fn defaults(cfg: &EditConfig) -> [&str; 4] {
+        let d = &cfg.rules.defaults;
+        [&d.policy_kind, &d.action, &d.left_operand, &d.operator]
+    }
+
+    #[test]
+    fn no_validator_by_default() {
+        assert!(EditConfig::default().validator.is_none());
+        let cfg = EditConfig::default().with_wording(Rc::new(research_closed()));
+        assert!(cfg.validator.is_none());
+    }
+
+    #[test]
+    fn with_strict_sets_validator_and_admissible_defaults() {
+        use prose_core::validate::{Mode, Options};
+        let w = Rc::new(research_closed());
+        let cfg = EditConfig::default()
+            .with_wording(w.clone())
+            .with_strict(Options::strict());
+        let v = cfg.validator.as_ref().expect("a validator");
+        assert_eq!(v.options().mode(), Mode::Strict);
+        assert_eq!(v.wording().as_ref(), w.as_ref());
+        // The stock defaults are ODRL terms: kept.
+        assert_eq!(defaults(&cfg), ["Set", "use", "", "eq"]);
+
+        // Defaults the profiles do not allow give way to the first
+        // admissible entry of the vocabulary.
+        let mut cfg = EditConfig::default().with_wording(w.clone());
+        cfg.rules.defaults.policy_kind = format!("{EX}fineTune");
+        cfg.rules.defaults.action = "https://example.net/foo/bar".into();
+        cfg.rules.defaults.left_operand = format!("{EX}academic");
+        cfg.rules.defaults.operator = "https://example.net/foo/op".into();
+        let cfg = cfg.with_strict(Options::strict());
+        assert_eq!(defaults(&cfg), ["Set", "use", "", "eq"]);
+
+        // A default left operand that is closed binds the default operator.
+        let mut cfg = EditConfig::default().with_wording(w.clone());
+        cfg.rules.defaults.left_operand = format!("{EX}dataSubjectCount");
+        let cfg = cfg.with_strict(Options::strict());
+        let count = format!("{EX}dataSubjectCount");
+        assert_eq!(defaults(&cfg), ["Set", "use", count.as_str(), "gt"]);
+
+        // A compact IRI is kept as written when its profile term is
+        // admissible: whether a policy binds the prefix is the policy's.
+        let mut cfg = EditConfig::default().with_wording(w.clone());
+        cfg.rules.defaults.action = "ex:train".into();
+        let cfg = cfg.with_strict(Options::strict());
+        assert_eq!(cfg.rules.defaults.action, "ex:train");
+
+        // Nothing admissible: empty, except the policy type, which a policy
+        // cannot do without, and which stays as it was.
+        let mut cfg = EditConfig::default().with_wording(w.clone());
+        cfg.vocab.actions.clear();
+        cfg.vocab.operators.clear();
+        cfg.vocab.policy_kinds.clear();
+        cfg.rules.defaults.policy_kind = format!("{EX}fineTune");
+        cfg.rules.defaults.action = "https://example.net/foo/bar".into();
+        cfg.rules.defaults.operator = "https://example.net/foo/op".into();
+        let cfg = cfg.with_strict(Options::strict());
+        let kind = format!("{EX}fineTune");
+        assert_eq!(defaults(&cfg), [kind.as_str(), "", "", ""]);
+
+        // Advisory mode admits everything: nothing is rewritten.
+        let mut cfg = EditConfig::default().with_wording(w);
+        cfg.rules.defaults.action = "https://example.net/foo/bar".into();
+        let cfg = cfg.with_strict(Options::advisory());
+        assert_eq!(cfg.rules.defaults.action, "https://example.net/foo/bar");
+        assert!(cfg.validator.is_some());
+    }
+
+    #[test]
+    fn with_wording_after_with_strict_rebuilds() {
+        use prose_core::validate::Options;
+        let options = Options::strict().structural(true);
+        let mut cfg = EditConfig::default().with_strict(options.clone());
+        cfg.rules.defaults.action = format!("{EX}train");
+        // Without the profile the research action is unknown...
+        let cfg = cfg.with_strict(options.clone());
+        assert_eq!(cfg.rules.defaults.action, "use");
+        let before = cfg.validator.clone().unwrap();
+        assert!(before.wording().is_empty());
+        // ...and with it, the validator is rebuilt over the new wording,
+        // with the same options.
+        let mut cfg = cfg;
+        cfg.rules.defaults.action = format!("{EX}train");
+        let w = Rc::new(research_closed());
+        let cfg = cfg.with_wording(w.clone());
+        let after = cfg.validator.as_ref().unwrap();
+        assert_eq!(after.options(), &options);
+        assert_eq!(after.wording().as_ref(), w.as_ref());
+        assert_ne!(after, &before);
+        assert_eq!(cfg.rules.defaults.action, format!("{EX}train"));
+    }
+
+    #[test]
+    fn an_added_rule_takes_admissible_defaults() {
+        use prose_core::edit::{EditEvent, NewItem, read_model};
+        use prose_core::validate::{Options, RuleId};
+        let w = Rc::new(research_closed());
+        let mut cfg = EditConfig::default().with_wording(w);
+        cfg.rules.defaults.action = "https://example.net/foo/bar".into();
+        let cfg = cfg.with_strict(Options::strict());
+        let v = cfg.validator.clone().unwrap();
+        let mut doc = read_model(r#"{"@type": "Set", "uid": "urn:p"}"#).unwrap();
+        let list = ListPath::of(&NodePath::policy(0), ListKind::Rules(RuleList::Permission));
+        let ev = EditEvent::Add {
+            expect: doc.list_owner_id(&list),
+            list,
+            index: 0,
+            item: NewItem::Default,
+        };
+        doc.apply_gated(&ev, &cfg.rules, Some(&v)).unwrap();
+        let report = v.validate(&doc);
+        assert!(
+            report
+                .findings
+                .iter()
+                .all(|f| f.rule != RuleId::ProfileUnknownTerm),
+            "{:?}",
+            report.findings
+        );
+    }
 }
