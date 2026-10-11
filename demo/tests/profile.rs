@@ -376,3 +376,54 @@ async fn relative_url_is_resolved_and_fetched() {
     let msg = q(&c, "#profile-error").text_content().unwrap();
     assert!(msg.starts_with("The server answered 404"), "{msg}");
 }
+
+/// Just over the 4 MiB the field reads.
+fn too_large() -> String {
+    " ".repeat(4 * 1024 * 1024 + 1)
+}
+
+#[wasm_bindgen_test]
+async fn file_over_4_mib_is_refused_before_reading() {
+    let c = mount().await;
+    let parts = js_sys::Array::of1(&JsValue::from_str(&too_large()));
+    let file = web_sys::File::new_with_str_sequence(&parts, "huge.jsonld").unwrap();
+    let dt = DataTransfer::new().unwrap();
+    dt.items().add_with_file(&file).unwrap();
+    let el = q(&c, "input#profile-file")
+        .dyn_into::<HtmlInputElement>()
+        .unwrap();
+    el.set_files(Some(&dt.files().unwrap()));
+    let init = EventInit::new();
+    init.set_bubbles(true);
+    el.dispatch_event(&Event::new_with_event_init_dict("change", &init).unwrap())
+        .unwrap();
+    until(&c, "the error", |c| has(c, "#profile-error")).await;
+    let msg = q(&c, "#profile-error").text_content().unwrap();
+    assert_eq!(
+        msg,
+        "huge.jsonld is 4194305 bytes; profiles over 4 MiB are not read."
+    );
+    assert_eq!(textarea_value(&c, "textarea#profile-json"), "", "not read");
+    assert!(!status(&c).contains("Reading"), "no longer loading");
+}
+
+#[wasm_bindgen_test]
+async fn answer_over_4_mib_is_refused() {
+    // A blob: answer carries its Content-Length.
+    let c = mount().await;
+    set_input(
+        &c,
+        "input#profile-url",
+        &blob_url(&too_large(), "application/ld+json"),
+    );
+    settle().await;
+    click(&c, "#profile-load").await;
+    until(&c, "the error", |c| has(c, "#profile-error")).await;
+    let msg = q(&c, "#profile-error").text_content().unwrap();
+    assert_eq!(
+        msg,
+        "The profile is 4194305 bytes; profiles over 4 MiB are not read."
+    );
+    assert_eq!(textarea_value(&c, "textarea#profile-json"), "");
+    assert!(!status(&c).contains("Reading"), "no longer loading");
+}
