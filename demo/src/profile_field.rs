@@ -4,7 +4,9 @@
 use std::rc::Rc;
 
 use prose_yew::SharedWording;
+use prose_yew::prose_core::edit::StrictEdit;
 use prose_yew::prose_core::profile::{ProfileLimits, ProfileVocab, TermKind, Wording};
+use prose_yew::prose_core::validate::Options;
 use serde_json::Value;
 use yew::Reducible;
 
@@ -68,6 +70,13 @@ pub enum ProfileMsg {
     },
     /// The user typed in the URL field (or it was prefilled).
     Url(String),
+    /// Switch strict validation on or off.
+    Strict(bool),
+    /// Switch the structural `odrl.*` tier on or off (strict only).
+    Structural(bool),
+    /// Have the editor refuse a term the profile does not allow, instead of
+    /// flagging it (strict only).
+    Refuse(bool),
     /// Empty the field and use no profile.
     Clear,
 }
@@ -92,6 +101,27 @@ pub struct ProfileState {
     /// Bumped by `Begin` and `Clear`: a load that started before is stale.
     pub generation: u32,
     pub loading: bool,
+    /// The strict switch.
+    pub strict: bool,
+    /// The structural tier's switch; counts only while `strict` is on.
+    pub structural: bool,
+    /// The refuse switch; counts only while `strict` is on.
+    pub refuse: bool,
+    /// The loaded profile as a badge names it, "Research Data Profile 0.1.0".
+    pub name: Option<String>,
+}
+
+impl ProfileState {
+    /// The validation options these switches mean; `None` while strict is
+    /// off, which is the advisory behaviour of before.
+    pub fn options(&self) -> Option<Options> {
+        todo!("options")
+    }
+
+    /// What the editor does with a term outside the profile.
+    pub fn strict_edit(&self) -> StrictEdit {
+        todo!("strict_edit")
+    }
 }
 
 /// The state after `m`. A newer user action (Apply, a preset, Clear) also
@@ -141,6 +171,7 @@ pub fn reduce(s: &ProfileState, m: ProfileMsg) -> ProfileState {
         } if generation == s.generation => fetched(&mut n, Some(url), text, content_type),
         ProfileMsg::Fetched { .. } | ProfileMsg::FetchedFrom { .. } => {}
         ProfileMsg::Url(url) => n.url = url,
+        ProfileMsg::Strict(_) | ProfileMsg::Structural(_) | ProfileMsg::Refuse(_) => {}
         ProfileMsg::Clear => {
             n = ProfileState {
                 generation: s.generation.wrapping_add(1),
@@ -688,6 +719,66 @@ mod tests {
         assert_eq!(s.url, "https://e.org/p.ttl");
         let s = reduce(&s, ProfileMsg::Clear);
         assert_eq!(s.url, "https://e.org/p.ttl");
+    }
+
+    #[test]
+    fn strict_is_off_until_switched_on() {
+        let s = ProfileState::default();
+        assert!(!s.strict && !s.structural && !s.refuse);
+        assert_eq!(s.options(), None);
+        assert_eq!(s.strict_edit(), StrictEdit::Flag);
+        let s = reduce(&s, ProfileMsg::Strict(true));
+        assert_eq!(s.options(), Some(Options::strict()));
+        assert_eq!(s.strict_edit(), StrictEdit::Flag, "refusing is opt-in");
+        let s = reduce(&s, ProfileMsg::Strict(false));
+        assert_eq!(s.options(), None);
+    }
+
+    #[test]
+    fn structural_and_refuse_count_only_in_strict() {
+        let s = reduce(&ProfileState::default(), ProfileMsg::Structural(true));
+        let s = reduce(&s, ProfileMsg::Refuse(true));
+        assert!(s.structural && s.refuse, "the switches are remembered");
+        assert_eq!(s.options(), None);
+        assert_eq!(s.strict_edit(), StrictEdit::Flag);
+        let s = reduce(&s, ProfileMsg::Strict(true));
+        assert_eq!(s.options(), Some(Options::strict().structural(true)));
+        assert_eq!(s.strict_edit(), StrictEdit::RefuseTerms);
+        let s = reduce(&s, ProfileMsg::Structural(false));
+        assert_eq!(s.options(), Some(Options::strict()));
+    }
+
+    #[test]
+    fn the_strict_switches_survive_clear_and_a_new_profile() {
+        let s = reduce(&ProfileState::default(), ProfileMsg::Strict(true));
+        let s = reduce(&s, ProfileMsg::Refuse(true));
+        let s = reduce(&s, ProfileMsg::Use(sample()));
+        assert!(s.strict && s.refuse);
+        let s = reduce(&s, ProfileMsg::Clear);
+        assert!(s.strict && s.refuse);
+        assert_eq!(s.wording, None);
+    }
+
+    #[test]
+    fn the_applied_profile_is_named_for_the_badge() {
+        let s = applied(&sample());
+        assert_eq!(s.name.as_deref(), Some("Research Data Profile 0.1.0"));
+        let s = reduce(&s, ProfileMsg::Clear);
+        assert_eq!(s.name, None);
+        let s = applied("<html>");
+        assert_eq!(s.name, None);
+    }
+
+    #[test]
+    fn the_closed_sample_is_a_preset() {
+        let p = PRESETS.iter().find(|p| p.id == "profile-sample-closed");
+        let p = p.expect("a Research (closed) button");
+        assert_eq!(p.label, "Research (closed)");
+        assert!(p.text.contains("prose:closed"));
+        assert_eq!(
+            PRESETS[2].id, "profile-odrl22",
+            "the others keep their place"
+        );
     }
 
     #[test]

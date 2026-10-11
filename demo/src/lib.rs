@@ -5,6 +5,7 @@ mod edit;
 mod fetch;
 mod fixtures;
 pub mod profile_field;
+pub mod strict;
 
 use edit::EditDemo;
 use profile_field::{MAX_BYTES, PRESETS, ProfileMsg, ProfileState, declared_profile};
