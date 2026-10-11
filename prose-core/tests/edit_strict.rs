@@ -912,3 +912,229 @@ fn the_gate_follows_the_ruleset_pin_and_odrl_vocabulary() {
         RuleId::ProfileUnknownTerm
     );
 }
+
+#[test]
+fn a_ruleset_pinned_before_a_rule_does_not_refuse_by_it() {
+    // A rule the pinned ruleset does not have is off, so it refuses nothing.
+    let doc = base();
+    let ev = text(&doc, ACTION, "foo:bar");
+    assert!(strict_gate(closed()).admissible(&doc, &ev).is_err());
+    let pinned = Validator::new(Arc::new(closed()), Options::strict().ruleset(0));
+    assert!(pinned.admissible(&doc, &ev).is_ok());
+    assert_eq!(gated(&doc, &ev, Some(&pinned)), plain(&doc, &ev));
+}
+
+const UNITS: &str = "https://example.org/odrl/profile/units";
+const STORAGE: &str = "policy[0].permission[0].constraint[2]";
+
+/// research-closed, and a profile whose `storage` operand suggests the
+/// unit gigabyte or, when `closed`, allows only that.
+fn with_units(is_closed: bool) -> Wording {
+    let units = prose_core::profile::ProfileVocab::from_value(
+        &json!({
+            "@context": {"odrl": "http://www.w3.org/ns/odrl/2/",
+                         "prose": "https://ds-labs-org.github.io/ds-prose-rs/profile#",
+                         "owl": "http://www.w3.org/2002/07/owl#",
+                         "u": "https://example.org/odrl/profile/units/"},
+            "@graph": [{"@id": UNITS, "@type": "owl:Ontology"},
+                       {"@id": "u:storage", "@type": "odrl:LeftOperand",
+                        "prose:unit": [{"@id": "u:gigabyte"}], "prose:closed": is_closed}]
+        }),
+        &prose_core::profile::ProfileLimits::default(),
+    )
+    .unwrap();
+    closed().with_profile(units)
+}
+
+/// [`base`], declaring the units profile too, with a third constraint on
+/// `u:storage` in gigabytes.
+fn base_with_units() -> EditDoc {
+    let mut v = base_value();
+    v["@context"][1]["u"] = json!("https://example.org/odrl/profile/units/");
+    v["profile"] = json!([RESEARCH, UNITS]);
+    v["permission"][0]["constraint"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"leftOperand": "u:storage", "operator": "lteq",
+                     "rightOperand": 5, "unit": "u:gigabyte"}));
+    read_model(&v.to_string()).unwrap()
+}
+
+#[test]
+fn a_unit_outside_a_closed_operand_is_refused() {
+    let doc = base_with_units();
+    let unit = format!("{STORAGE}#unit");
+    let megabyte = "http://dbpedia.org/resource/Megabyte";
+    let closed = strict_gate(with_units(true));
+    assert!(
+        closed.validate(&doc).conforms(),
+        "{:?}",
+        closed.validate(&doc).findings
+    );
+    let ev = text(&doc, &unit, megabyte);
+    assert_eq!(
+        refused_by(gated(&doc, &ev, Some(&closed)).map(|_| ())),
+        "prose.unit-not-allowed"
+    );
+    // The allowed unit, written either way, commits.
+    for value in [
+        "u:gigabyte",
+        "https://example.org/odrl/profile/units/gigabyte",
+    ] {
+        let ev = text(&doc, &unit, value);
+        assert_eq!(gated(&doc, &ev, Some(&closed)), plain(&doc, &ev), "{value}");
+    }
+    // On an open operand the unit is only a suggestion: flagged as Info.
+    let open = strict_gate(with_units(false));
+    let after = gated(&doc, &ev, Some(&open)).unwrap();
+    assert!(
+        open.validate(&after)
+            .findings
+            .iter()
+            .any(|f| f.rule == RuleId::ProseUnitNotAllowed && f.severity == Severity::Info)
+    );
+}
+
+#[test]
+fn a_term_of_a_profile_the_policy_does_not_declare_is_flagged_not_refused() {
+    // other.jsonld is loaded, but the policy declares only the research
+    // profile: profile.not-declared is an error with a fix, never a refusal.
+    let w = wording_of(&["research-closed.jsonld", "other.jsonld"]);
+    let v = strict_gate(w);
+    let doc = base();
+    let ev = text(
+        &doc,
+        ACTION,
+        "https://example.com/odrl/profile/other/archiveCopy",
+    );
+    assert!(v.admissible(&doc, &ev).is_ok());
+    let after = gated(&doc, &ev, Some(&v)).unwrap();
+    let r = v.validate(&after);
+    let f = r
+        .findings
+        .iter()
+        .find(|f| f.rule == RuleId::ProfileNotDeclared)
+        .expect("not declared");
+    assert_eq!(f.severity, Severity::Error);
+    assert!(!f.fixes.is_empty());
+}
+
+#[test]
+fn advisory_with_a_level_raised_by_hand_never_refuses() {
+    // Advisory mode never refuses, whatever level a rule is given.
+    let doc = base();
+    let raised = Validator::new(
+        Arc::new(closed()),
+        Options::advisory()
+            .level(RuleId::ProfileUnknownTerm, Level::Error)
+            .level(RuleId::ProfileUndeclaredInNamespace, Level::Error),
+    );
+    for value in ["foo:bar", "ex:distil"] {
+        let ev = text(&doc, ACTION, value);
+        let after = gated(&doc, &ev, Some(&raised)).unwrap();
+        assert!(
+            raised
+                .validate(&after)
+                .findings
+                .iter()
+                .any(|f| f.severity == Severity::Error),
+            "{value}"
+        );
+    }
+}
+
+#[test]
+fn the_gate_refuses_exactly_what_validation_reports_at_the_slot() {
+    // Soundness: a refusal is a finding the validator reports, at the same
+    // slot, once the event is applied; and, while nothing is a gap, the
+    // validator reports no refusable error at a slot the gate let through.
+    let mut docs = docs();
+    docs.push(("units".into(), base_with_units()));
+    docs.push(("incomplete".into(), incomplete()));
+    let wordings = [
+        ("closed", closed()),
+        (
+            "closed+other",
+            wording_of(&["research-closed.jsonld", "other.jsonld"]),
+        ),
+        ("units-closed", with_units(true)),
+        ("units-open", with_units(false)),
+        ("none", Wording::new()),
+    ];
+    let values = [
+        "foo:bar",
+        "ex:distil",
+        "ex:train",
+        "ex:researchPurpose",
+        "ex:fineTune",
+        "use",
+        "eq",
+        "gteq",
+        "perm",
+        "Offer",
+        "u:gigabyte",
+        "http://dbpedia.org/resource/Megabyte",
+        "https://example.com/odrl/profile/other/archiveCopy",
+    ];
+    let (mut refused, mut admitted) = (0, 0);
+    for (wname, w) in wordings {
+        let v = strict_gate(w);
+        for (name, doc) in &docs {
+            for (slot, owner, is_choice) in slots_of(doc) {
+                for value in values {
+                    let value = value.to_string();
+                    let ev = if is_choice {
+                        EditEvent::SetChoice {
+                            slot: slot.clone(),
+                            expect: owner,
+                            value,
+                        }
+                    } else {
+                        EditEvent::SetText {
+                            slot: slot.clone(),
+                            expect: owner,
+                            value,
+                        }
+                    };
+                    let Ok(after) = plain(doc, &ev) else {
+                        continue;
+                    };
+                    let r = v.validate(&after);
+                    let here = IssueTarget::Slot(slot.clone());
+                    let at_slot = |f: &&Finding| {
+                        f.target == here
+                            && f.severity == Severity::Error
+                            && !f.gap
+                            && f.rule.info().refusable
+                    };
+                    match v.admissible(doc, &ev) {
+                        Err(f) => {
+                            assert!(
+                                r.findings
+                                    .iter()
+                                    .any(|g| g.rule == f.rule && g.target == f.target),
+                                "{wname}/{name}: {ev:?} refused for {} ({}), not reported after: {:?}",
+                                f.rule,
+                                f.message,
+                                r.findings
+                            );
+                            refused += 1;
+                        }
+                        Ok(()) => {
+                            // Right operands are flagged, never refused.
+                            if r.gaps.is_empty() && !matches!(slot.field, Field::RightOperand(_)) {
+                                assert!(
+                                    !r.findings.iter().any(|f| at_slot(&f)),
+                                    "{wname}/{name}: {ev:?} admitted, reported after: {:?}",
+                                    r.findings.iter().filter(at_slot).collect::<Vec<_>>()
+                                );
+                            }
+                            admitted += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(refused > 100 && admitted > 100, "{refused} {admitted}");
+}
