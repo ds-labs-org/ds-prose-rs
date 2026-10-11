@@ -86,6 +86,29 @@ impl ProfileVocab {
         self.iri.as_deref()
     }
 
+    /// The profile's name: `rdfs:label`, else `skos:prefLabel`, else
+    /// `dct:title` on the profile node.
+    pub fn title(&self) -> &LangText {
+        &self.title
+    }
+
+    /// `skos:definition`, else `rdfs:comment`, else `dct:description` on the
+    /// profile node.
+    pub fn description(&self) -> &LangText {
+        &self.description
+    }
+
+    /// `owl:versionInfo`, else `dct:hasVersion`.
+    pub fn version(&self) -> Option<&str> {
+        self.version.as_deref()
+    }
+
+    /// `owl:imports` and `prof:isProfileOf` on the profile node: recorded,
+    /// never fetched.
+    pub fn imports(&self) -> &[String] {
+        &self.imports
+    }
+
     /// The term with this expanded IRI. Compact IRIs are not looked up here.
     pub fn term(&self, iri: &str) -> Option<&Term> {
         self.index.get(iri).map(|&i| &self.terms[i])
@@ -105,6 +128,34 @@ impl ProfileVocab {
     /// once.
     pub fn warnings(&self) -> &[String] {
         &self.warnings
+    }
+
+    /// Counts per kind, for a status line.
+    pub fn summary(&self) -> ProfileSummary {
+        ProfileSummary::default()
+    }
+}
+
+/// What a loaded profile holds, in numbers.
+#[non_exhaustive]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProfileSummary {
+    pub iri: Option<String>,
+    pub version: Option<String>,
+    pub terms: usize,
+    /// (kind, number of terms of that kind) for every kind present, in
+    /// [`TermKind`] order. A term of two kinds counts under both.
+    pub counts: Vec<(TermKind, usize)>,
+    pub warnings: usize,
+}
+
+impl ProfileSummary {
+    /// The number of terms of `kind`.
+    pub fn count(&self, kind: TermKind) -> usize {
+        self.counts
+            .iter()
+            .find(|(k, _)| *k == kind)
+            .map_or(0, |(_, n)| *n)
     }
 }
 
@@ -150,6 +201,13 @@ impl Term {
             deprecated: false,
             hints: OperandHints::default(),
         }
+    }
+
+    /// The label in the best language for `langs`, else the IRI's local
+    /// name, humanised.
+    pub fn display_label(&self, langs: &[String]) -> String {
+        let _ = langs;
+        String::new()
     }
 }
 

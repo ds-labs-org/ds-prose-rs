@@ -224,3 +224,44 @@
 //!     }
 //! }
 //! ```
+//! ```
+//! #![deny(unreachable_patterns)]
+//! #![allow(dead_code)]
+//! use prose_core::profile::TermKind;
+//! fn f(x: &TermKind) -> u8 {
+//!     match x {
+//!         TermKind::Action => 0,
+//!         TermKind::LeftOperand => 0,
+//!         TermKind::Operator => 0,
+//!         TermKind::RightOperand => 0,
+//!         TermKind::ConflictTerm => 0,
+//!         TermKind::PolicyClass => 0,
+//!         TermKind::RuleClass => 0,
+//!         TermKind::AssetClass => 0,
+//!         TermKind::PartyClass => 0,
+//!         TermKind::PartyFunction => 0,
+//!         TermKind::AssetRelation => 0,
+//!         TermKind::LogicalOperand => 0,
+//!         _ => 1,
+//!     }
+//! }
+//! ```
+//! ```
+//! #![deny(unreachable_patterns)]
+//! #![allow(dead_code)]
+//! use prose_core::profile::ProfileError;
+//! fn f(x: &ProfileError) -> u8 {
+//!     match x {
+//!         ProfileError::TooLarge { .. } => 0,
+//!         ProfileError::Json { .. } => 0,
+//!         ProfileError::LooksLikeHtml => 0,
+//!         ProfileError::ContextOnly => 0,
+//!         ProfileError::JsonSchema => 0,
+//!         ProfileError::LooksLikePolicy => 0,
+//!         ProfileError::NoTerms => 0,
+//!         ProfileError::UnsupportedFormat => 0,
+//!         ProfileError::LimitExceeded { .. } => 0,
+//!         _ => 1,
+//!     }
+//! }
+//! ```
