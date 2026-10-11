@@ -185,6 +185,57 @@ fn advisory_option_gives_the_advisory_report() {
     assert_eq!(r["mode"], "advisory");
 }
 
+/// Every field of every rule reaches the host as the core states it.
+#[test]
+fn rules_carry_every_field_of_the_core_catalogue() {
+    use prose_core::validate::{Basis, Tier};
+    let v: Value = serde_json::from_str(&rules_json()).unwrap();
+    let lvl = |l: Level| match l {
+        Level::Off => "off",
+        Level::Info => "info",
+        Level::Warning => "warning",
+        Level::Error => "error",
+    };
+    for (j, r) in v.as_array().unwrap().iter().zip(RULES) {
+        let id = r.id.as_str();
+        let tier = match r.tier {
+            Tier::Profile => "profile",
+            Tier::Odrl => "odrl",
+            Tier::Prose => "prose",
+            Tier::Input => "input",
+            Tier::Heuristic => "heuristic",
+            _ => unreachable!("a new tier needs a name here"),
+        };
+        let basis = match r.basis {
+            Basis::Standard => "standard",
+            Basis::StandardDerived => "standard-derived",
+            Basis::Convention => "convention",
+            Basis::Heuristic => "heuristic",
+            Basis::Input => "input",
+            _ => unreachable!("a new basis needs a name here"),
+        };
+        assert_eq!(j["id"], id);
+        assert_eq!(j["tier"], tier, "{id}");
+        assert_eq!(j["title"], r.title, "{id}");
+        assert_eq!(j["basis"], basis, "{id}");
+        assert_eq!(j["source"], r.source, "{id}");
+        assert_eq!(j["sinceRuleset"], r.since_ruleset, "{id}");
+        assert_eq!(j["advisory"], lvl(r.advisory), "{id}");
+        assert_eq!(j["strict"], lvl(r.strict), "{id}");
+        assert_eq!(
+            j["strictClosed"],
+            r.strict_closed.map_or(Value::Null, |l| json!(lvl(l))),
+            "{id}"
+        );
+        assert_eq!(j["gap"], r.gap, "{id}");
+        assert_eq!(j["refusable"], r.refusable, "{id}");
+    }
+    assert!(
+        RULES.iter().any(|r| r.refusable) && RULES.iter().any(|r| r.gap),
+        "the catalogue must exercise both flags for this test to mean anything"
+    );
+}
+
 #[test]
 fn rules_lists_the_catalogue() {
     let v: Value = serde_json::from_str(&rules_json()).unwrap();
