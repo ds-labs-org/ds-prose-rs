@@ -56,9 +56,14 @@ pub use wording::{Prefixes, Wording};
 
 /// The vocabulary one ODRL profile declares.
 ///
-/// Equality compares the vocabulary, not how it was written: the prefixes a
-/// document bound and its parse warnings are left out, so a compacted and an
-/// expanded copy of one profile are equal.
+/// Equality compares the vocabulary as a graph, not how it was written. An
+/// RDF graph has no order, so the order of the terms, of the language pairs
+/// in each [`LangText`] and of every IRI list is left out, and so are the
+/// prefixes a document bound and its parse warnings: a compacted and an
+/// expanded copy of one profile are equal, and so are a JSON-LD profile and
+/// a Turtle twin a tool wrote in its own order. [`OperandHints::value_tree`]
+/// is worked out from the rest and is not compared. The derived `==` of
+/// [`Term`] and [`LangText`] still compares in order.
 #[derive(Clone, Debug, Default)]
 pub struct ProfileVocab {
     iri: Option<String>,
@@ -78,12 +83,57 @@ pub struct ProfileVocab {
 impl PartialEq for ProfileVocab {
     fn eq(&self, other: &ProfileVocab) -> bool {
         self.iri == other.iri
-            && self.title == other.title
-            && self.description == other.description
+            && same_text(&self.title, &other.title)
+            && same_text(&self.description, &other.description)
             && self.version == other.version
-            && self.imports == other.imports
-            && self.terms == other.terms
+            && same_set(&self.imports, &other.imports)
+            && self.terms.len() == other.terms.len()
+            // Term IRIs are unique, so equal counts and every term found make
+            // a one-to-one match.
+            && self
+                .terms
+                .iter()
+                .all(|t| other.term(&t.iri).is_some_and(|u| same_term(t, u)))
     }
+}
+
+/// `a` and `b` hold the same (language, text) pairs, in any order.
+fn same_text(a: &LangText, b: &LangText) -> bool {
+    fn sorted(t: &LangText) -> Vec<(Option<&str>, &str)> {
+        let mut v: Vec<_> = t.iter().collect();
+        v.sort_unstable();
+        v
+    }
+    sorted(a) == sorted(b)
+}
+
+/// `a` and `b` hold the same IRIs, in any order. Every list here is read
+/// without duplicates.
+fn same_set(a: &[String], b: &[String]) -> bool {
+    fn sorted(v: &[String]) -> Vec<&str> {
+        let mut v: Vec<&str> = v.iter().map(String::as_str).collect();
+        v.sort_unstable();
+        v
+    }
+    a.len() == b.len() && sorted(a) == sorted(b)
+}
+
+/// One term, compared as a graph; see [`ProfileVocab`]'s equality.
+fn same_term(a: &Term, b: &Term) -> bool {
+    a.iri == b.iri
+        && a.kinds == b.kinds
+        && same_text(&a.label, &b.label)
+        && same_text(&a.definition, &b.definition)
+        && same_text(&a.note, &b.note)
+        && same_set(&a.included_in, &b.included_in)
+        && same_set(&a.broader, &b.broader)
+        && same_set(&a.implies, &b.implies)
+        && same_set(&a.exact_match, &b.exact_match)
+        && a.deprecated == b.deprecated
+        && same_set(&a.hints.operators, &b.hints.operators)
+        && same_set(&a.hints.values, &b.hints.values)
+        && a.hints.datatype == b.hints.datatype
+        && same_set(&a.hints.units, &b.hints.units)
 }
 
 impl ProfileVocab {
