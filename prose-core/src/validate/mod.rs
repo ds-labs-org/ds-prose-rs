@@ -13,7 +13,7 @@
 //! which tier a rule belongs to and the authority behind it, so a reader
 //! can tell what the standard requires from what is a ds-prose convention.
 use crate::edit::{EditDoc, Issue, IssueTarget, NodeId, Severity};
-use crate::profile::Wording;
+use crate::profile::{OdrlVocab, Wording};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -42,6 +42,7 @@ pub struct Options {
     structural: bool,
     fail_closed: bool,
     deny_deprecated: bool,
+    odrl: OdrlVocab,
     ruleset: u32,
     /// Per-rule levels set with [`Options::level`]; the last one set wins.
     levels: BTreeMap<RuleId, Level>,
@@ -61,6 +62,7 @@ impl Options {
             structural: false,
             fail_closed: false,
             deny_deprecated: false,
+            odrl: OdrlVocab::Common,
             ruleset: RULESET,
             levels: BTreeMap::new(),
         }
@@ -96,6 +98,18 @@ impl Options {
     pub fn deny_deprecated(mut self, on: bool) -> Options {
         self.deny_deprecated = on;
         self
+    }
+
+    /// Which ODRL terms strict mode counts as defined without a profile:
+    /// the Core and Common Vocabularies (the default), or the Core
+    /// Vocabulary only.
+    pub fn odrl_vocabulary(mut self, vocab: OdrlVocab) -> Options {
+        self.odrl = vocab;
+        self
+    }
+
+    pub fn odrl(&self) -> OdrlVocab {
+        self.odrl
     }
 
     /// Checks only the rules of ruleset `n` and earlier (see

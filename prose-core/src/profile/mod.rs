@@ -36,7 +36,9 @@
 //! `prose:datatype`, `prose:unit` in
 //! `https://ds-labs-org.github.io/ds-prose-rs/profile#`) is a ds-prose
 //! convention, not ODRL: on a left operand it orders the editor's
-//! suggestions ([`OperandHints`]) and never restricts them.
+//! suggestions ([`OperandHints`]) and never restricts them. Only
+//! `prose:closed true` on the left operand makes them binding, and only in
+//! strict validation ([`crate::validate`]).
 //!
 //! Every read is bounded by [`ProfileLimits`]; past a limit the profile is
 //! refused, never half read.
@@ -45,12 +47,14 @@ use serde_json::Value;
 mod build;
 mod jsonld;
 mod ns;
+mod odrl_terms;
 mod text;
 mod triples;
 #[cfg(feature = "turtle")]
 mod turtle;
 mod wording;
 
+pub use odrl_terms::{OdrlTerm, OdrlVocab, odrl_term, odrl_terms};
 pub use text::LangText;
 pub(crate) use wording::Budget;
 pub use wording::{Prefixes, Wording};
@@ -135,6 +139,7 @@ fn same_term(a: &Term, b: &Term) -> bool {
         && same_set(&a.hints.values, &b.hints.values)
         && a.hints.datatype == b.hints.datatype
         && same_set(&a.hints.units, &b.hints.units)
+        && a.hints.closed == b.hints.closed
 }
 
 impl ProfileVocab {
@@ -372,6 +377,10 @@ pub struct OperandHints {
     pub datatype: Option<String>,
     /// `prose:unit`: suggested units.
     pub units: Vec<String>,
+    /// `prose:closed true`: the profile closes this left operand. In strict
+    /// validation its operators, values, units and datatype above are then
+    /// binding rather than suggested; nothing else changes.
+    pub closed: bool,
     /// `values` with their descendants within the profile (right operands
     /// whose `skos:broader` or `rdfs:subClassOf` leads to them), depth
     /// first, each with its depth below the suggested value (0). Each value

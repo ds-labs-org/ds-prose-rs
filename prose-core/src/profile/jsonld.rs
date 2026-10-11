@@ -628,8 +628,9 @@ fn literal(text: &str, lang: Option<&str>, datatype: Option<&str>) -> Object {
 /// Properties whose string values are IRIs even without a term definition
 /// that says so.
 fn iri_valued(p: &str) -> bool {
-    if p.starts_with(ns::PROSE) {
-        return true;
+    if let Some(local) = p.strip_prefix(ns::PROSE) {
+        // `prose:closed` is a boolean; the hints name terms.
+        return local != "closed";
     }
     let local =
         |base: &str, names: &[&str]| p.strip_prefix(base).is_some_and(|l| names.contains(&l));
