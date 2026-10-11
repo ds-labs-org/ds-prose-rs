@@ -261,6 +261,7 @@
 //!         ProfileError::NoTerms => 0,
 //!         ProfileError::UnsupportedFormat => 0,
 //!         ProfileError::LimitExceeded { .. } => 0,
+//!         ProfileError::Turtle { .. } => 0,
 //!         _ => 1,
 //!     }
 //! }

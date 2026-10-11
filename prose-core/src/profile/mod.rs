@@ -76,6 +76,13 @@ impl ProfileVocab {
         }
     }
 
+    /// Reads a profile written in Turtle.
+    #[cfg(feature = "turtle")]
+    pub fn parse_turtle(text: &str, limits: &ProfileLimits) -> Result<ProfileVocab, ProfileError> {
+        let _ = (text, limits);
+        Err(ProfileError::UnsupportedFormat)
+    }
+
     /// As [`ProfileVocab::parse`], for a value that is already parsed.
     pub fn from_value(v: &Value, limits: &ProfileLimits) -> Result<ProfileVocab, ProfileError> {
         let parsed = jsonld::read(v, limits)?;
@@ -292,7 +299,10 @@ impl Default for ProfileLimits {
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProfileError {
-    TooLarge { bytes: usize, limit: usize },
+    TooLarge {
+        bytes: usize,
+        limit: usize,
+    },
     Json(String),
     LooksLikeHtml,
     ContextOnly,
@@ -301,6 +311,9 @@ pub enum ProfileError {
     NoTerms,
     UnsupportedFormat,
     LimitExceeded(&'static str),
+    /// The text was read as Turtle (the `turtle` feature) and is not valid
+    /// Turtle.
+    Turtle(String),
 }
 
 impl std::fmt::Display for ProfileError {
@@ -335,6 +348,7 @@ impl std::fmt::Display for ProfileError {
                 "no ODRL terms found: a profile declares terms typed odrl:Action, odrl:LeftOperand, odrl:Operator, odrl:RightOperand or odrl:ConflictTerm"
             ),
             ProfileError::UnsupportedFormat => write!(f, "{UNSUPPORTED}"),
+            ProfileError::Turtle(e) => write!(f, "{e}"),
             ProfileError::LimitExceeded(what) => write!(
                 f,
                 "the profile goes past the reader's limit {what}, so none of it was read; raise ProfileLimits::{what} for a profile you trust"

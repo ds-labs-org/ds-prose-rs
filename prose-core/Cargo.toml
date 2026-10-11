@@ -13,7 +13,18 @@ keywords = ["odrl", "json-ld", "policy", "prose"]
 # preserve_order is unified across the whole build: it also changes the host's
 # own serde_json::Map ordering. Documented in README.md (Limits).
 serde_json = { version = "1", features = ["preserve_order"] }
+# Only with the `turtle` feature: Turtle is parsed into the same private
+# triple list as JSON-LD. The versions ds-odrl-engine-rs already ships to wasm.
+oxttl = { version = "0.2.4", optional = true, default-features = false }
+oxrdf = { version = "0.3.4", optional = true, default-features = false }
+
+# oxrdf names blank nodes with `rand`, which needs a browser random source on
+# wasm32-unknown-unknown. Cargo.lock keeps oxrdf on rand 0.8 (oxrdf accepts
+# 0.8 and 0.9), whose getrandom 0.2 takes it from the `js` feature; rand 0.9's
+# getrandom 0.3 would also need a `--cfg getrandom_backend` rustflag.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { version = "0.2", features = ["js"], optional = true }
 
 [features]
 # Read profiles written in Turtle. Off by default.
-turtle = []
+turtle = ["dep:oxttl", "dep:oxrdf", "dep:getrandom"]

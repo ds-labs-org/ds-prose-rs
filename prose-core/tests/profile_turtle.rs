@@ -1,0 +1,187 @@
+//! Profiles written in Turtle (the `turtle` feature): read into the same
+//! triple list as JSON-LD, so a profile and its JSON-LD twin are the same
+//! vocabulary, under the same limits.
+#![cfg(feature = "turtle")]
+use prose_core::profile::{ProfileError, ProfileLimits, ProfileVocab, TermKind};
+
+const ODRL: &str = "http://www.w3.org/ns/odrl/2/";
+
+fn profile_text(name: &str) -> String {
+    std::fs::read_to_string(format!(
+        "{}/tests/profiles/{name}",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .unwrap()
+}
+
+fn limits(f: impl FnOnce(&mut ProfileLimits)) -> ProfileLimits {
+    let mut l = ProfileLimits::default();
+    f(&mut l);
+    l
+}
+
+#[test]
+fn turtle_equals_its_jsonld_twin() {
+    let ttl = ProfileVocab::parse(&profile_text("research.ttl")).unwrap();
+    let jsonld = ProfileVocab::parse(&profile_text("research.jsonld")).unwrap();
+    assert!(ttl.warnings().is_empty(), "{:?}", ttl.warnings());
+    assert_eq!(ttl.terms().count(), 14);
+    assert_eq!(ttl, jsonld);
+    assert_eq!(ttl.summary(), jsonld.summary());
+    let explicit =
+        ProfileVocab::parse_turtle(&profile_text("research.ttl"), &ProfileLimits::default())
+            .unwrap();
+    assert_eq!(explicit, jsonld);
+}
+
+#[test]
+fn turtle_is_recognised_from_its_first_characters() {
+    let body = format!("<https://example.org/a> a <{ODRL}Action> .\n");
+    for text in [
+        format!("@prefix odrl: <{ODRL}> .\n<https://example.org/a> a odrl:Action ."),
+        format!("PREFIX odrl: <{ODRL}>\n<https://example.org/a> a odrl:Action ."),
+        format!("# a comment\n{body}"),
+        format!("\u{FEFF}{body}"),
+        body.clone(),
+    ] {
+        let v = ProfileVocab::parse(&text).unwrap_or_else(|e| panic!("{text:?}: {e}"));
+        assert_eq!(
+            v.term("https://example.org/a").map(|t| t.kinds.clone()),
+            Some(vec![TermKind::Action]),
+            "{text:?}"
+        );
+    }
+}
+
+#[test]
+fn markup_and_rdf_xml_are_still_refused() {
+    let html = profile_text("hostile/landing.html");
+    assert_eq!(ProfileVocab::parse(&html), Err(ProfileError::LooksLikeHtml));
+    assert_eq!(
+        ProfileVocab::parse("<html><body>x</body></html>"),
+        Err(ProfileError::LooksLikeHtml)
+    );
+    assert_eq!(
+        ProfileVocab::parse("<?xml version=\"1.0\"?><rdf:RDF/>"),
+        Err(ProfileError::UnsupportedFormat)
+    );
+}
+
+#[test]
+fn turtle_syntax_error_is_reported_not_guessed() {
+    let missing_dot = format!("@prefix odrl: <{ODRL}> .\n<https://example.org/a> a odrl:Action");
+    let e = ProfileVocab::parse(&missing_dot).unwrap_err();
+    assert!(matches!(e, ProfileError::Turtle(_)), "{e:?}");
+    assert!(e.to_string().contains("not valid Turtle"), "{e}");
+
+    let prose = ProfileVocab::parse("Research data profile, version 1").unwrap_err();
+    assert!(matches!(prose, ProfileError::Turtle(_)), "{prose:?}");
+
+    // A relative IRI with no @base cannot be made absolute.
+    let relative = format!("<train> a <{ODRL}Action> .");
+    assert!(matches!(
+        ProfileVocab::parse(&relative),
+        Err(ProfileError::Turtle(_))
+    ));
+    let based = format!("@base <https://example.org/p/> .\n<train> a <{ODRL}Action> .");
+    let v = ProfileVocab::parse(&based).unwrap();
+    assert!(v.term("https://example.org/p/train").is_some());
+}
+
+#[test]
+fn turtle_too_large_before_parse() {
+    let text = "@prefix x: <".repeat(20);
+    assert_eq!(
+        ProfileVocab::parse_with(&text, &limits(|l| l.max_bytes = 100)),
+        Err(ProfileError::TooLarge {
+            bytes: 240,
+            limit: 100
+        })
+    );
+    assert_eq!(
+        ProfileVocab::parse_turtle(&text, &limits(|l| l.max_bytes = 100)),
+        Err(ProfileError::TooLarge {
+            bytes: 240,
+            limit: 100
+        })
+    );
+}
+
+#[test]
+fn turtle_limits_terms_and_values_per_key() {
+    let text = profile_text("research.ttl");
+    assert_eq!(
+        ProfileVocab::parse_with(&text, &limits(|l| l.max_terms = 2)),
+        Err(ProfileError::LimitExceeded("max_terms"))
+    );
+    let labels = ["a", "b", "c", "d", "e"]
+        .iter()
+        .map(|l| format!("\"label {l}\"@{l}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let text = format!(
+        "<https://example.org/t> a <{ODRL}Action> ; <http://www.w3.org/2000/01/rdf-schema#label> {labels} ."
+    );
+    let v = ProfileVocab::parse_with(&text, &limits(|l| l.max_values_per_key = 3)).unwrap();
+    assert_eq!(
+        v.term("https://example.org/t")
+            .unwrap()
+            .label
+            .iter()
+            .count(),
+        3
+    );
+    assert!(
+        v.warnings().iter().any(|w| w.contains("first 3 values")),
+        "{:?}",
+        v.warnings()
+    );
+}
+
+#[test]
+fn turtle_hostile_text_is_plain() {
+    let text = format!(
+        "<https://example.org/t> a <{ODRL}Action> ;\n  <http://www.w3.org/2000/01/rdf-schema#label> \"\\u202Eevil <b>tune</b> &amp; more\"@EN ."
+    );
+    let v = ProfileVocab::parse(&text).unwrap();
+    let t = v.term("https://example.org/t").unwrap();
+    assert_eq!(
+        t.label.iter().collect::<Vec<_>>(),
+        vec![(Some("en"), "evil tune & more")]
+    );
+}
+
+#[test]
+fn turtle_blank_node_subject_is_not_a_term() {
+    let text = format!(
+        "[] a <{ODRL}Action> .\n<https://example.org/a> a <{ODRL}Action> ; <{ODRL}includedIn> [ a <{ODRL}Action> ] ."
+    );
+    let v = ProfileVocab::parse(&text).unwrap();
+    let iris: Vec<_> = v.terms().map(|t| t.iri.as_str()).collect();
+    assert_eq!(iris, vec!["https://example.org/a"]);
+}
+
+#[test]
+fn turtle_deep_nesting_does_not_overflow() {
+    std::thread::Builder::new()
+        .stack_size(1 << 20)
+        .spawn(|| {
+            let n = 50_000;
+            let p = "<https://example.org/p>";
+            let mut text =
+                format!("<https://example.org/t> a <{ODRL}Action> .\n<https://example.org/s> {p} ");
+            text.push_str(&format!("[ {p} ").repeat(n));
+            text.push_str(&"] ".repeat(n));
+            text.push_str(".\n<https://example.org/u> ");
+            text.push_str(p);
+            text.push(' ');
+            text.push_str(&"( ".repeat(n));
+            text.push_str(&") ".repeat(n));
+            text.push_str(".\n");
+            let v = ProfileVocab::parse(&text).unwrap();
+            assert!(v.term("https://example.org/t").is_some());
+        })
+        .unwrap()
+        .join()
+        .expect("the Turtle reader overflowed its stack or panicked");
+}
