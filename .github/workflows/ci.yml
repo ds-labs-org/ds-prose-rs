@@ -56,6 +56,12 @@ jobs:
           cargo test -p prose-core --locked
           cargo test -p prose-core --features turtle --locked
 
+      # A time budget for strict validation (building the index, then one
+      # large policy). Ignored in the debug run above, where it would measure
+      # the wrong thing; here it runs optimised.
+      - name: Strict validation time budget
+        run: cargo test -p prose-core --release --locked --test validate_perf -- --ignored
+
       # Each feature combination a consumer can pick must at least compile:
       # the host-side SSR build, and the browser build the site uses.
       - name: Feature builds

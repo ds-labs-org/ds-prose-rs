@@ -14,6 +14,11 @@
 //! (a [`SharedWording`]) for `<OdrlProse>`, [`EditConfig::with_wording`] for
 //! [`OdrlProseView`]. Without one, both render exactly as before 0.4.
 //!
+//! Strict validation is opt-in too: [`OdrlProseProps::validator`] with
+//! `violations` shows the findings and the verdict under the prose, and
+//! [`EditConfig::with_strict`] marks them in the editor (see [`edit`]).
+//! Without a validator, nothing is validated or rendered for it.
+//!
 //! [`OdrlProseView`] is the editing counterpart: the same sentences, with an
 //! Edit mode (see [`edit`]).
 pub mod edit;

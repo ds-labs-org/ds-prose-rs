@@ -12,6 +12,24 @@
 //! Every finding names its rule ([`RuleId`]); the catalogue ([`RULES`]) says
 //! which tier a rule belongs to and the authority behind it, so a reader
 //! can tell what the standard requires from what is a ds-prose convention.
+//!
+//! A verdict is `Conforms`, `Violations` or `Incomplete`; incomplete (a
+//! declared profile is not loaded, say) is never a pass and never a guessed
+//! error. The `odrl.*` tier of the Information Model's own requirements is
+//! off until [`Options::structural`] switches it on. A report serialises as
+//! `ds-prose/validation-report@1` ([`Report::to_json`]).
+//!
+//! ```
+//! use prose_core::profile::Wording;
+//! use prose_core::validate::{Options, Verdict, validate_json};
+//!
+//! let policy = r#"{"@type":"Set","profile":"https://example.org/p",
+//!   "permission":[{"action":"use","target":"https://example.org/a"}]}"#;
+//! // The policy declares a profile that is not loaded: not a pass.
+//! let report = validate_json(policy, &Wording::default(), &Options::strict());
+//! assert_eq!(report.verdict, Verdict::Incomplete);
+//! assert!(!report.conforms());
+//! ```
 use crate::edit::{EditDoc, Issue, IssueTarget, NodeId, Severity};
 use crate::profile::{OdrlVocab, Wording};
 use std::collections::BTreeMap;

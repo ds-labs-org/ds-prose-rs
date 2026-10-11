@@ -11,12 +11,13 @@ to accept a policy but should not have to read JSON-LD to do it.
 |---|---|
 | `prose-core/` | reads ODRL JSON-LD, builds a structured `Document`. No UI framework |
 | `prose-core/src/edit/` | the edit layer: an addressable policy model, edit events, edit rules, a JSON-LD reader and writer, and the edit sentence templates |
+| `prose-core/src/validate/` | advisory and strict validation of a policy against the loaded profiles: the rule catalogue, the verdict and the `ds-prose/validation-report@1` JSON (see Strict validation) |
 | `prose-core/src/profile/` | reads an ODRL profile (JSON-LD, or Turtle with the `turtle` feature) into a `ProfileVocab`; `Wording` carries the loaded profiles to the reader and the editor |
 | `prose-yew/` | `<OdrlProse json={...} />`: lays a `Document` out as semantic HTML, with a glossary of profile terms. `<OdrlProseView>`: the same sentences for documents written with bare keys, read or edited |
 | `demo/` | Trunk app: paste a policy and read it, or edit the prose itself; a Profile field loads a profile by paste, preset, file or URL |
 | `demo/profiles/` | profile presets compiled into the demo only (the trimmed W3C ODRL 2.2 vocabulary) |
-| `prose-wasm/` | wasm-bindgen bridge that mounts the read-only `<OdrlProse>` into any DOM element, with `setProfile`; `prose-wasm/npm/` holds the metadata of the npm package |
-| `prose-angular/` | Angular wrapper, `<ds-odrl-prose [json] [profile]>`, over `prose-wasm` (read-only; no edit mode); built with ng-packagr |
+| `prose-wasm/` | wasm-bindgen bridge that mounts the read-only `<OdrlProse>` into any DOM element, with `setProfile`, plus `validate` and the `ds-prose-validate` command; `prose-wasm/npm/` holds the metadata of the npm package |
+| `prose-angular/` | Angular wrapper, `<ds-odrl-prose [json] [profile]>`, over `prose-wasm` (read-only; no edit mode), with strict validation inputs; built with ng-packagr |
 | `demo-angular/` | Angular demo app; installs the two packed npm packages, like a downstream app |
 
 ```rust
@@ -170,6 +171,7 @@ can add four properties to a left operand, in the namespace
 | `prose:rightOperand` | suggested values; their `skos:broader` or `rdfs:subClassOf` descendants within the profile are offered under them, indented |
 | `prose:datatype` | an xsd datatype IRI: the value slot's placeholder, and an advisory lexical check (integer, decimal, boolean, date, dateTime, duration) |
 | `prose:unit` | unit suggestions |
+| `prose:closed` | `true` makes the four properties above binding on this left operand, in strict validation only (see Strict validation) |
 
 ```json
 { "@context": { "odrl": "http://www.w3.org/ns/odrl/2/",
@@ -182,7 +184,9 @@ can add four properties to a left operand, in the namespace
 
 The extension only orders and groups suggestions. Every other operator and
 any free value stay available, and nothing a profile says through it is
-enforced. It is read on left operands only. A profile without it still
+enforced, unless the left operand also says `prose:closed true` and the host
+asks for strict validation (see Strict validation). It is read on left
+operands only. A profile without it still
 fills the editor's lists with all its actions, operands, operators, values
 and conflict terms, just not narrowed per operand. Other tools ignore these
 triples, as RDF allows.
@@ -220,6 +224,268 @@ A profile is third-party input, often fetched from a URL the user typed.
   the user asks it to load a URL (CORS, no credentials, 15 s, 4 MiB).
 - **No spoofing of core terms** (see above): a profile can relabel its own
   terms only.
+
+## Strict validation
+
+`prose_core::validate` checks a policy against the profiles a `Wording`
+holds. It has two modes.
+
+- **Advisory** (the default, and what `edit::check_profile` has always said):
+  a profile widens and annotates, and nothing it says about a policy is an
+  error. `check_profile` is this mode, byte for byte.
+- **Strict** reads the vocabulary as closed: ODRL plus the loaded profiles is
+  every term there is. A term that resolves nowhere is an error, and so is a
+  term used where its kind does not belong. Strict is opt-in; it never
+  changes what `render` or the editor do unless the host asks for it.
+
+```rust
+use prose_core::validate::{Options, Verdict, validate_json};
+
+let report = validate_json(policy_json, &wording, &Options::strict());
+match report.verdict {
+    Verdict::Conforms => {}
+    Verdict::Violations => { /* report.findings, in document order */ }
+    Verdict::Incomplete => { /* report.gaps: what could not be checked */ }
+    _ => {}
+}
+```
+
+For many policies against the same profiles, build a `Validator` once
+(`Validator::new(Arc<Wording>, Options)`): it indexes the profiles at
+construction instead of on every call. `Validator::validate` takes an
+`EditDoc`, `validate_json` a text, and neither panics on hostile input; a
+text that is not a policy is an `input.unreadable` finding.
+
+### The verdict
+
+| verdict | when |
+|---|---|
+| `conforms` | no error and nothing left unchecked |
+| `violations` | at least one error that does not rest on something unchecked |
+| `incomplete` | no such error, and a gap: something could not be checked |
+
+Incomplete is never a pass and never a guessed error. The vocabulary is
+incomplete when the policy declares a `profile` that is not loaded, when a
+loaded profile builds (`owl:imports`, `prof:isProfileOf`) on one that is not,
+or when a node could not be checked (a locked or opaque node, a remote
+`inheritFrom` parent). While the vocabulary is incomplete,
+`profile.unknown-term`, `profile.wrong-kind` and `profile.not-declared` are
+not reported: a missing profile must not turn every term into a false error.
+Nothing is fetched; declared and imported profiles are the host's to load.
+With no profile at all, strict is meaningful: the vocabulary is ODRL alone,
+`ex:x` is an error, and a policy that declares a profile is incomplete.
+
+Which ODRL terms count as defined without a profile is `Options::odrl_vocabulary`:
+the Core plus the Common Vocabulary (the default), or the Core only.
+`profile::odrl_terms()` is the table of names and kinds (no definitions).
+
+### Rules
+
+Every finding names its rule. Ids are frozen once released. Each rule
+carries its tier and the authority behind it (`RuleInfo`, `RULES`), so a
+reader can tell what the standard requires from what is a ds-prose
+convention:
+
+- **standard**: the ODRL Information Model (IM) states it as a requirement;
+- **standard-derived**: the IM states a requirement about vocabulary, and the
+  rule is its reading under a closed world, which the IM does not itself call
+  for;
+- **convention**: a ds-prose convention, not a standard;
+- **input**: about the input or the reader, not the policy;
+- **heuristic**: a likely mistake no standard rules out; opt-in only.
+
+What the IM says that these rules lean on, quoted from the W3C Recommendation: "An ODRL Policy must either: Only use
+terms defined in the ODRL Core Vocabulary, or Use an ODRL Profile that
+declares the supported vocabulary used by expressions in the Policy", and in
+the latter case the `profile` property MUST indicate the profile's IRI
+(IM §2.1). A
+processor MUST understand the profile a policy identifies, and MUST stop if it
+does not recognise it (IM §3.2). From these, the `profile.*` rules follow
+only once the vocabulary is taken as closed.
+
+Levels read advisory, then strict. "Closed" is a left operand a profile
+marks `prose:closed` (below). "Refusable" means the editor may refuse an edit
+that makes this finding, and only under `StrictEdit::RefuseTerms`.
+
+| id | what | levels | basis | refusable |
+|---|---|---|---|---|
+| <a id="rule-profile-not-loaded"></a>`profile.not-loaded` | a declared `profile` is not loaded (ODRL core always counts as loaded); a gap | warning, error | standard-derived | no |
+| <a id="rule-profile-import-not-loaded"></a>`profile.import-not-loaded` | a loaded profile builds on one that is not loaded; a gap | off, warning | standard-derived | no |
+| <a id="rule-profile-undeclared-in-namespace"></a>`profile.undeclared-in-namespace` | a term in a loaded profile's namespace that no loaded profile declares | warning, error | standard-derived | yes |
+| <a id="rule-profile-unknown-term"></a>`profile.unknown-term` | an action, left operand, operator, unit, conflict value or policy type that neither ODRL nor a loaded profile defines | off, error | standard-derived | yes |
+| <a id="rule-profile-wrong-kind"></a>`profile.wrong-kind` | a term used where its kind does not belong, such as a left operand written as an action | off, error | standard-derived | yes |
+| <a id="rule-profile-not-declared"></a>`profile.not-declared` | a term from a loaded profile the policy does not list in `profile` | off, error | standard-derived | no (a fix is offered) |
+| <a id="rule-profile-conflict-term"></a>`profile.conflict-term` | a conflict value that is not `perm`, `prohibit`, `invalid` or a conflict term of a loaded profile (the IM says SHOULD) | off, error | standard-derived | yes |
+| <a id="rule-profile-unbound-prefix"></a>`profile.unbound-prefix` | a compact IRI that only a profile's own prefixes expand; a JSON-LD processor would read another IRI | off, error | standard-derived | yes |
+| <a id="rule-profile-deprecated-term"></a>`profile.deprecated-term` | a term the profile marks `owl:deprecated`; still defined, so a warning (an error with `deny_deprecated`) | warning, warning | convention | no |
+| <a id="rule-odrl-policy-uid"></a>`odrl.policy-uid` | a policy without a uid (IM §2.1) | off, error | standard | no |
+| <a id="rule-odrl-no-rule"></a>`odrl.no-rule` | a policy without a permission, prohibition or obligation (IM §2.1) | off, error | standard | no |
+| <a id="rule-odrl-offer-assigner"></a>`odrl.offer-assigner` | an Offer rule without an assigner (IM §2.1.2, §2.7.1) | off, error | standard | no |
+| <a id="rule-odrl-agreement-parties"></a>`odrl.agreement-parties` | an Agreement rule without an assigner or an assignee (IM §2.1.3, §2.7.1) | off, error | standard | no |
+| <a id="rule-odrl-rule-target"></a>`odrl.rule-target` | a permission or prohibition without a target (IM §2.6.1, §2.6.2, §2.7.1) | off, error | standard | no |
+| <a id="rule-odrl-rule-action"></a>`odrl.rule-action` | a rule without an action (IM §2.6, §2.7.1) | off, error | standard | no |
+| <a id="rule-odrl-constraint-shape"></a>`odrl.constraint-shape` | a constraint without a left operand, an operator, or exactly one of `rightOperand` and `rightOperandReference` (IM §2.5.1) | off, error | standard | no |
+| <a id="rule-odrl-set-operator-cardinality"></a>`odrl.set-operator-cardinality` | several right operand values with an operator that is not set-based (IM §2.5.1) | off, error | standard | no |
+| <a id="rule-odrl-consequence-nesting"></a>`odrl.consequence-nesting` | a consequence on a consequence, or a remedy that has a consequence (IM §2.6.6, §2.6.7) | off, error | standard | no |
+| <a id="rule-odrl-inheritance-cycle"></a>`odrl.inheritance-cycle` | policies in the document that inherit from each other in a circle (IM §2.9) | off, error | standard | no |
+| <a id="rule-prose-operator-not-allowed"></a>`prose.operator-not-allowed` | an operator outside the left operand's `prose:operator` | info, info; closed: error | convention | closed only |
+| <a id="rule-prose-value-not-allowed"></a>`prose.value-not-allowed` | an IRI value outside `prose:rightOperand` and the values narrower than it | off, info; closed: error | convention | no |
+| <a id="rule-prose-iri-expected"></a>`prose.iri-expected` | a plain string that names an allowed value where an IRI is expected | off, off; closed: error | convention | no (a fix is offered) |
+| <a id="rule-prose-unit-not-allowed"></a>`prose.unit-not-allowed` | a unit outside `prose:unit` | off, info; closed: error | convention | closed only |
+| <a id="rule-prose-datatype-lexical"></a>`prose.datatype-lexical` | a literal outside the lexical space of `prose:datatype` | info, info; closed: error | convention | no |
+| <a id="rule-prose-datatype-conflict"></a>`prose.datatype-conflict` | a literal typed with another datatype than `prose:datatype` | off, warning; closed: error | convention | no |
+| <a id="rule-prose-ill-typed-literal"></a>`prose.ill-typed-literal` | a typed literal outside its own datatype's lexical space (XSD 1.1 Part 2; RDF 1.1 Concepts §3.3) | off, error | convention | no |
+| <a id="rule-input-unreadable"></a>`input.unreadable` | the input is not a policy; always an error | error, error | input | no |
+| <a id="rule-input-unchecked"></a>`input.unchecked` | something the validator could not check; a gap (an error with `fail_closed`) | off, warning | input | no |
+| <a id="rule-input-reader-note"></a>`input.reader-note` | a note the reader made while reading | off, info | input | no |
+| <a id="rule-heuristic-ordered-on-unordered"></a>`heuristic.ordered-on-unordered` | `gt`, `gteq`, `lt` or `lteq` on an IRI or boolean value; the IM states no requirement | off, off | heuristic | no |
+
+Tiers. Strict turns on `profile.*`, `prose.*` and `input.*`. The `odrl.*`
+tier (the IM's own structural requirements) is **off by default**, even in
+strict, and `Options::structural(true)` switches it on: a Dataspace Protocol
+catalog offer is often written without the assigner or target the IM asks
+for, so the tier must not block a profile user by default. The heuristic rule
+is switched on only with `Options::level`. `Options::level(rule, level)`
+sets any rule's level, over everything else (`input.unreadable` stays an
+error); `fail_closed(true)` makes `input.unchecked` an error and
+`deny_deprecated(true)` does the same for `profile.deprecated-term`.
+
+The severity of a rule is resolved in this order: a per-rule level; off if
+the rule is newer than the pinned ruleset; off if it is an `odrl.*` rule and
+`structural` is not set; the catalogue's level for the mode; for `prose.*`,
+the closed column when the left operand is closed.
+
+**Ruleset pinning.** `RULESET` is the ruleset this build implements (1), and
+each rule records `since_ruleset`. `Options::ruleset(n)` checks only the rules
+of ruleset `n` and earlier, so a CI that pins `n` does not turn red when a
+later release adds a rule to a policy that did not change. Rule ids are never
+renamed or reused.
+
+### `prose:closed`
+
+The `prose:` hints keep their meaning, "suggested, never exclusive", in strict
+mode too. A left operand becomes closed only through an explicit marker in the
+`prose:` namespace, `prose:closed true`, one per left operand
+(`OperandHints::closed`):
+
+```json
+{ "@id": "ex:researchPurpose", "@type": "odrl:LeftOperand",
+  "prose:closed": true,
+  "prose:operator": [ { "@id": "odrl:eq" } ],
+  "prose:rightOperand": [ { "@id": "ex:academic" } ] }
+```
+
+On a closed operand the operator, values (with their narrower values), unit
+and datatype the profile names are binding, and the `prose.*` rules above
+are errors there. On an operand that is not closed, the same rules stay at
+the informational level they have in advisory mode. This is a ds-prose
+convention. ODRL has no such marker, and other tools ignore the triple.
+
+### The report
+
+`Report::to_json` is `ds-prose/validation-report@1`, the same bytes from the
+Rust crates, the wasm package, the Angular wrapper and the command line. It is
+deterministic: no timestamps, findings in document order, keys in a fixed
+order. A change to `@1` may only add keys; removing or renaming one is `@2`.
+
+```json
+{ "schema": "ds-prose/validation-report@1",
+  "tool": {"name": "ds-prose-rs", "version": "0.4.0"},
+  "mode": "strict",
+  "tiers": ["profile", "prose", "input"],
+  "ruleset": 1,
+  "verdict": "violations",
+  "vocabulary": {"odrl": "common",
+                 "profiles": [{"iri": "...", "title": "...", "version": "..."}]},
+  "gaps": [{"rule": "profile.not-loaded", "detail": "..."}],
+  "counts": {"error": 1, "warning": 0, "info": 0},
+  "findings": [{
+    "rule": "profile.unknown-term",
+    "tier": "profile",
+    "basis": "standard-derived",
+    "severity": "error",
+    "message": "...",
+    "target": {"kind": "slot", "path": "policy[0].permission[0].action[0]#name"},
+    "pointer": null,
+    "term": {"written": "foo:bar", "iri": "https://.../bar"},
+    "profile": null,
+    "expected": {"kinds": ["action"], "operators": [], "values": [], "units": [],
+                 "datatype": null, "closed": false},
+    "fixes": [{"label": "...", "safe": true, "replacement": "..."}],
+    "fingerprint": "16 hex digits"
+  }] }
+```
+
+- `verdict` is `conforms`, `violations` or `incomplete`; `gaps` lists the
+  findings that make a verdict incomplete, and they are also in `findings`.
+- `target.kind` is `doc`, `node`, `slot` or `list`; `path` is the edit layer's
+  path (empty for `doc`). `pointer` is reserved for an RFC 6901 pointer into
+  the input and is `null` today.
+- `fingerprint` is FNV-1a 64 over the rule id, the path and the term as
+  written (the message when there is no term). Reformatting the file or
+  reordering its keys does not change it, so it works as a baseline key.
+- `fixes[].replacement` is a compact IRI only when the policy binds the
+  prefix, otherwise the full IRI. In Rust a `Fix` also carries its
+  `EditEvent`s, with `expect` ids, so a fix applied to a document that moved
+  on fails as stale.
+- `RuleInfo` and `RULES` (and `rules()` in the wasm package) give the same
+  catalogue as data, for a UI that lists the rules.
+
+### Command line
+
+`@ds-labs/prose-wasm` installs `ds-prose-validate`, a Node bin that runs the
+same engine (the wasm module), for CI:
+
+```bash
+npx ds-prose-validate --strict --profile research.ttl policy.json
+npx ds-prose-validate --strict --structural --format json --profile p.jsonld a.json b.json
+```
+
+Options: `--profile` (repeatable), `--strict`, `--structural`,
+`--fail-closed`, `--deny-deprecated`, `--odrl common|core`, `--ruleset <n>`,
+`--rule <id>=<off|info|warning|error>` (repeatable), `--format text|json`,
+`--allow-incomplete`. A policy of `-` is read from standard input. Without
+`--strict` it is the advisory reading, where nothing is an error.
+
+| exit code | meaning |
+|---|---|
+| 0 | every policy conforms |
+| 1 | at least one policy has violations |
+| 2 | usage error, or a policy or profile that cannot be read |
+| 3 | no violations, but incomplete |
+
+`--allow-incomplete` maps 3 to 0. When several apply, 2 outranks 1, and 1
+outranks 3. A profile that does not parse is exit 2, never a finding.
+`--format json` prints an array with a `{file, report, error}` per policy;
+each report is the validator's own text, unchanged. There is no native
+binary; the command is a Node script.
+
+### In the editor
+
+`EditConfig::with_strict(options)` makes the editor validate the document
+(`EditConfig::validator`, a `Validator`) and marks each finding in place, with
+a problems list; the closed comboboxes offer only the terms the validator
+admits, and `rules.defaults` is rewritten so an add button creates an
+admissible node. By default (`StrictEdit::Flag`) every edit commits and a
+violation is marked as an error: a user never loses typed text and is never
+trapped by partial input. `StrictEdit::RefuseTerms` is opt-in: through
+`EditDoc::apply_gated(ev, rules, Some(&validator))` and
+`use_prose_editor_with`, the reducer refuses, as `EditError::OutsideProfile`,
+a term written into a vocabulary slot that a refusable rule reports as an
+error there. Refusal is slot-local (it looks at the written value only, never
+at what depends on it), never applies to the empty string, to free text, to
+right operands, to structural events or to undo, and a document that already
+violates loads and stays editable. What certifies a policy is
+`Report::conforms()`, not the refusals; the demo gates its export on it.
+
+### In the browser and in Angular
+
+`@ds-labs/prose-wasm` exports `validate(policy, profiles, options?)`,
+`rules()` and `ProseValidator`, returning the report as JSON text; its
+`ProseHandle` gets `setValidation` and `report()`. `<ds-odrl-prose>` has the
+`strict`, `validation` and `showViolations` inputs, the `validationChange`
+and `validationError` outputs and a `report` signal, and
+`ProseValidatorService` validates without rendering. See the package READMEs.
 
 ## Edit mode
 
@@ -271,7 +537,7 @@ The enums that grow as the editor learns more of ODRL are `#[non_exhaustive]`,
 so adding a variant is a minor release, not a breaking one. In `prose-core`:
 `EditEvent`, `EditError`, `NewItem`, `FocusTarget`, `ListKind`, `Field`, `Step`,
 `NodeRef`, `Segment`, `SlotKind`, `ChoiceKind`, `EmptyText`, `IssueTarget`,
-`profile::TermKind` and `profile::ProfileError`. In `prose-yew`: `FocusKind`
+`profile::TermKind`, `profile::ProfileError`, `StrictEdit` and, in `validate`, `Mode`, `Verdict`, `Tier`, `Basis`, `RuleId` and `RuleInfo`. In `prose-yew`: `FocusKind`
 and `DecorationAt`. Outside the defining crate a `match` on one of them needs
 a wildcard arm with a sensible fallback. Units,
 `rightOperandReference` and `partOf` can be edited but not added today (see
@@ -298,6 +564,29 @@ Changed in 0.4 (profiles; additive except for struct literals):
   `Vocabulary::with_profiles` and `EditConfig::with_wording`. In the npm
   packages: `ProseHandle.setProfile`, and on `<ds-odrl-prose>` the `profile`
   input and the `profileLoaded` and `profileError` outputs.
+- New, strict validation (opt-in; advisory output is unchanged): in
+  `prose-core`, the `validate` module (`Options`, `Validator`, `validate`,
+  `validate_json`, `Report`, `Finding`, `RULES`), `profile::odrl_terms`,
+  `OperandHints::closed`, `EditDoc::apply_gated`, `StrictEdit` and
+  `EditError::OutsideProfile`. In `prose-yew`: `EditConfig::with_strict`,
+  `use_prose_editor_with`, `use_validation`, `OdrlProseProps::validator` and
+  `violations`. In the npm packages: `validate`, `rules`, `ProseValidator`,
+  `setValidation`, `report()` and `setProfiles`; on `<ds-odrl-prose>` the
+  `strict`, `validation` and `showViolations` inputs, the `validationChange`
+  and `validationError` outputs, the `report` signal and
+  `ProseValidatorService`; and the `ds-prose-validate` command.
+- **`EditConfig.validator` is a breaking change for a struct literal.**
+  `EditConfig` gained the field `validator: Option<Validator>`, so a literal
+  of it needs `validator: None`. Code that builds it with
+  `..Default::default()` or with the `with_*` methods is unaffected. This
+  rides the 0.4 release, with `wording`. `Labels` also gained the strict
+  fields (`not_allowed_option`, `not_allowed_term`, `did_you_mean`,
+  `problems_heading`, `go_to`, `status_conforms`, `status_violations`,
+  `status_incomplete` and `counts`), with the same remedy.
+- **A new error variant.** `EditError::OutsideProfile` is only produced by
+  `apply_gated` under `StrictEdit::RefuseTerms`; `EditError` is
+  `#[non_exhaustive]`, so a `match` with a wildcard arm is unaffected.
+  `EditRules` and `EditDoc::apply` are unchanged.
 - **No profile reads exactly as before.** `render`, `render_value` and
   `sentences` are `render_with`, `render_value_with` and `sentences_with`
   with `Wording::default()`; the v0.1 goldens and the SSR snapshots are
@@ -543,6 +832,15 @@ only through the `"plaintext-only"` path.
 - **No JSON-LD processing.** A custom `@context` that renames ODRL terms is not
   followed. Terms it does not recognise are listed in `Document::warnings`
   (shown by the component), never silently dropped or guessed at.
+- **Strict validation is a reading of the vocabulary, not a proof of
+  meaning.** It does not fetch a declared profile, an `owl:imports` target,
+  a remote `@context` or a remote `inheritFrom` parent; each is a gap and the
+  verdict is `incomplete`. It does not decide whether a constraint is
+  satisfied (that needs runtime claims, and belongs to a policy engine). The
+  `profile.*` rules are this crate's reading of IM §2.1 and §3.2 under a
+  closed world, and the `prose.*` rules a ds-prose convention; the report's
+  `basis` says which. Report pointers (RFC 6901), SARIF output and a
+  `--baseline` for the command are not there yet.
 - **Reading, not evaluating.** PROSE says what a policy states. It does not
   decide whether a request complies; that is a policy engine's job.
 - **English only** (the edit templates too), and action phrasing assumes the action is a verb that takes
@@ -567,10 +865,10 @@ for new advisories:
 
 | job | gates |
 |---|---|
-| `gates` | `cargo fmt --check`, `clippy -D warnings`, `cargo test`, `cargo doc` with warnings denied, `prose-core` tested without and with `turtle`, every feature build (host, `ssr`, `csr` and `turtle` on wasm32) |
+| `gates` | `cargo fmt --check`, `clippy -D warnings`, `cargo test`, `cargo doc` with warnings denied, `prose-core` tested without and with `turtle`, the ignored time-budget test of strict validation run in release (`validate_perf`), every feature build (host, `ssr`, `csr` and `turtle` on wasm32) |
 | `browser` | wasm clippy, and the Edit-mode DOM tests, the demo's tab and profile tests and the `prose-wasm` tests mounted in headless Chrome; the `wasm-bindgen-cli` version is read from `Cargo.lock` |
 | `demo` | release `trunk build` under the Pages sub-path, then `scripts/smoke-demo.sh` boots it in Chrome and fails unless a policy rendered and the Profile field is there |
-| `angular` | `scripts/build-npm-packages.sh` builds and packs both npm packages, `scripts/check-npm-packages.mjs` checks the tarballs, `npm publish --dry-run`, the wrapper's typecheck and node tests, then `demo-angular` is built from the tarballs only and booted in Chrome |
+| `angular` | `scripts/build-npm-packages.sh` builds and packs both npm packages, `scripts/check-npm-packages.mjs` checks the tarballs, the `ds-prose-validate` tests (`node --test scripts/test/*.test.mjs`, and every exit code through the bin of the packed tarball), `npm publish --dry-run`, the wrapper's typecheck and node tests, then `demo-angular` is built from the tarballs only and booted in Chrome |
 | `supply-chain` | `cargo deny check` against `deny.toml`: licences, advisories, sources |
 
 `deny.toml` ignores two "unmaintained" notices that arrive only through
@@ -588,9 +886,13 @@ Two packages are published to npmjs under the `@ds-labs` scope:
 | [`@ds-labs/prose-wasm`](prose-wasm/npm/README.md) | the wasm and its JavaScript glue; framework-neutral | any JavaScript host |
 | [`@ds-labs/prose-angular`](prose-angular/README.md) | `<ds-odrl-prose [json] [profile]>`, Angular 19 or newer | Angular apps; depends on the wasm package |
 
+`@ds-labs/prose-wasm` also installs the `ds-prose-validate` command (see
+Strict validation), and both packages can validate a policy against profiles;
+the rendering itself is read-only.
+
 An Angular app needs `npm i @ds-labs/prose-angular` and one `angular.json`
 asset entry pointing at the wasm file inside `node_modules`; there is nothing
-to vendor or build. Both are read-only: there is no edit mode in them.
+to vendor or build. There is no edit mode in either.
 
 Both take a profile as text: `ProseHandle.setProfile(text | null)` returns
 the profile's summary as JSON and throws on a text that is not a profile,
@@ -599,14 +901,15 @@ keeping the previous one; the Angular component has a `profile` input and
 `turtle` feature, so a profile can be JSON-LD or Turtle. The packages never
 fetch it; the host does.
 
-The wasm grew in 0.4 (wasm-pack release build, `wasm-opt` off, measured on
+The wasm grew in 0.4 for profiles (wasm-pack release build, `wasm-opt` off, measured on
 2026-10-11):
 
 | `prose_wasm_bg.wasm` | bytes | gzip -9 |
 |---|---|---|
 | 0.3.1 | 488,862 | 174,680 |
 | 0.4.0 without `turtle` | 774,473 | 260,984 |
-| 0.4.0 as published, with `turtle` | 957,764 | 323,480 |
+| 0.4.0 with `turtle`, before strict validation | 957,764 | 323,480 |
+| 0.4.0 with `turtle` and strict validation (as built by `scripts/build-npm-packages.sh`, 2026-10-12) | 1,226,818 | 409,877 |
 
 The two npm packages and the Rust crates share one version number (0.4.0
 at the time of writing), so a number says which reader and renderer you have.
@@ -628,6 +931,8 @@ node scripts/check-npm-packages.mjs  # check the tarballs
 ```bash
 cargo test --workspace      # prose-core with turtle (prose-wasm turns it on)
 cargo test -p prose-core   # prose-core alone, without turtle
+cargo test -p prose-core --release --test validate_perf -- --ignored  # a time budget; ignored in debug
+node --test scripts/test/*.test.mjs   # the ds-prose-validate command, with a fake engine
 cd demo && trunk serve     # Trunk 0.22.0-beta.2+, like the other ds-labs-org demos
 ```
 

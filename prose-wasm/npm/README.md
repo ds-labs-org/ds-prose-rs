@@ -44,8 +44,9 @@ no bidi or control characters) and rendered as text. ODRL's own terms keep
 their built-in wording whatever a profile calls them. A profile may suggest
 operators and values per left operand through the ds-prose `prose:`
 extension (`https://ds-labs-org.github.io/ds-prose-rs/profile#`, a ds-prose
-convention, not ODRL); this read-only package does not use those
-suggestions. See the
+convention, not ODRL); the rendering does not use those suggestions, but
+strict validation does when a left operand is marked `prose:closed true`
+(see Validation). See the
 [ds-prose-rs README](https://github.com/ds-labs-org/ds-prose-rs#profiles).
 
 `setProfiles([text, ...])` loads several at once and returns the summaries as
@@ -80,6 +81,13 @@ adds the findings and the verdict to the rendering, and `report()` returns
 the report for the current policy and profiles (`null` while validation is
 off). The types (`ValidateOptions`, `ValidationReport`, `Finding`, `Verdict`
 and `RuleId`, the union of the rule ids) are in the package.
+
+The rules, their tiers and what each rests on (the standard, a reading of it
+under a closed world, or a ds-prose convention) are in the
+[ds-prose-rs README](https://github.com/ds-labs-org/ds-prose-rs#strict-validation);
+`rules()` returns the same catalogue as data. The `odrl.*` tier (the
+Information Model's structural requirements) is off unless `structural` is
+set.
 
 ## Command line
 
