@@ -42,10 +42,12 @@ struct Ctx {
     /// The terms this context defines; `None` is a `null` definition that
     /// removes the enclosing one.
     terms: HashMap<String, Option<Def>>,
-    vocab: Option<String>,
-    base: Option<String>,
+    /// `@vocab`, `@base` and `@language` are shared with the contexts under
+    /// this one, not copied: an empty nested context costs nothing.
+    vocab: Option<Rc<str>>,
+    base: Option<Rc<str>>,
     /// The default language of plain strings (`@language`), lower-cased.
-    language: Option<String>,
+    language: Option<Rc<str>>,
     /// The W3C ODRL context was named.
     odrl: bool,
 }
@@ -94,7 +96,7 @@ pub(crate) fn read(
         base: None,
     };
     match base {
-        Some(b) if absolute(b) => w.base = Some(b.to_string()),
+        Some(b) if absolute(b) => w.base = Some(Rc::from(b)),
         Some(b) => w.warn(format!(
             "the base IRI \"{b}\" is not absolute; relative IRIs are skipped"
         )),
@@ -149,7 +151,7 @@ struct Walker<'l> {
     blank: usize,
     cut: bool,
     /// The base the host gave, kept by a `null` context.
-    base: Option<String>,
+    base: Option<Rc<str>>,
 }
 
 impl Walker<'_> {
@@ -500,16 +502,22 @@ impl Walker<'_> {
     fn context_object(&mut self, out: &mut Ctx, o: &Obj) {
         for (k, v) in o.iter().filter(|(k, _)| k.starts_with('@')) {
             match (k.as_str(), v) {
-                ("@vocab", Value::String(s)) => out.vocab = self.expand(out, s, true),
+                // Counted once here, whether it is used or not.
+                ("@vocab", Value::String(s)) => {
+                    out.vocab = self.expand(out, s, true).map(|v| Rc::from(self.charged(v)))
+                }
                 ("@vocab", Value::Null) => out.vocab = None,
                 ("@base", Value::String(s)) => {
-                    out.base = match absolute(s) {
+                    let base = match absolute(s) {
                         true => Some(s.clone()),
                         false => out.base.as_deref().map(|b| resolve(b, s)),
-                    }
+                    };
+                    out.base = base.map(|b| Rc::from(self.charged(b)))
                 }
                 ("@base", Value::Null) => out.base = None,
-                ("@language", Value::String(l)) => out.language = Some(l.to_ascii_lowercase()),
+                ("@language", Value::String(l)) => {
+                    out.language = Some(Rc::from(l.to_ascii_lowercase()))
+                }
                 ("@language", Value::Null) => out.language = None,
                 ("@version", _) => {}
                 (k, _) => self.warn(format!("the context key \"{k}\" is not followed")),
