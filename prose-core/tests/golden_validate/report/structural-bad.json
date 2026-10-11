@@ -1,0 +1,215 @@
+{
+  "schema": "ds-prose/validation-report@1",
+  "tool": {
+    "name": "ds-prose-rs",
+    "version": "<version>"
+  },
+  "mode": "strict",
+  "tiers": [
+    "profile",
+    "odrl",
+    "prose",
+    "input"
+  ],
+  "ruleset": 1,
+  "verdict": "violations",
+  "vocabulary": {
+    "odrl": "common",
+    "profiles": []
+  },
+  "gaps": [],
+  "counts": {
+    "error": 10,
+    "warning": 0,
+    "info": 1
+  },
+  "findings": [
+    {
+      "rule": "input.reader-note",
+      "tier": "input",
+      "basis": "input",
+      "severity": "info",
+      "message": "a constraint is missing its leftOperand or operator",
+      "target": {
+        "kind": "doc",
+        "path": ""
+      },
+      "pointer": null,
+      "term": null,
+      "profile": null,
+      "expected": null,
+      "fixes": [],
+      "fingerprint": "266d259e26e3eb98"
+    },
+    {
+      "rule": "odrl.policy-uid",
+      "tier": "odrl",
+      "basis": "standard",
+      "severity": "error",
+      "message": "the policy has no uid",
+      "target": {
+        "kind": "node",
+        "path": "policy[0]"
+      },
+      "pointer": null,
+      "term": null,
+      "profile": null,
+      "expected": null,
+      "fixes": [],
+      "fingerprint": "048ce32660950627"
+    },
+    {
+      "rule": "odrl.offer-assigner",
+      "tier": "odrl",
+      "basis": "standard",
+      "severity": "error",
+      "message": "this rule of an Offer has no assigner, on the rule or on the policy",
+      "target": {
+        "kind": "node",
+        "path": "policy[0].permission[0]"
+      },
+      "pointer": null,
+      "term": null,
+      "profile": null,
+      "expected": null,
+      "fixes": [],
+      "fingerprint": "f7494e2d6ea9943a"
+    },
+    {
+      "rule": "odrl.rule-target",
+      "tier": "odrl",
+      "basis": "standard",
+      "severity": "error",
+      "message": "this permission has no target, on the rule or on the policy",
+      "target": {
+        "kind": "node",
+        "path": "policy[0].permission[0]"
+      },
+      "pointer": null,
+      "term": null,
+      "profile": null,
+      "expected": null,
+      "fixes": [],
+      "fingerprint": "8050030939fcb019"
+    },
+    {
+      "rule": "odrl.constraint-shape",
+      "tier": "odrl",
+      "basis": "standard",
+      "severity": "error",
+      "message": "this constraint has no operator",
+      "target": {
+        "kind": "node",
+        "path": "policy[0].permission[0].constraint[0]"
+      },
+      "pointer": null,
+      "term": null,
+      "profile": null,
+      "expected": null,
+      "fixes": [],
+      "fingerprint": "2f5feb59a724bc1f"
+    },
+    {
+      "rule": "odrl.set-operator-cardinality",
+      "tier": "odrl",
+      "basis": "standard",
+      "severity": "error",
+      "message": "\"eq\" compares with one value, but this constraint gives 2; use isAnyOf, isAllOf or isNoneOf for several",
+      "target": {
+        "kind": "node",
+        "path": "policy[0].permission[0].constraint[1]"
+      },
+      "pointer": null,
+      "term": null,
+      "profile": null,
+      "expected": null,
+      "fixes": [],
+      "fingerprint": "b736dd8d1be1e20a"
+    },
+    {
+      "rule": "odrl.constraint-shape",
+      "tier": "odrl",
+      "basis": "standard",
+      "severity": "error",
+      "message": "this constraint has both a rightOperand and a rightOperandReference",
+      "target": {
+        "kind": "node",
+        "path": "policy[0].permission[0].constraint[2]"
+      },
+      "pointer": null,
+      "term": null,
+      "profile": null,
+      "expected": null,
+      "fixes": [],
+      "fingerprint": "8eb94d187352c389"
+    },
+    {
+      "rule": "odrl.offer-assigner",
+      "tier": "odrl",
+      "basis": "standard",
+      "severity": "error",
+      "message": "this rule of an Offer has no assigner, on the rule or on the policy",
+      "target": {
+        "kind": "node",
+        "path": "policy[0].prohibition[0]"
+      },
+      "pointer": null,
+      "term": null,
+      "profile": null,
+      "expected": null,
+      "fixes": [],
+      "fingerprint": "3a5d0a24a73e8940"
+    },
+    {
+      "rule": "odrl.consequence-nesting",
+      "tier": "odrl",
+      "basis": "standard",
+      "severity": "error",
+      "message": "this remedy has a consequence; a remedy must not refer to a duty that has one",
+      "target": {
+        "kind": "node",
+        "path": "policy[0].prohibition[0].remedy[0]"
+      },
+      "pointer": null,
+      "term": null,
+      "profile": null,
+      "expected": null,
+      "fixes": [],
+      "fingerprint": "9a8e96f9e8d46ca4"
+    },
+    {
+      "rule": "odrl.offer-assigner",
+      "tier": "odrl",
+      "basis": "standard",
+      "severity": "error",
+      "message": "this rule of an Offer has no assigner, on the rule or on the policy",
+      "target": {
+        "kind": "node",
+        "path": "policy[0].obligation[0]"
+      },
+      "pointer": null,
+      "term": null,
+      "profile": null,
+      "expected": null,
+      "fixes": [],
+      "fingerprint": "0889d5ff524f047b"
+    },
+    {
+      "rule": "odrl.consequence-nesting",
+      "tier": "odrl",
+      "basis": "standard",
+      "severity": "error",
+      "message": "this consequence has a consequence of its own",
+      "target": {
+        "kind": "node",
+        "path": "policy[0].obligation[0].consequence[0]"
+      },
+      "pointer": null,
+      "term": null,
+      "profile": null,
+      "expected": null,
+      "fixes": [],
+      "fingerprint": "fdb36be07a0e1edd"
+    }
+  ]
+}

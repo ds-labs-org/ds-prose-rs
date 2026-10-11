@@ -20,8 +20,10 @@ use std::sync::Arc;
 mod check;
 mod inherit;
 mod lexical;
+mod report;
 mod rules;
 
+pub use report::{Counts, SCHEMA};
 pub use rules::{Basis, Level, RULES, RULESET, RuleId, RuleInfo, Tier, UnknownRule};
 
 /// How a policy is read against its profiles.
@@ -205,7 +207,7 @@ impl Validator {
     /// Every finding about `doc`, and the verdict.
     pub fn validate(&self, doc: &EditDoc) -> Report {
         let findings = check::run(doc, &self.wording, &self.index, &self.options);
-        Report::new(self.options.mode, findings)
+        Report::new(&self.options, &self.wording, findings)
     }
 
     /// As [`Validator::validate`], for a policy given as JSON-LD text. Never
@@ -214,7 +216,8 @@ impl Validator {
         match crate::edit::read_model(json) {
             Ok(doc) => self.validate(&doc),
             Err(e) => Report::new(
-                self.options.mode,
+                &self.options,
+                &self.wording,
                 vec![Finding::new(
                     RuleId::InputUnreadable,
                     Severity::Error,
@@ -348,10 +351,13 @@ pub struct Report {
     pub findings: Vec<Finding>,
     /// The findings that are gaps, also in `findings`.
     pub gaps: Vec<Finding>,
+    /// What the report was made with, for its JSON header.
+    options: Options,
+    profiles: Vec<report::ProfileRef>,
 }
 
 impl Report {
-    fn new(mode: Mode, findings: Vec<Finding>) -> Report {
+    fn new(options: &Options, wording: &Wording, findings: Vec<Finding>) -> Report {
         let gaps: Vec<Finding> = findings.iter().filter(|f| f.gap).cloned().collect();
         let verdict = if findings
             .iter()
@@ -364,10 +370,19 @@ impl Report {
             Verdict::Conforms
         };
         Report {
-            mode,
+            mode: options.mode,
             verdict,
             findings,
             gaps,
+            options: options.clone(),
+            profiles: wording
+                .profiles()
+                .map(|p| report::ProfileRef {
+                    iri: p.iri().map(str::to_string),
+                    title: p.title().pick(&[]).map(str::to_string),
+                    version: p.version().map(str::to_string),
+                })
+                .collect(),
         }
     }
 
