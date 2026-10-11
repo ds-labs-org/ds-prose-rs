@@ -19,6 +19,7 @@ mod model;
 pub mod profile;
 mod read;
 mod words;
+mod words_ctx;
 
 /// The wording helpers the reader uses, public so an editor can show the
 /// same phrases for the same terms.
@@ -69,15 +70,16 @@ pub fn render(json: &str) -> Result<Document, ProseError> {
 /// As [`render`], for a value that is already parsed. Accepts a single
 /// policy, an array of policies, or an object whose `@graph` holds them.
 pub fn render_value(value: &serde_json::Value) -> Result<Document, ProseError> {
-    read::document(value)
+    read::document_with(value, &profile::Wording::default()).map(|r| r.document)
 }
 
 /// As [`render`], worded with the profiles `wording` holds: profile terms
 /// read with their labels and a glossary explains them. With no profile
 /// loaded, `document` is exactly what [`render`] returns.
 pub fn render_with(json: &str, wording: &profile::Wording) -> Result<Reading, ProseError> {
-    let _ = (json, wording);
-    Err(ProseError::NoPolicy)
+    let value: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| ProseError::Json(e.to_string()))?;
+    render_value_with(&value, wording)
 }
 
 /// As [`render_with`], for a value that is already parsed.
@@ -85,8 +87,7 @@ pub fn render_value_with(
     value: &serde_json::Value,
     wording: &profile::Wording,
 ) -> Result<Reading, ProseError> {
-    let _ = (value, wording);
-    Err(ProseError::NoPolicy)
+    read::document_with(value, wording)
 }
 
 #[cfg(doctest)]

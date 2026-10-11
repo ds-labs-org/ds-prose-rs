@@ -5,7 +5,8 @@ use super::model::*;
 use super::path::*;
 use super::rules::odrl_position;
 use crate::read::join_with;
-use crate::words::{self, local_name};
+use crate::words::local_name;
+use crate::words_ctx::WordCtx;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PolicyProse {
@@ -272,17 +273,20 @@ impl SlotList {
 
 /// Sentences for every policy of the document.
 pub fn sentences(doc: &EditDoc) -> Vec<PolicyProse> {
-    doc.policies
-        .iter()
-        .enumerate()
-        .map(|(i, p)| policy_prose(i, p))
-        .collect()
+    sentences_in(doc, &WordCtx::plain())
 }
 
 /// As [`sentences`], worded with the profiles `wording` holds.
 pub fn sentences_with(doc: &EditDoc, wording: &crate::profile::Wording) -> Vec<PolicyProse> {
-    let _ = (doc, wording);
-    Vec::new()
+    sentences_in(doc, &WordCtx::new(wording, super::prefixes(doc)))
+}
+
+fn sentences_in(doc: &EditDoc, ctx: &WordCtx) -> Vec<PolicyProse> {
+    doc.policies
+        .iter()
+        .enumerate()
+        .map(|(i, p)| policy_prose(ctx, i, p))
+        .collect()
 }
 
 fn locked_of(reason: &Option<String>, origin: Option<&Origin>) -> Option<Locked> {
@@ -341,6 +345,7 @@ fn entity_display(e: &Entity, noun: &str) -> String {
 }
 
 fn entity_items(
+    ctx: &WordCtx,
     owner: &NodePath,
     role: EntityRole,
     list: &[Entity],
@@ -400,7 +405,7 @@ fn entity_items(
             };
             if !e.refinement.is_empty() {
                 let parts: Vec<String> =
-                    cond_items(&path, Step::Refinement, &e.refinement, in_duty)
+                    cond_items(ctx, &path, Step::Refinement, &e.refinement, in_duty)
                         .iter()
                         .map(inline_condition)
                         .collect();
@@ -447,7 +452,7 @@ fn entity_inherited(
         .collect()
 }
 
-fn action_items(owner: &NodePath, list: &[ActionNode]) -> Vec<ListItem> {
+fn action_items(ctx: &WordCtx, owner: &NodePath, list: &[ActionNode]) -> Vec<ListItem> {
     list.iter()
         .enumerate()
         .map(|(i, a)| {
@@ -455,7 +460,7 @@ fn action_items(owner: &NodePath, list: &[ActionNode]) -> Vec<ListItem> {
             let display = if a.name.is_empty() {
                 String::new()
             } else {
-                words::action(&a.name)
+                ctx.action(&a.name)
             };
             ListItem {
                 node: Some(a.id),
@@ -472,8 +477,8 @@ fn action_items(owner: &NodePath, list: &[ActionNode]) -> Vec<ListItem> {
         .collect()
 }
 
-fn action_inherited(owner: &NodePath, list: &[ActionNode]) -> Vec<Slot> {
-    action_items(owner, list)
+fn action_inherited(ctx: &WordCtx, owner: &NodePath, list: &[ActionNode]) -> Vec<Slot> {
+    action_items(ctx, owner, list)
         .into_iter()
         .filter(|i| i.locked.is_none())
         .map(|i| i.slot)
@@ -544,7 +549,7 @@ struct Inh {
     action: Vec<Slot>,
 }
 
-fn policy_prose(i: usize, p: &PolicyNode) -> PolicyProse {
+fn policy_prose(ctx: &WordCtx, i: usize, p: &PolicyNode) -> PolicyProse {
     let path = NodePath::policy(i);
     let mut out = PolicyProse {
         node: p.id,
@@ -595,6 +600,7 @@ fn policy_prose(i: usize, p: &PolicyNode) -> PolicyProse {
                 p.id,
                 ListKind::Entities(EntityRole::Assigner),
                 entity_items(
+                    ctx,
                     &path,
                     EntityRole::Assigner,
                     &p.assigner,
@@ -613,6 +619,7 @@ fn policy_prose(i: usize, p: &PolicyNode) -> PolicyProse {
                 p.id,
                 ListKind::Entities(EntityRole::Assignee),
                 entity_items(
+                    ctx,
                     &path,
                     EntityRole::Assignee,
                     &p.assignee,
@@ -647,6 +654,7 @@ fn policy_prose(i: usize, p: &PolicyNode) -> PolicyProse {
                     p.id,
                     ListKind::Entities(EntityRole::Target),
                     entity_items(
+                        ctx,
                         &path,
                         EntityRole::Target,
                         &p.target,
@@ -669,7 +677,7 @@ fn policy_prose(i: usize, p: &PolicyNode) -> PolicyProse {
                     &path,
                     p.id,
                     ListKind::Actions,
-                    action_items(&path, &p.action),
+                    action_items(ctx, &path, &p.action),
                     vec![],
                     Conj::And,
                     EmptyText::Nothing,
@@ -729,7 +737,7 @@ fn policy_prose(i: usize, p: &PolicyNode) -> PolicyProse {
             ],
         },
     ];
-    out.refinements = refinement_groups(&path, &p.action);
+    out.refinements = refinement_groups(ctx, &path, &p.action);
 
     let inh = Inh {
         assigner: entity_inherited(
@@ -753,7 +761,7 @@ fn policy_prose(i: usize, p: &PolicyNode) -> PolicyProse {
             "asset",
             SlotKind::Asset,
         ),
-        action: action_inherited(&path, &p.action),
+        action: action_inherited(ctx, &path, &p.action),
     };
     for (kind, list) in [
         (RuleList::Permission, &p.permission),
@@ -762,6 +770,7 @@ fn policy_prose(i: usize, p: &PolicyNode) -> PolicyProse {
     ] {
         for (idx, r) in list.iter().enumerate() {
             out.rules.push(rule_prose(
+                ctx,
                 path.child(Step::Rule(kind, idx)),
                 kind,
                 idx,
@@ -781,7 +790,11 @@ fn policy_prose(i: usize, p: &PolicyNode) -> PolicyProse {
     out
 }
 
-fn refinement_groups(owner: &NodePath, actions: &[ActionNode]) -> Vec<RefinementGroup> {
+fn refinement_groups(
+    ctx: &WordCtx,
+    owner: &NodePath,
+    actions: &[ActionNode],
+) -> Vec<RefinementGroup> {
     actions
         .iter()
         .enumerate()
@@ -789,12 +802,12 @@ fn refinement_groups(owner: &NodePath, actions: &[ActionNode]) -> Vec<Refinement
         .map(|(j, a)| {
             let action = owner.child(Step::Action(j));
             RefinementGroup {
-                action_name: words::action(&a.name),
+                action_name: ctx.action(&a.name),
                 conditions: ConditionList {
                     list: ListPath::of(&action, ListKind::Refinements),
                     owner: a.id,
                     in_duty: false,
-                    items: cond_items(&action, Step::Refinement, &a.refinement, false),
+                    items: cond_items(ctx, &action, Step::Refinement, &a.refinement, false),
                 },
                 action,
             }
@@ -802,7 +815,14 @@ fn refinement_groups(owner: &NodePath, actions: &[ActionNode]) -> Vec<Refinement
         .collect()
 }
 
-fn rule_prose(path: NodePath, list: RuleList, index: usize, r: &RuleNode, inh: &Inh) -> RuleProse {
+fn rule_prose(
+    ctx: &WordCtx,
+    path: NodePath,
+    list: RuleList,
+    index: usize,
+    r: &RuleNode,
+    inh: &Inh,
+) -> RuleProse {
     let in_duty = !matches!(list, RuleList::Permission | RuleList::Prohibition);
     let in_duty_label = matches!(
         list,
@@ -860,6 +880,7 @@ fn rule_prose(path: NodePath, list: RuleList, index: usize, r: &RuleNode, inh: &
             r.id,
             ListKind::Entities(EntityRole::Assignee),
             entity_items(
+                ctx,
                 &path,
                 EntityRole::Assignee,
                 &r.assignee,
@@ -888,7 +909,7 @@ fn rule_prose(path: NodePath, list: RuleList, index: usize, r: &RuleNode, inh: &
             &path,
             r.id,
             ListKind::Actions,
-            action_items(&path, &r.action),
+            action_items(ctx, &path, &r.action),
             own(r.action.is_empty(), &inh.action),
             Conj::And,
             EmptyText::UnspecifiedAction,
@@ -896,6 +917,7 @@ fn rule_prose(path: NodePath, list: RuleList, index: usize, r: &RuleNode, inh: &
         ),
     ];
     let target_items = entity_items(
+        ctx,
         &path,
         EntityRole::Target,
         &r.target,
@@ -933,6 +955,7 @@ fn rule_prose(path: NodePath, list: RuleList, index: usize, r: &RuleNode, inh: &
         r.id,
         ListKind::Entities(EntityRole::Assigner),
         entity_items(
+            ctx,
             &path,
             EntityRole::Assigner,
             &r.assigner,
@@ -947,12 +970,12 @@ fn rule_prose(path: NodePath, list: RuleList, index: usize, r: &RuleNode, inh: &
     ));
     segs.push(text("."));
     out.sentence = Sentence { segments: segs };
-    out.refinements = refinement_groups(&path, &r.action);
+    out.refinements = refinement_groups(ctx, &path, &r.action);
     out.conditions = ConditionList {
         list: ListPath::of(&path, ListKind::Constraints),
         owner: r.id,
         in_duty: in_duty_label,
-        items: cond_items(&path, Step::Constraint, &r.constraint, in_duty_label),
+        items: cond_items(ctx, &path, Step::Constraint, &r.constraint, in_duty_label),
     };
 
     // Duties, remedies and consequences inherit only the effective parties.
@@ -998,7 +1021,9 @@ fn rule_prose(path: NodePath, list: RuleList, index: usize, r: &RuleNode, inh: &
             rules: children
                 .iter()
                 .enumerate()
-                .map(|(i, c)| rule_prose(path.child(Step::Rule(kind, i)), kind, i, c, &child_inh))
+                .map(|(i, c)| {
+                    rule_prose(ctx, path.child(Step::Rule(kind, i)), kind, i, c, &child_inh)
+                })
                 .collect(),
         });
     }
@@ -1006,6 +1031,7 @@ fn rule_prose(path: NodePath, list: RuleList, index: usize, r: &RuleNode, inh: &
 }
 
 fn cond_items(
+    ctx: &WordCtx,
     owner: &NodePath,
     step: fn(usize) -> Step,
     list: &[ConstraintNode],
@@ -1013,7 +1039,7 @@ fn cond_items(
 ) -> Vec<ConditionProse> {
     list.iter()
         .enumerate()
-        .map(|(i, c)| cond_prose(owner.child(step(i)), i, c, in_duty))
+        .map(|(i, c)| cond_prose(ctx, owner.child(step(i)), i, c, in_duty))
         .collect()
 }
 
@@ -1021,7 +1047,13 @@ fn is_or_operator(op: &str) -> bool {
     matches!(local_name(op), "isAnyOf" | "isNoneOf")
 }
 
-fn cond_prose(path: NodePath, index: usize, c: &ConstraintNode, in_duty: bool) -> ConditionProse {
+fn cond_prose(
+    ctx: &WordCtx,
+    path: NodePath,
+    index: usize,
+    c: &ConstraintNode,
+    in_duty: bool,
+) -> ConditionProse {
     let mut out = ConditionProse {
         node: c.id(),
         path: path.clone(),
@@ -1035,12 +1067,12 @@ fn cond_prose(path: NodePath, index: usize, c: &ConstraintNode, in_duty: bool) -
             let left_display = if a.left.is_empty() {
                 String::new()
             } else {
-                words::operand(&a.left)
+                ctx.operand(&a.left)
             };
             let op_display = if a.operator.is_empty() {
                 String::new()
             } else {
-                words::operator_for(&a.left, &a.operator)
+                ctx.operator_for(&a.left, &a.operator)
             };
             let mut segs = vec![
                 Segment::Slot(slot(
@@ -1125,7 +1157,7 @@ fn cond_prose(path: NodePath, index: usize, c: &ConstraintNode, in_duty: bool) -
                     a.id,
                     SlotKind::Unit,
                     u,
-                    words::humanise(local_name(u)),
+                    ctx.unit(u),
                 )));
             }
             out.sentence = Sentence { segments: segs };
@@ -1149,7 +1181,7 @@ fn cond_prose(path: NodePath, index: usize, c: &ConstraintNode, in_duty: bool) -
                 list: ListPath::of(&path, ListKind::Children),
                 owner: l.id,
                 in_duty,
-                items: cond_items(&path, Step::Child, &l.children, in_duty),
+                items: cond_items(ctx, &path, Step::Child, &l.children, in_duty),
             });
         }
         ConstraintNode::Reference { id, iri, .. } => {

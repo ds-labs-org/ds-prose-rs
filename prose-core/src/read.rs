@@ -1,7 +1,9 @@
 //! JSON-LD in, [`Document`] out.
 use crate::ProseError;
 use crate::model::*;
-use crate::words::{self, join, local_name};
+use crate::profile::{Prefixes, Wording};
+use crate::words::{join, local_name};
+use crate::words_ctx::WordCtx;
 use serde_json::{Map, Value};
 
 pub(crate) type Obj = Map<String, Value>;
@@ -93,8 +95,10 @@ const ODRL_PROPERTIES: &[&str] = &[
 /// is better than overflowing the stack (a panic in wasm takes the page).
 const MAX_DEPTH: usize = 256;
 
-pub fn document(value: &Value) -> Result<Document, ProseError> {
-    let mut r = Reader::default();
+/// The reading of `value`, worded with `wording`. With no profile loaded it
+/// is the v0.1 reading and every glossary is empty.
+pub fn document_with(value: &Value, wording: &Wording) -> Result<Reading, ProseError> {
+    let mut r = Reader::new(WordCtx::new(wording, Prefixes::default()));
     let mut notes = Vec::new();
     let value = &bare_odrl_keys(value, odrl_prefix_is_odrl(value), &mut notes);
     for note in notes {
@@ -111,7 +115,11 @@ pub fn document(value: &Value) -> Result<Document, ProseError> {
         return Err(ProseError::NoPolicy);
     }
     doc.warnings = r.warnings;
-    Ok(doc)
+    let glossary = vec![PolicyGlossary::default(); doc.policies.len()];
+    Ok(Reading {
+        document: doc,
+        glossary,
+    })
 }
 
 /// `v` with ODRL property keys written as compact IRIs (`odrl:permission`)
@@ -341,11 +349,11 @@ pub(crate) fn ident(v: &Value) -> Option<String> {
     }
 }
 
-#[derive(Default)]
-struct Reader {
+struct Reader<'a> {
     warnings: Vec<String>,
     /// The same messages, for de-duplication in constant time.
     seen: std::collections::HashSet<String>,
+    ctx: WordCtx<'a>,
 }
 
 /// What a rule inherits from its policy when it states none of its own.
@@ -357,7 +365,15 @@ struct Inherited {
     actions: Vec<(String, Vec<Condition>)>,
 }
 
-impl Reader {
+impl<'a> Reader<'a> {
+    fn new(ctx: WordCtx<'a>) -> Reader<'a> {
+        Reader {
+            warnings: Vec::new(),
+            seen: Default::default(),
+            ctx,
+        }
+    }
+
     fn warn(&mut self, msg: impl Into<String>) {
         let msg = msg.into();
         if self.seen.insert(msg.clone()) {
@@ -696,7 +712,7 @@ impl Reader {
         items(v)
             .into_iter()
             .filter_map(|a| match a {
-                Value::String(s) => Some((words::action(s), vec![])),
+                Value::String(s) => Some((self.ctx.action(s), vec![])),
                 Value::Object(o) => {
                     // Pre-0.7 profiles name the action under `type`.
                     let Some(name) =
@@ -709,7 +725,7 @@ impl Reader {
                         .get("refinement")
                         .map(|r| items(r).into_iter().map(|c| self.constraint(c)).collect())
                         .unwrap_or_default();
-                    Some((words::action(&name), refine))
+                    Some((self.ctx.action(&name), refine))
                 }
                 _ => {
                     self.warn("skipped an unreadable action");
@@ -762,7 +778,7 @@ impl Reader {
             let mut text = join_with(&vals, conj);
             if let Some(u) = o.get("unit").and_then(ident) {
                 text.push(' ');
-                text.push_str(&words::humanise(local_name(&u)));
+                text.push_str(&self.ctx.unit(&u));
             }
             text
         } else if let Some(r) = o.get("rightOperandReference").and_then(ident) {
@@ -773,8 +789,8 @@ impl Reader {
         };
         Condition::leaf(format!(
             "{} {} {}",
-            words::operand(&left),
-            words::operator_for(&left, &op),
+            self.ctx.operand(&left),
+            self.ctx.operator_for(&left, &op),
             right
         ))
     }
