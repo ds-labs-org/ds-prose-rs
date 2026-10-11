@@ -557,3 +557,102 @@ fn profile_goldens() {
         assert_eq!(got, want, "golden mismatch for {name}");
     }
 }
+
+#[test]
+fn a_term_reads_with_its_label_only_as_its_own_kind() {
+    // ex:fineTune is an action: as a left operand or a value it is not
+    // relabelled.
+    assert_eq!(
+        condition("ex:fineTune", "lt", json!(3)),
+        "the fine tune is less than 3"
+    );
+    assert_eq!(
+        condition("ex:researchPurpose", "eq", json!({"@id": "ex:fineTune"})),
+        "the research purpose is equal to ex:fineTune"
+    );
+}
+
+#[test]
+fn acronym_label_keeps_its_case() {
+    let w = Wording::new().with_profile(vocab(json!({
+        "@context": {"odrl": ODRL, "ex": EX, "rdfs": "http://www.w3.org/2000/01/rdf-schema#"},
+        "@graph": [{"@id": "ex:eu", "@type": "odrl:RightOperand", "rdfs:label": "EU member states"}]
+    })));
+    let p = policy_with(json!({
+        "target": "urn:asset:1", "action": "use",
+        "constraint": [{"leftOperand": "spatial", "operator": "eq",
+                        "rightOperand": {"@id": "ex:eu"}}]
+    }));
+    assert_eq!(
+        read(&p, &w).document.policies[0].rules[0].conditions[0].text,
+        "the location is equal to EU member states"
+    );
+}
+
+#[test]
+fn glossary_capped_at_30_per_policy() {
+    let graph: Vec<Value> = (0..31)
+        .map(|i| json!({"@id": format!("ex:a{i}"), "@type": "odrl:Action"}))
+        .collect();
+    let w = Wording::new().with_profile(vocab(json!({
+        "@context": {"odrl": ODRL, "ex": EX},
+        "@graph": graph
+    })));
+    let actions: Vec<String> = (0..31).map(|i| format!("ex:a{i}")).collect();
+    let p = policy_with(json!({"target": "urn:asset:1", "action": actions}));
+    let r = read(&p, &w);
+    assert_eq!(r.glossary[0].terms.len(), 30);
+    assert_eq!(r.glossary[0].terms[29].written, "ex:a29");
+}
+
+#[test]
+fn policy_context_before_the_documents() {
+    let p = json!({
+        "@context": {"ex": "https://other.example/ns/"},
+        "@graph": [{
+            "@context": ["http://www.w3.org/ns/odrl.jsonld", {"ex": EX}],
+            "@type": "Set",
+            "permission": [{"target": "urn:asset:1", "action": "ex:fineTune"}]
+        }]
+    })
+    .to_string();
+    assert_eq!(
+        read(&p, &research()).document.policies[0].rules[0].sentence,
+        "Anyone may fine-tune urn:asset:1."
+    );
+}
+
+#[test]
+fn odrl_unit_keeps_its_built_in_wording() {
+    let w = Wording::new().with_profile(vocab(json!({
+        "@context": {"odrl": ODRL, "rdfs": "http://www.w3.org/2000/01/rdf-schema#"},
+        "@graph": [{"@id": "odrl:perUse", "@type": "odrl:RightOperand", "rdfs:label": "Spoofed"}]
+    })));
+    let p = policy_with(json!({
+        "target": "urn:asset:1", "action": "use",
+        "constraint": [{"leftOperand": "payAmount", "operator": "eq",
+                        "rightOperand": 10, "unit": "odrl:perUse"}]
+    }));
+    assert_eq!(
+        read(&p, &w).document.policies[0].rules[0].conditions[0].text,
+        "the payment amount is equal to 10 per use"
+    );
+}
+
+#[test]
+fn declared_profile_as_compact_iri_is_expanded() {
+    let p = json!({
+        "@context": ["http://www.w3.org/ns/odrl.jsonld",
+                     {"rp": "https://example.org/odrl/profile/"}],
+        "@type": "Set",
+        "profile": "rp:research",
+        "permission": [{"target": "urn:asset:1", "action": "use"}]
+    })
+    .to_string();
+    let r = read(&p, &research());
+    assert!(r.document.warnings.is_empty(), "{:?}", r.document.warnings);
+    assert_eq!(
+        r.document.policies[0].notes[0],
+        "Written to the profile Research Data Profile (rp:research, version 0.1.0)."
+    );
+}
