@@ -21,6 +21,12 @@
 //! `prose-decoration`, `prose-suggestions`, `prose-suggestion`
 //! (`-active`), `prose-live`, `prose-empty`.
 //!
+//! Strict validation (see [`EditConfig::with_strict`]) adds `prose-problems`
+//! (with `prose-problem-*`, see [`ProseProblems`]), `prose-slot-note` and
+//! `prose-slot-message` under a closed slot, which carries
+//! `data-closed="true"`; the read-only component's `prose-violations`.
+//! Without a validator none of it is rendered.
+//!
 //! Markup: every policy, rule and condition container carries
 //! `data-node="<NodePath>"`; slots `data-slot="<SlotPath>"`; add buttons
 //! `data-add="<ListPath>"`. Controls the [`EditRules`](prose_core::edit::EditRules) do not allow are not
