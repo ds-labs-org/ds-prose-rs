@@ -225,6 +225,34 @@ mod tests {
     }
 
     #[test]
+    fn pick_follows_the_order_of_preference() {
+        // A primary-subtag match on the first choice beats an exact match on
+        // a later one (RFC 4647 lookup: de-CH falls back to de before fr).
+        let t = text(&[(Some("fr"), "Entraîner"), (Some("de"), "Trainieren")]);
+        assert_eq!(t.pick(&prefs(&["de-CH", "fr"])), Some("Trainieren"));
+        assert_eq!(t.pick(&prefs(&["fr", "de-CH"])), Some("Entraîner"));
+        // Within one preference, the truncated tag beats a sibling region.
+        let regions = text(&[
+            (Some("de-at"), "Trainieren (AT)"),
+            (Some("de"), "Trainieren"),
+        ]);
+        assert_eq!(regions.pick(&prefs(&["de-CH"])), Some("Trainieren"));
+        let script = text(&[
+            (Some("zh"), "zh"),
+            (Some("zh-hant"), "zh-Hant"),
+            (Some("zh-hans"), "zh-Hans"),
+        ]);
+        assert_eq!(script.pick(&prefs(&["zh-Hant-TW"])), Some("zh-Hant"));
+        // A sibling still beats a later preference's exact match.
+        assert_eq!(
+            regions.pick(&prefs(&["de-AT-x-y"])),
+            Some("Trainieren (AT)")
+        );
+        let sibling = text(&[(Some("fr"), "Entraîner"), (Some("de-at"), "Trainieren")]);
+        assert_eq!(sibling.pick(&prefs(&["de-CH", "fr"])), Some("Trainieren"));
+    }
+
+    #[test]
     fn push_lowercases_tags_and_drops_exact_duplicates() {
         let t = text(&[(Some("EN"), "Train"), (Some("en"), "Train"), (None, "x")]);
         let all: Vec<_> = t.iter().collect();
