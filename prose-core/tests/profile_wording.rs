@@ -284,6 +284,22 @@ fn compact_writes_a_curie_only_with_a_bound_prefix() {
 }
 
 #[test]
+fn compact_prefers_the_longest_namespace() {
+    // Both prefixes leave a plain local name; the longer namespace wins,
+    // whichever order the context binds them in.
+    for context in [
+        json!({"@context": {"a": "https://example.org/ab", "b": "https://example.org/abc"}}),
+        json!({"@context": {"b": "https://example.org/abc", "a": "https://example.org/ab"}}),
+    ] {
+        let p = Prefixes::of_document(&context);
+        assert_eq!(
+            p.compact("https://example.org/abcd").as_deref(),
+            Some("b:d")
+        );
+    }
+}
+
+#[test]
 fn operator_with_uses_the_profile_label_outside_odrl() {
     use prose_core::wording::{operator_for, operator_with};
     let w = Wording::new().with_profile(research());

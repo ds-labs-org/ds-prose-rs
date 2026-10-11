@@ -775,6 +775,23 @@ async fn glossary_is_capped_per_policy() {
 }
 
 #[tokio::test]
+async fn prose_glossary_caps_what_a_host_hands_it() {
+    // A host can build a longer glossary than the reader does; the
+    // component still shows at most 30 entries.
+    let w = research_wording();
+    let p = prose_core::edit::prefixes(&read_model(&profile_file("research-policy.json")).unwrap());
+    let gloss = prose_core::wording::gloss(&w, &p, "ex:fineTune").unwrap();
+    let mut glossary = prose_core::PolicyGlossary::default();
+    glossary.terms = vec![gloss; 40];
+    let html = ssr::<prose_yew::ProseGlossary>(prose_yew::GlossaryProps {
+        glossary,
+        labels: Rc::default(),
+    })
+    .await;
+    assert_eq!(html.matches("<dt>").count(), 30, "{html}");
+}
+
+#[tokio::test]
 async fn glossary_escapes_markup() {
     let profile = r#"{
         "@context": {"odrl": "http://www.w3.org/ns/odrl/2/", "ex": "https://example.org/x/",

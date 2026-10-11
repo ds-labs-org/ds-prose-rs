@@ -1162,6 +1162,41 @@ mod tests {
     }
 
     #[test]
+    fn deprecated_terms_are_offered_nowhere() {
+        let p = ProfileVocab::parse(&format!(
+            r#"{{
+                "@context": {{"odrl": "{ODRL}", "ex": "{EX}",
+                             "owl": "http://www.w3.org/2002/07/owl#",
+                             "rdfs": "http://www.w3.org/2000/01/rdf-schema#"}},
+                "@graph": [
+                    {{"@id": "ex:lo", "@type": "odrl:LeftOperand"}},
+                    {{"@id": "ex:oldLo", "@type": "odrl:LeftOperand", "owl:deprecated": true}},
+                    {{"@id": "ex:Kind", "rdfs:subClassOf": {{"@id": "odrl:Policy"}}}},
+                    {{"@id": "ex:OldKind", "rdfs:subClassOf": {{"@id": "odrl:Policy"}},
+                      "owl:deprecated": true}},
+                    {{"@id": "ex:op", "@type": "odrl:Operator"}},
+                    {{"@id": "ex:oldOp", "@type": "odrl:Operator", "owl:deprecated": true}},
+                    {{"@id": "ex:cf", "@type": "odrl:ConflictTerm"}},
+                    {{"@id": "ex:oldCf", "@type": "odrl:ConflictTerm", "owl:deprecated": true}}
+                ]
+            }}"#
+        ))
+        .unwrap();
+        let v = Vocabulary::default().with_profiles(&Wording::new().with_profile(p));
+        let has =
+            |list: &[Suggestion], local: &str| values(list).contains(&&*format!("{EX}{local}"));
+        // The current terms are offered, so the profile was read.
+        assert!(has(&v.left_operands, "lo") && !has(&v.left_operands, "oldLo"));
+        assert!(has(&v.policy_kinds, "Kind") && !has(&v.policy_kinds, "OldKind"));
+        let ops: Vec<&str> = v.operators.iter().map(|o| o.as_str()).collect();
+        assert!(ops.contains(&&*format!("{EX}op")));
+        assert!(!ops.contains(&&*format!("{EX}oldOp")));
+        let cfs: Vec<&str> = v.conflicts.iter().map(|c| c.value.as_str()).collect();
+        assert!(cfs.contains(&&*format!("{EX}cf")));
+        assert!(!cfs.contains(&&*format!("{EX}oldCf")));
+    }
+
+    #[test]
     fn with_wording_extends_the_vocabulary_with_the_labels_heading() {
         let mut cfg = EditConfig::default();
         cfg.labels.group_profile = "Profil : {profile}".into();

@@ -1267,3 +1267,72 @@ async fn switching_wording_rerenders_without_resetting_doc_or_undo() {
         Some("urn:policy:research-1")
     );
 }
+
+const UNIT_PROFILE: &str = r#"{
+    "@context": {"odrl": "http://www.w3.org/ns/odrl/2/", "ex": "https://example.org/u/",
+                 "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+                 "owl": "http://www.w3.org/2002/07/owl#",
+                 "prose": "https://ds-labs-org.github.io/ds-prose-rs/profile#"},
+    "@graph": [
+        {"@id": "ex:size", "@type": "odrl:LeftOperand", "rdfs:label": "Size",
+         "prose:unit": ["ex:gigabyte", "ex:terabyte"]},
+        {"@id": "ex:tier", "@type": "odrl:LeftOperand", "rdfs:label": "Tier"},
+        {"@id": "ex:gold", "@type": "odrl:RightOperand", "rdfs:label": "Gold"},
+        {"@id": "ex:tin", "@type": "odrl:RightOperand", "rdfs:label": "Tin",
+         "owl:deprecated": true}
+    ]
+}"#;
+
+const UNIT_POLICY: &str = r#"{
+    "@context": {"ex": "https://example.org/u/"},
+    "@type": "Set", "uid": "urn:p",
+    "permission": [{"action": "use", "constraint": [
+        {"leftOperand": "ex:size", "operator": "lteq", "rightOperand": 10, "unit": "ex:gigabyte"},
+        {"leftOperand": "ex:tier", "operator": "eq", "rightOperand": {"@id": "ex:gold"}}
+    ]}]
+}"#;
+
+#[wasm_bindgen_test]
+async fn unit_slot_offers_the_left_operands_units() {
+    let w = Rc::new(Wording::new().with_profile(ProfileVocab::parse(UNIT_PROFILE).unwrap()));
+    let (c, log, _h) = mount_worded(UNIT_POLICY, Some(w)).await;
+    let path = "policy[0].permission[0].constraint[0]#unit";
+    type_into(&slot(&c, path), "");
+    settle().await;
+    let options = shown_options(&c);
+    assert_eq!(options.len(), 2, "{options:?}");
+    let second = c
+        .query_selector_all("[role=option]")
+        .unwrap()
+        .item(1)
+        .unwrap();
+    mousedown(&second.dyn_into::<Element>().unwrap());
+    settle().await;
+    // Written with the prefix the policy binds.
+    assert_eq!(
+        set_texts(&log),
+        vec![(path.to_string(), "ex:terabyte".to_string())]
+    );
+}
+
+#[wasm_bindgen_test]
+async fn profile_values_leave_out_deprecated_and_list_each_once() {
+    // A second profile declaring the same value: listed once.
+    let again = r#"{
+        "@context": {"odrl": "http://www.w3.org/ns/odrl/2/", "ex": "https://example.org/u/"},
+        "@graph": [{"@id": "ex:gold", "@type": "odrl:RightOperand"}]
+    }"#;
+    let w = Rc::new(
+        Wording::new()
+            .with_profile(ProfileVocab::parse(UNIT_PROFILE).unwrap())
+            .with_profile(ProfileVocab::parse(again).unwrap()),
+    );
+    let (c, _log, _h) = mount_worded(UNIT_POLICY, Some(w)).await;
+    type_into(
+        &slot(&c, "policy[0].permission[0].constraint[1]#rightOperand[0]"),
+        "",
+    );
+    settle().await;
+    let labels: Vec<String> = shown_options(&c).into_iter().map(|(l, _)| l).collect();
+    assert_eq!(labels, ["Gold"]);
+}
