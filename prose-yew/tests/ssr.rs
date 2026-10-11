@@ -718,7 +718,8 @@ async fn odrl_prose_with_wording_renders_glossary_details() {
     // The sentences use the profile's labels.
     assert!(html.contains("may fine-tune"), "{html}");
     for needle in [
-        "<details class=\"prose-glossary\" open>",
+        // Yew writes a boolean attribute as open="open", attributes sorted.
+        "<details open=\"open\" class=\"prose-glossary\">",
         "<summary>Terms from the profile</summary>",
         "<dt><span>Fine-tune</span> <code>ex:fineTune</code></dt>",
         "<dd>To adapt an already trained model using the Asset.</dd>",

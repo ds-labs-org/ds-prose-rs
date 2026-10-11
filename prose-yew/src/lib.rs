@@ -6,11 +6,14 @@
 //! Classes: `ds-prose` (root), `prose-policy`, `prose-rules`, `prose-rule`
 //! plus `prose-permission` / `prose-prohibition` / `prose-obligation`,
 //! `prose-rule-sentence`, `prose-label`, `prose-notes`, `prose-warnings`,
-//! `prose-error`.
+//! `prose-error`, and in the glossary of profile terms ([`ProseGlossary`])
+//! `prose-glossary`, `prose-note`, `prose-kind-of`, `prose-implies`,
+//! `prose-deprecated`, `prose-from`.
 //!
 //! [`OdrlProseView`] is the editing counterpart: the same sentences, with an
 //! Edit mode (see [`edit`]).
 pub mod edit;
+use edit::fill;
 pub use edit::{
     BASE_CSS, ButtonContent, Choice, Decoration, DecorationAt, EditConfig, EditMode, EmptyTexts,
     FieldNames, FocusKind, Labels, Nouns, OdrlProseView, OdrlProseViewProps, Placeholders,
@@ -67,16 +70,66 @@ pub struct GlossaryProps {
 /// with a `<dl>`. Nothing when the glossary is empty.
 #[function_component(ProseGlossary)]
 pub fn prose_glossary(props: &GlossaryProps) -> Html {
-    let _ = props;
-    Html::default()
+    let terms = &props.glossary.terms;
+    if terms.is_empty() {
+        return Html::default();
+    }
+    let l = &props.labels;
+    let line = |class: &'static str, template: &str, key: &str, value: &str| {
+        html! { <dd class={class}>{ fill(template, &[(key, value)]) }</dd> }
+    };
+    let labels = |list: &[(String, String)]| {
+        list.iter()
+            .map(|(_, label)| label.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    html! {
+        <details class="prose-glossary" open=true>
+            <summary>{ l.glossary_heading.clone() }</summary>
+            <dl>
+                { for terms.iter().take(GLOSSARY_MAX).map(|g| html! {
+                    <>
+                        <dt><span>{ g.label.clone() }</span>{ " " }<code>{ g.written.clone() }</code></dt>
+                        if let Some(d) = &g.definition { <dd>{ d.clone() }</dd> }
+                        if let Some(n) = &g.note { { line("prose-note", &l.usage_note, "note", n) } }
+                        if !g.broader.is_empty() {
+                            { line("prose-kind-of", &l.kind_of, "terms", &labels(&g.broader)) }
+                        }
+                        if !g.implies.is_empty() {
+                            { line("prose-implies", &l.implies, "terms", &labels(&g.implies)) }
+                        }
+                        if g.deprecated {
+                            <dd class="prose-deprecated">{ l.deprecated.clone() }</dd>
+                        }
+                        if let Some(p) = &g.profile {
+                            { line("prose-from", &l.from_profile, "profile", p) }
+                        }
+                    </>
+                }) }
+            </dl>
+        </details>
+    }
 }
+
+/// At most this many glossary entries per policy.
+const GLOSSARY_MAX: usize = 30;
 
 #[function_component(OdrlProse)]
 pub fn odrl_prose(props: &OdrlProseProps) -> Html {
-    let parsed = use_memo(props.json.clone(), |json| prose_core::render(json));
+    let parsed = use_memo(
+        (props.json.clone(), props.wording.clone()),
+        |(json, w)| match w {
+            Some(w) => prose_core::render_with(json, &w.0),
+            None => prose_core::render_with(json, &Wording::default()),
+        },
+    );
     let class = classes!("ds-prose", props.class.clone());
     match &*parsed {
-        Ok(doc) => html! { <article class={class}>{ document(doc) }</article> },
+        Ok(r) => {
+            let glossary = if props.glossary { &r.glossary[..] } else { &[] };
+            html! { <article class={class}>{ document(&r.document, glossary) }</article> }
+        }
         Err(e) => html! { <article class={class}>{ error(e) }</article> },
     }
 }
@@ -85,10 +138,10 @@ fn error(e: &ProseError) -> Html {
     html! { <p class="prose-error" role="alert">{ e.to_string() }</p> }
 }
 
-fn document(doc: &Document) -> Html {
+fn document(doc: &Document, glossary: &[PolicyGlossary]) -> Html {
     html! {
         <>
-            { for doc.policies.iter().map(policy) }
+            { for doc.policies.iter().enumerate().map(|(i, p)| policy(p, glossary.get(i))) }
             if !doc.warnings.is_empty() {
                 <aside class="prose-warnings">
                     <p class="prose-label">{ "Not rendered" }</p>
@@ -99,7 +152,8 @@ fn document(doc: &Document) -> Html {
     }
 }
 
-fn policy(p: &Policy) -> Html {
+fn policy(p: &Policy, glossary: Option<&PolicyGlossary>) -> Html {
+    let glossary = glossary.filter(|g| !g.terms.is_empty());
     html! {
         <section class="prose-policy">
             <h3>{ &p.heading }</h3>
@@ -109,6 +163,9 @@ fn policy(p: &Policy) -> Html {
             }
             if !p.rules.is_empty() {
                 <ol class="prose-rules">{ for p.rules.iter().map(rule) }</ol>
+            }
+            if let Some(g) = glossary {
+                <ProseGlossary glossary={g.clone()} />
             }
         </section>
     }

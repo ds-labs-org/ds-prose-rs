@@ -8,7 +8,8 @@ use yew::prelude::*;
 use prose_core::edit::{
     ConditionList, ConditionProse, EditDoc, EditEvent, FocusTarget, Issue, IssueTarget, ListItem,
     ListKind, ListPath, Locked, LogicalOp, NewItem, NodeId, NodePath, PolicyProse, RefinementGroup,
-    RuleList, RuleProse, Segment, Sentence, Severity, Slot, SlotList, focus_after, sentences,
+    RuleList, RuleProse, Segment, Sentence, Severity, Slot, SlotList, SlotPath, focus_after,
+    sentences_with,
 };
 
 use super::choice::{ChoiceSelect, RuleKindSelect};
@@ -202,7 +203,10 @@ fn focus_target(root: &web_sys::Element, target: &FocusTarget, rule_select: bool
 pub fn odrl_prose_view(props: &OdrlProseViewProps) -> Html {
     let cfg = props.config.clone();
     let edit = props.mode == EditMode::Edit;
-    let prose = use_memo(props.doc.clone(), |d| sentences(d));
+    let prose = use_memo(
+        (props.doc.clone(), crate::SharedWording(cfg.wording.clone())),
+        |(d, w)| sentences_with(d, &w.0),
+    );
     let prefixes = use_memo(props.doc.clone(), |d| prose_core::edit::prefixes(d));
     let root = use_node_ref();
     let live = use_state(AttrValue::default);
@@ -669,12 +673,41 @@ impl Rend<'_> {
 
     // --- sentences ------------------------------------------------------------------
 
-    fn term(&self, display: &str, raw: &str) -> Html {
+    /// A term in Read mode. One a loaded profile explains is titled
+    /// "{label}: {definition} ({raw})", carries its IRI, and is described
+    /// by its definition.
+    fn term(&self, display: &str, raw: &str, slot: &SlotPath) -> Html {
         let cfg = self.cfg();
+        let gloss = (!cfg.wording.is_empty())
+            .then(|| prose_core::wording::gloss(&cfg.wording, &self.env.prefixes, raw))
+            .flatten();
+        let Some(g) = gloss else {
+            return html! {
+                <span class={cls!(cfg, term, "prose-term")} style={cfg.styles.term.clone()} title={raw.to_string()}>
+                    { display.to_string() }
+                </span>
+            };
+        };
+        let title = match &g.definition {
+            Some(d) => format!("{}: {d} ({raw})", g.label),
+            None => format!("{} ({raw})", g.label),
+        };
+        let id = g.definition.as_ref().map(|_| format!("prose-def-{slot}"));
         html! {
-            <span class={cls!(cfg, term, "prose-term")} style={cfg.styles.term.clone()} title={raw.to_string()}>
-                { display.to_string() }
-            </span>
+            <>
+                <span
+                    class={cls!(cfg, term, "prose-term")}
+                    style={cfg.styles.term.clone()}
+                    title={title}
+                    data-iri={g.iri.clone()}
+                    aria-describedby={id.clone()}
+                >
+                    { display.to_string() }
+                </span>
+                if let (Some(id), Some(d)) = (id, &g.definition) {
+                    <span id={id} hidden=true>{ d.clone() }</span>
+                }
+            </>
         }
     }
 
@@ -683,7 +716,7 @@ impl Rend<'_> {
             return if s.display.is_empty() {
                 Html::default()
             } else {
-                self.term(&s.display, &s.raw)
+                self.term(&s.display, &s.raw, &s.path)
             };
         }
         let key = issue_key(&IssueTarget::Slot(s.path.clone()));
@@ -732,7 +765,7 @@ impl Rend<'_> {
                 } else if c.display.is_empty() {
                     Html::default()
                 } else {
-                    self.term(&c.display, &c.raw)
+                    self.term(&c.display, &c.raw, &c.path)
                 }
             }
             Segment::RuleKind(k) => {
