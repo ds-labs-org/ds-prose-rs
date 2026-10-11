@@ -108,7 +108,8 @@ profile.
 | JSON-LD, compacted (`{"@context": ..., "@graph": [...]}` or one node) | always | no JSON-LD processor: string prefixes, `@vocab`, `@base` and simple term definitions (`{"@id": ..., "@type": "@id"}`) in an inline `@context` are followed; a remote, scoped or `@import` context is not, with one warning naming it |
 | JSON-LD, expanded (a top-level array, like W3C's `ODRL22.json` or DPV's `.jsonld`) | always | |
 | Turtle | the `turtle` cargo feature (off by default; on in the npm build and the demo) | parsed by [oxttl](https://crates.io/crates/oxttl) into the same triples as JSON-LD, so a Turtle profile and its JSON-LD twin read as equal `ProfileVocab`s |
-| RDF/XML, N-Triples, others | no | refused with `ProfileError::UnsupportedFormat` |
+| N-Triples | with the `turtle` feature | N-Triples is a subset of Turtle, so it is read as Turtle |
+| RDF/XML, others | no | RDF/XML is refused with `ProfileError::UnsupportedFormat`; with the `turtle` feature any other non-JSON text is tried as Turtle and fails with `ProfileError::Turtle`, without it with `UnsupportedFormat` |
 
 `ProfileVocab::parse` tells the syntax from the first characters: `{`, or
 `[` followed by a JSON value, is JSON-LD; anything else is Turtle when the
@@ -116,8 +117,10 @@ feature is on. `ProfileVocab::parse_turtle` skips the guess, for a host that
 has a `text/turtle` content type. An unbound `odrl`, `rdf`, `rdfs`, `owl`,
 `skos`, `dct`, `dcterms`, `xsd`, `prof` or `prose` prefix falls back to its
 well-known namespace, with one warning each; an author's own binding always
-wins. The W3C context `http://www.w3.org/ns/odrl.jsonld` turns them on
-without a warning.
+wins. The W3C context `http://www.w3.org/ns/odrl.jsonld` binds the ones it
+defines (`odrl`, `rdf`, `rdfs`, `owl`, `skos`, `dct`, `xsd`, and also
+`vcard`, `foaf`, `schema`, `cc`) without a warning; `dcterms`, `prof` and
+`prose` still fall back with one.
 
 What is read from each term: its kinds (`rdf:type` `odrl:Action`,
 `LeftOperand`, `Operator`, `RightOperand`, `ConflictTerm`, plus policy,
@@ -242,8 +245,9 @@ The enums that grow as the editor learns more of ODRL are `#[non_exhaustive]`,
 so adding a variant is a minor release, not a breaking one. In `prose-core`:
 `EditEvent`, `EditError`, `NewItem`, `FocusTarget`, `ListKind`, `Field`, `Step`,
 `NodeRef`, `Segment`, `SlotKind`, `ChoiceKind`, `EmptyText`, `IssueTarget`,
-`profile::TermKind` and `profile::ProfileError`. In `prose-yew`: `FocusKind` and `DecorationAt`. Outside the defining crate a
-`match` on one of them needs a wildcard arm with a sensible fallback. Units,
+`profile::TermKind` and `profile::ProfileError`. In `prose-yew`: `FocusKind`
+and `DecorationAt`. Outside the defining crate a `match` on one of them needs
+a wildcard arm with a sensible fallback. Units,
 `rightOperandReference` and `partOf` can be edited but not added today (see
 Limits); adding them is the kind of change this allows.
 
