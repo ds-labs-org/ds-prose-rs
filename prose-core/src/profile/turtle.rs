@@ -37,6 +37,9 @@ pub(crate) fn read(text: &str, limits: &ProfileLimits) -> Result<Parsed, Profile
             }
         };
         sink.push(&s, t.predicate.as_str(), o);
+        if sink.over() {
+            return Err(Sink::too_expanded());
+        }
     }
     let prefixes: Vec<(String, String)> = parser
         .prefixes()

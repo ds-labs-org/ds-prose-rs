@@ -1,6 +1,6 @@
 //! The private triple list every profile syntax is read into. Term semantics
 //! work on this list only, so a second syntax cannot change what a term means.
-use super::ProfileLimits;
+use super::{ProfileError, ProfileLimits};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -52,6 +52,8 @@ pub(crate) struct Sink<'a> {
     /// The prefixes in `parsed.prefixes`, for a constant-time check.
     bound: HashSet<String>,
     limits: &'a ProfileLimits,
+    /// Bytes expanded and stored so far, against `max_expanded_bytes`.
+    expanded: usize,
 }
 
 impl<'a> Sink<'a> {
@@ -65,6 +67,7 @@ impl<'a> Sink<'a> {
             counts: HashMap::new(),
             bound: HashSet::new(),
             limits,
+            expanded: 0,
         }
     }
 
@@ -72,7 +75,26 @@ impl<'a> Sink<'a> {
         self.parsed.notes.warn(msg);
     }
 
+    /// Counts `bytes` against `max_expanded_bytes`.
+    pub fn charge(&mut self, bytes: usize) {
+        self.expanded = self.expanded.saturating_add(bytes);
+    }
+
+    /// Past `max_expanded_bytes`: the reader stops, and the profile is
+    /// refused.
+    pub fn over(&self) -> bool {
+        self.expanded > self.limits.max_expanded_bytes
+    }
+
+    /// The error for a reader that stopped because of [`Sink::over`].
+    pub fn too_expanded() -> ProfileError {
+        ProfileError::LimitExceeded("max_expanded_bytes")
+    }
+
     pub fn push(&mut self, s: &str, p: &str, o: Object) {
+        if self.over() {
+            return;
+        }
         let n = self
             .counts
             .entry((s.to_string(), p.to_string()))
@@ -83,6 +105,23 @@ impl<'a> Sink<'a> {
             self.parsed.notes.warn(format!(
                 "only the first {max} values of <{p}> on one node are read"
             ));
+            return;
+        }
+        // Only what is kept counts; a value past the cap above costs nothing.
+        let o_len = match &o {
+            Object::Iri(i) => i.len(),
+            Object::Literal {
+                value,
+                lang,
+                datatype,
+            } => {
+                value.len()
+                    + lang.as_deref().map_or(0, str::len)
+                    + datatype.as_deref().map_or(0, str::len)
+            }
+        };
+        self.charge(s.len() + p.len() + o_len);
+        if self.over() {
             return;
         }
         self.parsed.triples.push(Triple {

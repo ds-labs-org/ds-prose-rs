@@ -91,6 +91,9 @@ pub(crate) fn read(v: &Value, limits: &ProfileLimits) -> Result<Parsed, ProfileE
             Work::Top(v, ctx, depth) => w.top(v, ctx, depth, &mut next),
             Work::Node(o, ctx, s, depth) => w.node(o, &ctx, &s, depth, &mut next),
         }
+        if w.sink.over() {
+            return Err(Sink::too_expanded());
+        }
         // Reversed, so the stack reads in document order.
         stack.extend(next.into_iter().rev());
     }
@@ -214,6 +217,9 @@ impl Walker<'_> {
         next: &mut Vec<Work<'a>>,
     ) {
         for (k, v) in o {
+            if self.sink.over() {
+                return;
+            }
             match self.key(ctx, k) {
                 Key::Keyword(kw) => match kw.as_str() {
                     "@context" | "@id" => {}
@@ -254,6 +260,9 @@ impl Walker<'_> {
         // go on the stack reversed, so they are read in document order.
         let mut todo = vec![(v, depth)];
         while let Some((v, depth)) = todo.pop() {
+            if self.sink.over() {
+                return;
+            }
             if !self.within(depth) {
                 continue;
             }
@@ -344,7 +353,7 @@ impl Walker<'_> {
         if let Some(def) = ctx.term(k) {
             return match def.iri.starts_with('@') {
                 true => Key::Keyword(def.iri.clone()),
-                false => Key::Prop(def.iri.clone(), def.coerce.clone()),
+                false => Key::Prop(self.charged(def.iri.clone()), def.coerce.clone()),
             };
         }
         if ctx.odrl {
@@ -364,37 +373,52 @@ impl Walker<'_> {
     /// applies (a key, a type); otherwise a bare word is resolved against
     /// `@base`. `None` when nothing makes it absolute.
     fn expand(&mut self, ctx: &Ctx, s: &str, vocab: bool) -> Option<String> {
+        if self.sink.over() {
+            // The profile is refused; expand nothing more.
+            return Some(String::new());
+        }
         if vocab
             && let Some(def) = ctx.term(s)
             && !def.iri.starts_with('@')
         {
-            return Some(def.iri.clone());
+            return Some(self.charged(def.iri.clone()));
         }
         if let Some((prefix, suffix)) = s.split_once(':') {
             return Some(self.prefixed(ctx, s, prefix, suffix));
         }
         if vocab {
             if let Some(v) = &ctx.vocab {
-                return Some(format!("{v}{s}"));
+                return Some(self.charged(format!("{v}{s}")));
             }
             if ctx.odrl {
                 return Some(ns::odrl(s));
             }
         }
-        ctx.base.as_deref().map(|b| resolve(b, s))
+        let iri = ctx.base.as_deref().map(|b| resolve(b, s))?;
+        Some(self.charged(iri))
+    }
+
+    /// `iri`, counted against `max_expanded_bytes`.
+    fn charged(&mut self, iri: String) -> String {
+        self.sink.charge(iri.len());
+        iri
     }
 
     /// `prefix:suffix`: a compact IRI when the prefix is bound (by the
     /// document, the ODRL context, or the well-known fallback), else an
     /// absolute IRI with that scheme.
     fn prefixed(&mut self, ctx: &Ctx, s: &str, prefix: &str, suffix: &str) -> String {
+        if self.sink.over() {
+            // The profile is refused; expand nothing more.
+            return String::new();
+        }
         if prefix == "_" || suffix.starts_with("//") {
             return s.to_string();
         }
         if let Some(def) = ctx.term(prefix)
             && !def.iri.starts_with('@')
         {
-            return format!("{}{suffix}", def.iri);
+            return self.charged(format!("{}{suffix}", def.iri));
         }
         if ctx.odrl
             && let Some((_, ns)) = ns::ODRL_CONTEXT.iter().find(|(p, _)| *p == prefix)
@@ -532,7 +556,10 @@ impl Walker<'_> {
             return self.prefixed(ctx, id, prefix, suffix);
         }
         match (&ctx.vocab, ctx.odrl) {
-            (Some(v), _) => format!("{v}{id}"),
+            (Some(v), _) => {
+                let iri = format!("{v}{id}");
+                self.charged(iri)
+            }
             (None, true) => ns::odrl(id),
             (None, false) => id.to_string(),
         }

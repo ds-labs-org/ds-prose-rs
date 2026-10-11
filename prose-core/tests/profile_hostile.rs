@@ -391,3 +391,22 @@ fn ordinary_profiles_are_far_below_the_expanded_limit() {
         );
     }
 }
+
+#[test]
+fn long_subject_copied_into_each_triple_counts() {
+    // A 1 MiB @id written out in full, with 300 properties: nothing is
+    // expanded, but each triple holds a copy of the subject.
+    let mut node = Map::new();
+    node.insert(
+        "@id".into(),
+        json!(format!("https://example.org/{}", "a".repeat(1024 * 1024))),
+    );
+    node.insert("@type".into(), json!("http://www.w3.org/ns/odrl/2/Action"));
+    for i in 0..300 {
+        node.insert(format!("https://example.org/k{i}"), json!("x"));
+    }
+    assert_eq!(
+        ProfileVocab::parse(&Value::Object(node).to_string()),
+        Err(ProfileError::LimitExceeded("max_expanded_bytes"))
+    );
+}
