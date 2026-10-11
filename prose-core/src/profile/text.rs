@@ -107,7 +107,7 @@ pub(crate) fn plain(s: &str, max_chars: usize) -> String {
 /// selectors, tag characters, fillers), plus the interlinear annotation
 /// characters: text that renders as nothing, or as a blank that is not
 /// whitespace. Whitespace is handled before this is asked.
-fn invisible(c: char) -> bool {
+pub(crate) fn invisible(c: char) -> bool {
     c.is_control()
         || matches!(c,
             '\u{00AD}' | '\u{034F}' | '\u{061C}' | '\u{115F}' | '\u{1160}'

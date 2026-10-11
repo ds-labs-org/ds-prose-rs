@@ -1,5 +1,6 @@
 //! The private triple list every profile syntax is read into. Term semantics
 //! work on this list only, so a second syntax cannot change what a term means.
+use super::text::invisible;
 use super::{ProfileError, ProfileLimits};
 use std::collections::{HashMap, HashSet};
 
@@ -29,12 +30,60 @@ pub(crate) struct Notes {
 }
 
 impl Notes {
+    /// Adds `msg` once. Warnings quote the text they are about, so every
+    /// invisible character in one is written as `\u{..}`.
     pub fn warn(&mut self, msg: impl Into<String>) {
-        let msg = msg.into();
+        let msg: String = msg.into();
+        let msg = match msg.chars().any(invisible) {
+            false => msg,
+            true => msg.chars().map(escaped).collect(),
+        };
         if self.seen.insert(msg.clone()) {
             self.list.push(msg);
         }
     }
+}
+
+/// `c`, or `\u{..}` for an invisible one.
+fn escaped(c: char) -> String {
+    match invisible(c) {
+        true => format!("\\u{{{:x}}}", c as u32),
+        false => c.to_string(),
+    }
+}
+
+/// Whether `iri` holds only what an IRI may (RFC 3987): no whitespace, no
+/// invisible character (bidi controls among them) and none of
+/// `<>"{}|\^` and the backquote. A label made from such an IRI could spoof
+/// or hide text, so it is skipped, not cleaned.
+fn iri_ok(iri: &str) -> bool {
+    !iri.chars().any(|c| {
+        c.is_whitespace()
+            || invisible(c)
+            || matches!(c, '<' | '>' | '"' | '{' | '}' | '|' | '\\' | '^' | '`')
+    })
+}
+
+/// `iri` for a warning: what it cannot hold percent-encoded, or as
+/// `\u{..}` when invisible; at most 200 characters.
+fn shown(iri: &str) -> String {
+    let mut out = String::new();
+    for c in iri.chars().take(200) {
+        match c {
+            c if invisible(c) => out.push_str(&escaped(c)),
+            c if c.is_whitespace() || "<>\"{}|\\^`".contains(c) => {
+                let mut b = [0; 4];
+                for byte in c.encode_utf8(&mut b).bytes() {
+                    out.push_str(&format!("%{byte:02X}"));
+                }
+            }
+            c => out.push(c),
+        }
+    }
+    if iri.chars().nth(200).is_some() {
+        out.push('\u{2026}');
+    }
+    out
 }
 
 /// What a syntax front end hands to term semantics.
@@ -97,6 +146,25 @@ impl<'a> Sink<'a> {
         if self.over() {
             return;
         }
+        let datatype = match &o {
+            Object::Literal { datatype, .. } => datatype.as_deref(),
+            Object::Iri(_) => None,
+        };
+        let o_iri = match &o {
+            Object::Iri(i) => Some(i.as_str()),
+            Object::Literal { .. } => None,
+        };
+        if let Some(bad) = [Some(s), Some(p), o_iri, datatype]
+            .into_iter()
+            .flatten()
+            .find(|i| !iri_ok(i))
+        {
+            self.parsed.notes.warn(format!(
+                "skipped the IRI {}: it holds characters an IRI cannot hold (whitespace, invisible characters or markup delimiters)",
+                shown(bad)
+            ));
+            return;
+        }
         // Looking a value up costs its subject and property, kept or not:
         // a value past the cap below was still read, so that much counts.
         self.charge(s.len() + p.len());
@@ -144,6 +212,9 @@ impl<'a> Sink<'a> {
     }
 
     pub fn bind(&mut self, prefix: &str, ns: &str) {
+        if !iri_ok(prefix) || !iri_ok(ns) {
+            return;
+        }
         if self.bound.insert(prefix.to_string()) {
             self.parsed
                 .prefixes
