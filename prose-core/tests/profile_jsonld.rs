@@ -380,3 +380,63 @@ fn odrl_context_binds_only_its_own_prefixes() {
         assert_eq!(v.warnings().len(), 1, "{prefix}: {:?}", v.warnings());
     }
 }
+
+#[test]
+fn context_language_tags_plain_strings() {
+    let rdfs = "http://www.w3.org/2000/01/rdf-schema#";
+    let v = from(json!({
+        "@context": {
+            "@language": "en", "odrl": ODRL, "rdfs": rdfs, "skos": SKOS,
+            "count": {"@id": "rdfs:comment", "@type": "http://www.w3.org/2001/XMLSchema#integer"}
+        },
+        "@graph": [
+            {"@id": "https://example.org/a", "@type": "odrl:Action",
+             "rdfs:label": "Train",
+             "skos:definition": {"@value": "Untagged as written."},
+             "skos:note": {"@value": "Tagged as written.", "@language": "de"}},
+            {"@context": {"@language": null},
+             "@id": "https://example.org/b", "@type": "odrl:Action", "rdfs:label": "Bee"},
+            {"@context": {"@language": "FR"},
+             "@id": "https://example.org/c", "@type": "odrl:Action", "rdfs:label": "Cé",
+             "count": "3"}
+        ]
+    }))
+    .unwrap();
+    assert!(v.warnings().is_empty(), "{:?}", v.warnings());
+    let pairs = |iri: &str, f: fn(&prose_core::profile::Term) -> &prose_core::profile::LangText| {
+        f(v.term(iri).unwrap())
+            .iter()
+            .map(|(l, t)| (l.map(String::from), t.to_string()))
+            .collect::<Vec<_>>()
+    };
+    let some = |l: &str, t: &str| vec![(Some(l.to_string()), t.to_string())];
+    // A plain string takes the default language; a value object keeps its own.
+    assert_eq!(
+        pairs("https://example.org/a", |t| &t.label),
+        some("en", "Train")
+    );
+    assert_eq!(
+        pairs("https://example.org/a", |t| &t.definition),
+        vec![(None, "Untagged as written.".to_string())]
+    );
+    assert_eq!(
+        pairs("https://example.org/a", |t| &t.note),
+        some("de", "Tagged as written.")
+    );
+    // `null` clears it in a nested context; another value replaces it.
+    assert_eq!(
+        pairs("https://example.org/b", |t| &t.label),
+        vec![(None, "Bee".to_string())]
+    );
+    assert_eq!(
+        pairs("https://example.org/c", |t| &t.label),
+        some("fr", "Cé")
+    );
+    // A typed term is not a language string.
+    assert!(
+        v.term("https://example.org/c")
+            .unwrap()
+            .definition
+            .is_empty()
+    );
+}

@@ -247,3 +247,21 @@ fn n_triples_is_read_as_turtle() {
     assert_eq!(t.kinds, vec![TermKind::Action]);
     assert_eq!(t.display_label(&[]), "Ay");
 }
+
+#[test]
+fn context_language_equals_turtle_language_tags() {
+    let jsonld = ProfileVocab::parse(&format!(
+        r#"{{"@context": {{"@language": "en", "odrl": "{ODRL}",
+              "rdfs": "http://www.w3.org/2000/01/rdf-schema#"}},
+            "@id": "https://example.org/train", "@type": "odrl:Action",
+            "rdfs:label": "Train"}}"#
+    ))
+    .unwrap();
+    let ttl = ProfileVocab::parse(&format!(
+        "@prefix odrl: <{ODRL}> .\n@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n\
+         <https://example.org/train> a odrl:Action ; rdfs:label \"Train\"@en .\n"
+    ))
+    .unwrap();
+    assert!(jsonld.warnings().is_empty(), "{:?}", jsonld.warnings());
+    assert_eq!(jsonld, ttl);
+}
