@@ -23,6 +23,19 @@ fn quick<T: Send + 'static>(what: &str, f: impl FnOnce() -> T + Send + 'static) 
     }
 }
 
+/// As [`quick`], with a tighter bound, for a cost that grows by gigabytes
+/// rather than by time.
+fn quick_in<T: Send + 'static>(what: &str, secs: u64, f: impl FnOnce() -> T + Send + 'static) -> T {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    match rx.recv_timeout(Duration::from_secs(secs)) {
+        Ok(v) => v,
+        Err(_) => panic!("{what}: still reading after {secs} s"),
+    }
+}
+
 fn big() -> ProfileLimits {
     let mut l = ProfileLimits::default();
     l.max_bytes = 16 * 1024 * 1024;
@@ -297,4 +310,51 @@ fn turtle_values_past_the_cap_on_a_long_key() {
             "max_expanded_bytes"
         ))
     );
+}
+
+/// A policy whose @context binds `big` to a namespace of `ns_len` bytes and
+/// `n` short terms to `big:` itself: each term expands to a full copy.
+fn aliases_of_a_long_namespace(ns_len: usize, n: usize) -> String {
+    let ns = format!("https://e/{}#", "a".repeat(ns_len));
+    let terms: Vec<String> = (0..n).map(|i| format!(r#""k{i}":"big:""#)).collect();
+    format!(
+        r#"{{"@context":{{"big":"{ns}",{}}},"@type":"Set","uid":"urn:p:1","permission":[{{"action":"use","target":"urn:a"}}]}}"#,
+        terms.join(",")
+    )
+}
+
+#[test]
+fn policy_context_aliases_of_a_long_namespace() {
+    // 1 MB of policy, 2 GB once every alias is expanded. Expansion stops at
+    // a budget proportional to the context; the rest stays as written.
+    let v: Value = serde_json::from_str(&aliases_of_a_long_namespace(1024 * 1024, 2_000)).unwrap();
+    let p = quick("policy context aliases", move || Prefixes::of_document(&v));
+    assert!(p.expand("k1999:z").len() < 10_000);
+}
+
+#[test]
+fn rendering_with_a_profile_bounds_policy_context_expansion() {
+    let text = aliases_of_a_long_namespace(1024 * 1024, 3_000);
+    // 3 GB once expanded; bounded, it reads in well under a second.
+    let r = quick_in("render_with aliases", 4, move || {
+        let w = prose_core::profile::Wording::new()
+            .with_profile(ProfileVocab::parse(&action("")).unwrap());
+        prose_core::render_with(&text, &w).map(|r| r.document.policies.len())
+    });
+    assert_eq!(r, Ok(1));
+}
+
+#[test]
+fn the_editor_without_a_profile_bounds_policy_context_expansion() {
+    // The editor asks for the policy's prefixes on every render, with or
+    // without a profile.
+    let text = aliases_of_a_long_namespace(512 * 1024, 2_000);
+    let n = quick("editor aliases", move || {
+        let doc = prose_core::edit::read_model(&text).unwrap();
+        let p = prose_core::edit::prefixes(&doc);
+        let s = prose_core::edit::sentences_with(&doc, &Default::default());
+        (p.expand("k1999:z").len(), s.len())
+    });
+    assert!(n.0 < 10_000);
+    assert_eq!(n.1, 1);
 }
