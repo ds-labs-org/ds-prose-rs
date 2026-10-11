@@ -410,3 +410,65 @@ fn long_subject_copied_into_each_triple_counts() {
         Err(ProfileError::LimitExceeded("max_expanded_bytes"))
     );
 }
+
+/// Characters an IRI cannot hold (RFC 3987): bidi controls and other
+/// invisible ones, whitespace, and the delimiters `<>"{}|\^` and backquote.
+const BAD_IRI_CHARS: &[char] = &[
+    '\u{202E}',
+    '\u{2066}',
+    '\u{200B}',
+    '\u{E0041}',
+    ' ',
+    '<',
+    '>',
+    '"',
+    '{',
+    '}',
+    '|',
+    '\\',
+    '^',
+    '`',
+];
+
+#[test]
+fn an_iri_that_holds_what_an_iri_cannot_is_skipped() {
+    const ODRL: &str = "http://www.w3.org/ns/odrl/2/";
+    for &c in BAD_IRI_CHARS {
+        let bad = format!("https://example.org/ev{c}il");
+        let v = ProfileVocab::from_value(
+            &json!([
+                {"@id": bad, "@type": format!("{ODRL}Action")},
+                {"@id": "https://example.org/ok", "@type": format!("{ODRL}Action"),
+                 format!("{ODRL}includedIn"): {"@id": bad},
+                 format!("https://example.org/p{c}"): "x"}
+            ]),
+            &ProfileLimits::default(),
+        )
+        .unwrap();
+        let iris: Vec<&str> = v.terms().map(|t| t.iri.as_str()).collect();
+        assert_eq!(iris, vec!["https://example.org/ok"], "U+{:04X}", c as u32);
+        assert!(v.terms().next().unwrap().included_in.is_empty());
+        assert!(
+            v.warnings().iter().any(|w| w.contains("cannot hold")),
+            "{:?}",
+            v.warnings()
+        );
+        // The warning shows the character escaped, never as itself.
+        if c != ' ' {
+            assert!(
+                v.warnings().iter().all(|w| !w.contains(c)),
+                "{:?}",
+                v.warnings()
+            );
+        }
+    }
+}
+
+#[test]
+fn an_unlabelled_term_never_shows_a_bidi_control() {
+    // The case that reached the prose: no label, so the display label is
+    // the IRI's local name.
+    let text = "{\"@id\":\"https://example.org/\\u202Eevil\\u202C\",\
+                \"@type\":\"http://www.w3.org/ns/odrl/2/Action\"}";
+    assert_eq!(err(text), ProfileError::NoTerms);
+}

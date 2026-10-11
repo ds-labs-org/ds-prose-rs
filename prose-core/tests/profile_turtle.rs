@@ -325,3 +325,21 @@ fn turtle_relative_iris_resolve_against_a_given_base() {
     );
     assert_eq!(ProfileVocab::parse_with_base(&jsonld, base, &l).unwrap(), v);
 }
+
+#[test]
+fn turtle_iri_with_a_bidi_control_is_skipped() {
+    // Turtle accepts U+202E in an IRI (written as a \u escape); an IRI may not
+    // hold it (RFC 3987), and it would reach the prose as a label.
+    let text = format!(
+        "<https://example.org/\\u202Eevil\\u202C> a <{ODRL}Action> .\n\
+         <https://example.org/ok> a <{ODRL}Action> .\n"
+    );
+    let v = ProfileVocab::parse(&text).unwrap();
+    let iris: Vec<&str> = v.terms().map(|t| t.iri.as_str()).collect();
+    assert_eq!(iris, vec!["https://example.org/ok"]);
+    assert!(
+        v.warnings().iter().any(|w| w.contains("\\u{202e}")),
+        "{:?}",
+        v.warnings()
+    );
+}
