@@ -96,7 +96,9 @@ jobs:
           tool: wasm-bindgen-cli@${{ steps.wb.outputs.version }}
 
       - name: Clippy (wasm32)
-        run: cargo clippy -p prose-yew -p demo --target wasm32-unknown-unknown --features csr --all-targets --locked -- -D warnings
+        run: |
+          cargo clippy -p prose-yew -p demo --target wasm32-unknown-unknown --features csr --all-targets --locked -- -D warnings
+          cargo clippy -p prose-wasm --target wasm32-unknown-unknown --all-targets --locked -- -D warnings
 
       # `--test '*'`, not a list of names: a new file under tests/ is covered
       # the moment it exists (a bare `cargo test -p ... --target
@@ -113,6 +115,7 @@ jobs:
           echo "chromedriver: ${CHROMEDRIVER}"
           cargo test -p prose-yew --target wasm32-unknown-unknown --features csr --locked --test '*'
           cargo test -p demo --target wasm32-unknown-unknown --locked --test '*'
+          cargo test -p prose-wasm --target wasm32-unknown-unknown --locked --test '*'
 
   # The release demo build, served under the Pages sub-path and booted in a
   # browser. Catches a build or boot failure before the deploy workflow does.

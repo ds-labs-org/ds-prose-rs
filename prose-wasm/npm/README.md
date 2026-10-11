@@ -19,6 +19,24 @@ handle.update(otherPolicyJsonText, 'my-class'); // re-render
 handle.destroy();                               // unmount
 ```
 
+## Profiles
+
+`setProfile(text)` loads the ODRL profile the prose is worded with: its
+labels replace local names in the sentences, and a glossary of the profile
+terms follows each policy. The text is JSON-LD or Turtle, as you fetched it
+(the package does no network access).
+
+```js
+const summary = JSON.parse(handle.setProfile(profileText));
+// { iri, title, version, terms, counts: { action: 3, leftOperand: 3, ... }, warnings: [...] }
+handle.setProfile(null); // back to the built-in wording; returns "null"
+```
+
+It throws when the text is not a readable profile (an HTML landing page, a
+document that holds only a `@context`, a JSON Schema, a policy...); the
+message names the likely cause, and the previous profile stays. `update`
+keeps the loaded profile.
+
 Yew owns the element's children: use it as a leaf and do not touch what it
 renders. Style it through the `prose-*` classes (`.ds-prose`, `.prose-policy`,
 `.prose-rule`, ...) or the class you pass.

@@ -4,30 +4,63 @@
 //! re-renders it when the policy or class changes, and tears it down. Yew keeps
 //! its own virtual DOM inside that element, so the host must not touch the
 //! element's children.
-use prose_core::profile::{ProfileError, ProfileVocab};
+use prose_core::profile::{ProfileError, ProfileVocab, Wording};
 use prose_yew::{OdrlProse, OdrlProseProps, SharedWording};
+use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 use web_sys::Element;
 use yew::{AttrValue, Classes, Renderer};
 
-fn props(json: &str, class: Option<String>) -> OdrlProseProps {
+fn props(json: &str, class: Option<String>, wording: Option<SharedWording>) -> OdrlProseProps {
     OdrlProseProps {
         json: AttrValue::from(json.to_owned()),
         class: class.map(Classes::from).unwrap_or_default(),
-        wording: None,
+        wording,
         glossary: true,
     }
 }
 
 /// Reads `text` as a profile (JSON-LD, or Turtle: this crate turns on
 /// prose-core's `turtle` feature). `None` means no profile.
-pub fn read_profile(_text: Option<&str>) -> Result<Option<SharedWording>, ProfileError> {
-    Ok(None)
+pub fn read_profile(text: Option<&str>) -> Result<Option<SharedWording>, ProfileError> {
+    match text {
+        None => Ok(None),
+        Some(t) => {
+            let p = ProfileVocab::parse(t)?;
+            Ok(Some(SharedWording::from(Wording::new().with_profile(p))))
+        }
+    }
 }
 
-/// What `setProfile` returns for a loaded profile, as JSON text.
-pub fn summary_json(_p: &ProfileVocab) -> String {
-    "{}".to_string()
+/// What `setProfile` returns for a loaded profile, as JSON text: `iri`,
+/// `title` and `version` (each `null` when the profile does not say),
+/// `terms`, `counts` (only the kinds present, keyed in camelCase) and
+/// `warnings` (what was not read, or read with a guess).
+pub fn summary_json(p: &ProfileVocab) -> String {
+    let s = p.summary();
+    let counts: serde_json::Map<String, Value> = s
+        .counts
+        .iter()
+        .map(|(k, n)| (camel(&format!("{k:?}")), Value::from(*n)))
+        .collect();
+    json!({
+        "iri": s.iri,
+        "title": p.title().pick(&[]),
+        "version": s.version,
+        "terms": s.terms,
+        "counts": counts,
+        "warnings": p.warnings(),
+    })
+    .to_string()
+}
+
+/// `LeftOperand` -> `leftOperand`.
+fn camel(name: &str) -> String {
+    let mut c = name.chars();
+    match c.next() {
+        Some(f) => f.to_ascii_lowercase().to_string() + c.as_str(),
+        None => String::new(),
+    }
 }
 
 /// A mounted `<OdrlProse>`. Call `destroy()` (or `free()`) when the host
@@ -35,6 +68,10 @@ pub fn summary_json(_p: &ProfileVocab) -> String {
 #[wasm_bindgen]
 pub struct ProseHandle {
     app: Option<yew::AppHandle<OdrlProse>>,
+    // Kept so `update` and `setProfile` each change one input only.
+    json: String,
+    class: Option<String>,
+    wording: Option<SharedWording>,
 }
 
 #[wasm_bindgen]
@@ -42,21 +79,40 @@ impl ProseHandle {
     /// Mount into `root`. `class` is added to the component's root element.
     #[wasm_bindgen(constructor)]
     pub fn new(root: Element, json: &str, class: Option<String>) -> ProseHandle {
-        let app = Renderer::<OdrlProse>::with_root_and_props(root, props(json, class)).render();
-        ProseHandle { app: Some(app) }
-    }
-
-    /// Re-render with a new policy and class. No-op after `destroy()`.
-    pub fn update(&mut self, json: &str, class: Option<String>) {
-        if let Some(app) = self.app.as_mut() {
-            app.update(props(json, class));
+        let app =
+            Renderer::<OdrlProse>::with_root_and_props(root, props(json, class.clone(), None))
+                .render();
+        ProseHandle {
+            app: Some(app),
+            json: json.to_owned(),
+            class,
+            wording: None,
         }
     }
 
-    /// Not implemented yet.
+    /// Re-render with a new policy and class. The profile is kept. No-op
+    /// after `destroy()`.
+    pub fn update(&mut self, json: &str, class: Option<String>) {
+        self.json = json.to_owned();
+        self.class = class;
+        self.render();
+    }
+
+    /// Load the ODRL profile the prose is worded with: JSON-LD or Turtle
+    /// text, or `null` for none. Returns the profile's summary as JSON
+    /// text (`"null"` after clearing). Throws with a message that names
+    /// the likely cause when the text is not a readable profile; the
+    /// previous profile then stays.
     #[wasm_bindgen(js_name = setProfile)]
-    pub fn set_profile(&mut self, _text: Option<String>) -> Result<String, JsError> {
-        Ok("null".to_string())
+    pub fn set_profile(&mut self, text: Option<String>) -> Result<String, JsError> {
+        let wording = read_profile(text.as_deref()).map_err(|e| JsError::new(&e.to_string()))?;
+        let summary = match wording.as_ref().and_then(|w| w.0.profiles().next()) {
+            Some(p) => summary_json(p),
+            None => "null".to_string(),
+        };
+        self.wording = wording;
+        self.render();
+        Ok(summary)
     }
 
     /// Unmount and remove the rendered DOM. Safe to call more than once.
@@ -67,10 +123,17 @@ impl ProseHandle {
     }
 }
 
+impl ProseHandle {
+    fn render(&mut self) {
+        if let Some(app) = self.app.as_mut() {
+            app.update(props(&self.json, self.class.clone(), self.wording.clone()));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::{Value, json};
 
     const RESEARCH: &str = include_str!("../../prose-core/tests/profiles/research.jsonld");
     const RESEARCH_TTL: &str = include_str!("../../prose-core/tests/profiles/research.ttl");
