@@ -39,6 +39,11 @@ pub struct OdrlProseViewProps {
     /// Shown inline at their targets.
     #[prop_or_default]
     pub issues: Rc<Vec<Issue>>,
+    /// An edit the host refused (`error.issue(&event)` of the last
+    /// refused event, see `ProseEditorWith::refused`), shown with the
+    /// issues at its slot. `None` shows nothing.
+    #[prop_or_default]
+    pub refusal: Option<Issue>,
     /// Host badges after each policy heading, rule sentence and condition.
     #[prop_or_default]
     pub decorate: Option<Callback<Decoration, Html>>,
@@ -326,9 +331,10 @@ pub fn odrl_prose_view(props: &OdrlProseViewProps) -> Html {
             .collect(),
         prefixes: prefixes.clone(),
         doc: props.doc.clone(),
+        closed_cache: Default::default(),
     });
     let mut index: HashMap<String, Vec<&Issue>> = HashMap::new();
-    for i in props.issues.iter() {
+    for i in props.issues.iter().chain(props.refusal.iter()) {
         index.entry(issue_key(&i.target)).or_default().push(i);
     }
     let r = Rend {

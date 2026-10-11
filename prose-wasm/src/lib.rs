@@ -20,6 +20,8 @@ fn props(json: &str, class: Option<String>, wording: Option<SharedWording>) -> O
         class: class.map(Classes::from).unwrap_or_default(),
         wording,
         glossary: true,
+        validator: None,
+        violations: false,
     }
 }
 

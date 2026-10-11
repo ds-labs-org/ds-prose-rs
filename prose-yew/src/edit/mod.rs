@@ -34,6 +34,7 @@ mod closed;
 mod config;
 mod css;
 mod hook;
+mod problems;
 mod slot;
 mod suggest;
 mod view;
@@ -49,6 +50,8 @@ pub use css::BASE_CSS;
 pub use hook::{
     ProseEditor, ProseEditorWith, use_prose_editor, use_prose_editor_with, use_validation,
 };
+pub(crate) use problems::status;
+pub use problems::{ProseProblems, ProseProblemsProps};
 pub use prose_core::edit::StrictEdit;
 pub use suggest::filter_suggestions;
 pub use view::{OdrlProseView, OdrlProseViewProps};
@@ -113,6 +116,9 @@ pub(crate) struct Env {
     pub prefixes: Rc<prose_core::profile::Prefixes>,
     /// The document, for what a slot's constraint says elsewhere.
     pub doc: Rc<prose_core::edit::EditDoc>,
+    /// Whether a slot is closed by strict validation, by (policy, kind of
+    /// slot) or slot, so that one render asks the validator once.
+    pub closed_cache: std::cell::RefCell<std::collections::HashMap<String, bool>>,
 }
 
 #[derive(Clone)]

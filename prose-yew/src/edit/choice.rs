@@ -7,6 +7,9 @@ use prose_core::edit::{
 };
 use prose_core::wording;
 
+use prose_core::edit::EditDoc;
+use prose_core::validate::{Mode, Validator};
+
 use super::config::{Choice, cls, fill, written_form};
 use super::{Env, EnvRef, FocusKind, SlotFocus};
 
@@ -17,6 +20,8 @@ struct Opt {
     suggested: bool,
     /// The current value, which no list offers.
     extra: bool,
+    /// Strict validation: the validator would not let this be written.
+    blocked: bool,
 }
 
 impl Opt {
@@ -26,6 +31,7 @@ impl Opt {
             label,
             suggested: false,
             extra: false,
+            blocked: false,
         }
     }
 }
@@ -40,6 +46,39 @@ fn hinted_operators(env: &Env, left: &str) -> Vec<String> {
     w.lookup_written(&env.prefixes, left)
         .map(|(t, _)| t.hints.operators.clone())
         .unwrap_or_default()
+}
+
+/// The validator of a strict configuration.
+fn strict(env: &Env) -> Option<&Validator> {
+    env.cfg
+        .validator
+        .as_ref()
+        .filter(|v| v.options().mode() == Mode::Strict)
+}
+
+/// Whether the left operand is closed by its profile to certain operators:
+/// the profile's operators are the only ones strict validation takes.
+fn closes_operators(env: &Env, left: &str) -> bool {
+    let w = &env.cfg.wording;
+    if left.is_empty() || w.is_empty() {
+        return false;
+    }
+    w.lookup_written(&env.prefixes, left)
+        .is_some_and(|(t, _)| t.hints.closed && !t.hints.operators.is_empty())
+}
+
+/// Whether strict validation would refuse `value` written into the select.
+fn is_blocked(v: &Validator, doc: &EditDoc, c: &ChoiceSlot, value: &str) -> bool {
+    value.is_empty()
+        || v.admissible(
+            doc,
+            &EditEvent::SetChoice {
+                slot: c.path.clone(),
+                expect: c.owner,
+                value: value.to_string(),
+            },
+        )
+        .is_err()
 }
 
 /// The options of a choice, with the current raw value among them: a raw
@@ -123,6 +162,15 @@ fn options(env: &Env, c: &ChoiceSlot, severity: Option<Severity>) -> (Vec<Opt>, 
                 .flatten()
         })
         .map(|o| o.value.clone());
+    // Under strict validation, what the validator would refuse is listed but
+    // cannot be picked.
+    if let Some(v) = strict(env)
+        && matches!(c.kind, ChoiceKind::Operator | ChoiceKind::Conflict)
+    {
+        for o in opts.iter_mut().filter(|o| !o.value.is_empty()) {
+            o.blocked = is_blocked(v, &env.doc, c, &o.value);
+        }
+    }
     // An operator the reducer would refuse is not offered, unless the host
     // translates the switch itself.
     if c.kind == ChoiceKind::Operator && !env.cfg.host_plans_operator_switches {
@@ -155,6 +203,13 @@ fn options(env: &Env, c: &ChoiceSlot, severity: Option<Severity>) -> (Vec<Opt>, 
             c.raw.clone()
         }
     };
+    // The current value stays selected, and says it is not allowed.
+    for o in opts
+        .iter_mut()
+        .filter(|o| o.blocked && !o.extra && o.value == selected)
+    {
+        o.label = fill(&labels.not_allowed_option, &[("label", &o.label)]);
+    }
     (opts, selected)
 }
 
@@ -242,6 +297,9 @@ pub(crate) fn choice_select(props: &ChoiceSelectProps) -> Html {
         Callback::from(move |_: FocusEvent| on_focus.emit(None))
     };
     let invalid = matches!(props.severity, Some(Severity::Error)).then_some("true");
+    let closed = c.kind == ChoiceKind::Operator
+        && strict(&env).is_some()
+        && closes_operators(&env, &c.left_operand);
     html! {
         <select
             key={format!("{}:{:?}", c.owner.0, c.path.field)}
@@ -257,7 +315,19 @@ pub(crate) fn choice_select(props: &ChoiceSelectProps) -> Html {
             onfocusin={onfocusin}
             onfocusout={onfocusout}
         >
-            if opts.iter().any(|o| o.suggested) {
+            if closed {
+                // The profile closes the operand: what it allows, and, still
+                // listed, what it does not.
+                { for opts.iter().filter(|o| o.extra).map(|o| option(o, &selected)) }
+                <optgroup label={cfg.labels.allowed_group.clone()}>
+                    { for opts.iter().filter(|o| !o.extra && !o.blocked).map(|o| option(o, &selected)) }
+                </optgroup>
+                if opts.iter().any(|o| !o.extra && o.blocked) {
+                    <optgroup label={cfg.labels.not_allowed_group.clone()} disabled=true>
+                        { for opts.iter().filter(|o| !o.extra && o.blocked).map(|o| option(o, &selected)) }
+                    </optgroup>
+                }
+            } else if opts.iter().any(|o| o.suggested) {
                 // The profile's suggestions first, never hiding the rest.
                 { for opts.iter().filter(|o| o.extra).map(|o| option(o, &selected)) }
                 <optgroup label={cfg.labels.suggested_operators.clone()}>
@@ -278,8 +348,12 @@ pub(crate) fn choice_select(props: &ChoiceSelectProps) -> Html {
 }
 
 fn option(o: &Opt, selected: &str) -> Html {
+    // A blocked option is disabled, unless it is the current value: a
+    // disabled option that is selected still shows as the select's value.
     html! {
-        <option value={o.value.clone()} selected={o.value == selected}>{ o.label.clone() }</option>
+        <option value={o.value.clone()} selected={o.value == selected} disabled={o.blocked && o.value != selected}>
+            { o.label.clone() }
+        </option>
     }
 }
 

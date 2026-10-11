@@ -21,13 +21,14 @@ use edit::fill;
 pub use edit::{
     BASE_CSS, ButtonContent, Choice, Decoration, DecorationAt, EditConfig, EditMode, EmptyTexts,
     FieldNames, FocusKind, Labels, Nouns, OdrlProseView, OdrlProseViewProps, Placeholders,
-    ProseClasses, ProseEditor, ProseEditorWith, ProseStyles, Reveal, SlotFocus, StrictEdit,
-    Suggestion, Vocabulary, filter_suggestions, use_prose_editor, use_prose_editor_with,
-    use_validation,
+    ProseClasses, ProseEditor, ProseEditorWith, ProseProblems, ProseProblemsProps, ProseStyles,
+    Reveal, SlotFocus, StrictEdit, Suggestion, Vocabulary, filter_suggestions, use_prose_editor,
+    use_prose_editor_with, use_validation,
 };
 /// The core crate, so hosts can reach `prose_yew::prose_core::edit::*`.
 pub use prose_core;
 use prose_core::profile::Wording;
+use prose_core::validate::{Report, Validator};
 use prose_core::{Condition, Document, Policy, PolicyGlossary, ProseError, Rule, RuleKind};
 use std::rc::Rc;
 use yew::prelude::*;
@@ -62,6 +63,15 @@ pub struct OdrlProseProps {
     /// a profile that explains a term the policy uses.
     #[prop_or(true)]
     pub glossary: bool,
+    /// Validates the policy against `validator`'s profiles. Nothing is shown
+    /// for it unless `violations` is set.
+    #[prop_or_default]
+    pub validator: Option<Validator>,
+    /// Add a section after the policies with the validator's findings and
+    /// its verdict. Needs a `validator`. Without it, the rendering is as
+    /// before.
+    #[prop_or(false)]
+    pub violations: bool,
 }
 
 #[derive(Properties, PartialEq, Clone)]
@@ -129,13 +139,61 @@ pub fn odrl_prose(props: &OdrlProseProps) -> Html {
             None => prose_core::render_with(json, &Wording::default()),
         },
     );
+    let report = use_memo(
+        (
+            props.json.clone(),
+            props.validator.clone(),
+            props.violations,
+        ),
+        |(json, validator, violations)| match validator {
+            Some(v) if *violations => Some(v.validate_json(json)),
+            _ => None,
+        },
+    );
     let class = classes!("ds-prose", props.class.clone());
     match &*parsed {
         Ok(r) => {
             let glossary = if props.glossary { &r.glossary[..] } else { &[] };
-            html! { <article class={class}>{ document(&r.document, glossary) }</article> }
+            html! {
+                <article class={class}>
+                    { document(&r.document, glossary) }
+                    if let Some(report) = &*report { { violations_section(report) } }
+                </article>
+            }
         }
         Err(e) => html! { <article class={class}>{ error(e) }</article> },
+    }
+}
+
+/// The findings of a validation, after the policies. Plain markup: a
+/// status line and, when there is something to say, a list.
+fn violations_section(report: &Report) -> Html {
+    let labels = Labels::default();
+    let status = edit::status(report, &labels);
+    let findings = &report.findings;
+    html! {
+        <section class="prose-violations">
+            if let Some((kind, text)) = status {
+                <p class={classes!("prose-violations-status", kind)} role="status">{ text }</p>
+            }
+            if !findings.is_empty() {
+                <ul class="prose-violations-list">
+                    { for findings.iter().map(|f| {
+                        let severity = match f.severity {
+                            prose_core::edit::Severity::Error => "prose-violation-error",
+                            prose_core::edit::Severity::Warning => "prose-violation-warning",
+                            prose_core::edit::Severity::Info => "prose-violation-info",
+                        };
+                        html! {
+                            <li class={classes!("prose-violation", severity)}>
+                                <code class="prose-rule-id">{ f.rule.as_str() }</code>{ " " }
+                                { f.message.clone() }
+                            </li>
+                        }
+                    }) }
+                </ul>
+            }
+        </section>
     }
 }
 

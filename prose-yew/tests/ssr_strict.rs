@@ -184,7 +184,7 @@ async fn problems_panel_snapshot() {
 async fn the_panel_groups_findings_by_rule_in_document_order() {
     let html = ssr::<ProseProblems>(panel(report_of("violating.json", &strict()))).await;
     assert!(
-        html.starts_with("<section class=\"prose-problems\""),
+        html.contains("<section class=\"prose-problems\">"),
         "{html}"
     );
     assert!(html.contains("Does not conform"), "{html}");
@@ -486,4 +486,9 @@ async fn a_closed_slot_with_a_value_outside_the_profile_says_so() {
     assert_eq!(html.matches("(not in the profile)").count(), 2, "{html}");
     // A value the profile allows has no note.
     assert!(tag_of(&html, FINE_TUNE).contains("data-closed=\"true\""));
+}
+#[tokio::test]
+async fn strict_operator_select_snapshot() {
+    let html = edit_view("violating.json", strict_config(), vec![]).await;
+    snapshot("strict_operator_select", &select_of(&html, PURPOSE_OP));
 }

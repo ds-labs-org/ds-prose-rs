@@ -26,6 +26,8 @@ async fn v01_snapshots() {
             class: Classes::new(),
             wording: None,
             glossary: true,
+            validator: None,
+            violations: false,
         })
         .await;
         let path = format!("{}/tests/snapshots/{name}.html", env!("CARGO_MANIFEST_DIR"));
@@ -57,6 +59,7 @@ fn props(doc: Rc<EditDoc>, mode: EditMode, config: EditConfig) -> OdrlProseViewP
         onedit: Callback::noop(),
         on_focus_slot: Callback::noop(),
         issues: Rc::new(vec![]),
+        refusal: None,
         decorate: None,
         class: Classes::new(),
     }
@@ -672,6 +675,8 @@ fn prose_props(json: String, wording: Option<Rc<Wording>>, glossary: bool) -> Od
         class: Classes::new(),
         wording: wording.map(SharedWording),
         glossary,
+        validator: None,
+        violations: false,
     }
 }
 

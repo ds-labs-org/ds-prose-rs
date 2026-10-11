@@ -17,6 +17,7 @@ use prose_core::edit::{
     Severity, Slot, SlotKind, SlotPath, left_operand_at,
 };
 use prose_core::profile::{Term, TermKind};
+use prose_core::validate::{Mode, Validator};
 use prose_core::wording;
 
 use super::config::{Suggestion, cls, merge_styles, written_form};
@@ -144,6 +145,87 @@ pub(crate) struct SlotEditorProps {
     /// Space-separated ids of the issue elements that describe this slot.
     #[prop_or_default]
     pub described_by: Option<AttrValue>,
+}
+
+/// A text no profile defines, to ask the validator whether a slot takes
+/// anything: if it would refuse this, the slot is closed.
+const PROBE: &str = "https://ds-prose.invalid/not-a-term";
+
+/// The validator of a strict configuration.
+fn strict(env: &Env) -> Option<&Validator> {
+    env.cfg
+        .validator
+        .as_ref()
+        .filter(|v| v.options().mode() == Mode::Strict)
+}
+
+fn set_text(slot: &Slot, value: &str) -> EditEvent {
+    EditEvent::SetText {
+        slot: slot.path.clone(),
+        expect: slot.owner,
+        value: value.to_string(),
+    }
+}
+
+/// How strict validation closes a slot.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Closure {
+    /// The validator refuses a term outside the vocabulary.
+    Terms,
+    /// The left operand is closed to the values the profile lists.
+    Values,
+}
+
+/// Whether, and how, strict validation closes `slot`: its terms are the
+/// vocabulary's and nothing else, so a combobox offers those and takes
+/// nothing more. Open while the vocabulary is incomplete (the validator
+/// would refuse nothing), in advisory mode, and without suggestions.
+fn closure(env: &Env, slot: &Slot) -> Option<Closure> {
+    let v = strict(env)?;
+    if !env.cfg.suggestions {
+        return None;
+    }
+    match slot.kind {
+        SlotKind::Action | SlotKind::LeftOperand | SlotKind::PolicyKind | SlotKind::Unit => {
+            // What a policy's terms are read against is the policy's; a
+            // unit's depends on its constraint's left operand.
+            let key = match slot.kind {
+                SlotKind::Unit => slot.path.to_string(),
+                kind => format!("{}:{:?}", slot.path.node.policy, kind),
+            };
+            let cached = env.closed_cache.borrow().get(&key).copied();
+            let closed = cached.unwrap_or_else(|| {
+                let closed = v.admissible(&env.doc, &set_text(slot, PROBE)).is_err();
+                env.closed_cache.borrow_mut().insert(key, closed);
+                closed
+            });
+            closed.then_some(Closure::Terms)
+        }
+        SlotKind::Literal if matches!(slot.path.field, Field::RightOperand(_)) => {
+            let closed_values = left_operand_term(env, slot)
+                .is_some_and(|t| t.hints.closed && !t.hints.value_tree.is_empty());
+            closed_values.then_some(Closure::Values)
+        }
+        _ => None,
+    }
+}
+
+/// Whether the text now in a closed slot is one it does not take: the
+/// validator refuses it, or it is not one of the values the profile lists.
+fn outside(env: &Env, slot: &Slot, closure: Closure, options: &[Suggestion]) -> bool {
+    if slot.raw.is_empty() {
+        return false;
+    }
+    match closure {
+        Closure::Terms => {
+            strict(env).is_some_and(|v| v.admissible(&env.doc, &set_text(slot, &slot.raw)).is_err())
+        }
+        Closure::Values => {
+            let w = &env.cfg.wording;
+            let same = |a: &str, b: &str| w.expand(&env.prefixes, a) == w.expand(&env.prefixes, b);
+            !options.iter().any(|o| same(&o.value, &slot.raw))
+        }
+    }
 }
 
 /// The suggestions for a slot, and the depth of each nested one (a value
@@ -370,6 +452,15 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         options_for(&env, slot)
     } else {
         (vec![], HashMap::new())
+    };
+    let closed = closure(&env, slot);
+    let not_in_profile = closed.is_some_and(|c| outside(&env, slot, c, &options));
+    let note_id = format!("prose-note-{}", slot.path);
+    // The issues that describe the slot, then the note under it.
+    let described = match (described_by.clone(), not_in_profile) {
+        (Some(d), true) => Some(AttrValue::from(format!("{d} {note_id}"))),
+        (None, true) => Some(AttrValue::from(note_id.clone())),
+        (d, false) => d,
     };
     let shown: Vec<Suggestion> = if *open {
         filter_suggestions(&options, &query, cfg.max_suggestions)
@@ -769,12 +860,13 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                     aria-haspopup={use_suggestions.then_some("listbox")}
                     aria-label={label}
                     aria-invalid={invalid}
-                    aria-describedby={described_by.clone()}
+                    aria-describedby={described}
                     aria-autocomplete={use_suggestions.then_some("list")}
                     aria-expanded={expanded}
                     aria-controls={controls}
                     aria-activedescendant={activedesc}
                     data-slot={slot.path.to_string()}
+                    data-closed={closed.map(|_| "true")}
                     data-placeholder={placeholder(&env, slot)}
                     title={slot.display.clone()}
                     spellcheck="false"
@@ -791,6 +883,9 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                     { if slot.raw.is_empty() { Html::default() } else { html! { { slot.raw.clone() } } } }
                 </span>
             </span>
+            if not_in_profile {
+                <small id={note_id} class="prose-slot-note">{ cfg.labels.not_in_profile.clone() }</small>
+            }
             if list_open {
                 <ul
                     id={list_id.clone()}
