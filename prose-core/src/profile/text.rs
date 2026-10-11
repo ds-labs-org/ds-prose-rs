@@ -6,10 +6,32 @@
 pub struct LangText(Vec<(Option<String>, String)>);
 
 impl LangText {
-    /// The text in the best language for `prefs` (most preferred first).
+    /// The text in the best language for `prefs` (most preferred first): an
+    /// exact tag match, then a primary-subtag match (`de-CH` and `de`), then
+    /// English, then untagged text, then the first text given.
     pub fn pick(&self, prefs: &[String]) -> Option<&str> {
-        let _ = prefs;
-        None
+        let tagged = |want: &dyn Fn(&str) -> bool| {
+            self.0
+                .iter()
+                .find(|(l, _)| l.as_deref().is_some_and(want))
+                .map(|(_, t)| t.as_str())
+        };
+        prefs
+            .iter()
+            .find_map(|p| tagged(&|l| l.eq_ignore_ascii_case(p)))
+            .or_else(|| {
+                prefs
+                    .iter()
+                    .find_map(|p| tagged(&|l| primary(l).eq_ignore_ascii_case(primary(p))))
+            })
+            .or_else(|| tagged(&|l| primary(l) == "en"))
+            .or_else(|| {
+                self.0
+                    .iter()
+                    .find(|(l, _)| l.is_none())
+                    .map(|(_, t)| t.as_str())
+            })
+            .or_else(|| self.0.first().map(|(_, t)| t.as_str()))
     }
 
     pub fn is_empty(&self) -> bool {
@@ -30,10 +52,127 @@ impl LangText {
     }
 }
 
-/// `s` as plain text of at most `max_chars` characters.
+/// The primary subtag: `de` for `de-CH`.
+fn primary(tag: &str) -> &str {
+    tag.split('-').next().unwrap_or(tag)
+}
+
+/// `s` as plain text of at most `max_chars` characters: tags stripped,
+/// entities decoded, bidi, zero-width and control characters removed,
+/// whitespace collapsed, and an ellipsis where it was cut. The result is
+/// meant for a text node, never for markup.
 pub(crate) fn plain(s: &str, max_chars: usize) -> String {
-    let _ = max_chars;
-    s.to_string()
+    let decoded = decode_entities(&strip_tags(s));
+    let mut out = String::with_capacity(decoded.len());
+    let mut space = false;
+    for c in decoded.chars() {
+        if c.is_whitespace() {
+            space = !out.is_empty();
+        } else if !invisible(c) {
+            if space {
+                out.push(' ');
+                space = false;
+            }
+            out.push(c);
+        }
+    }
+    truncate(out, max_chars)
+}
+
+/// Bidi controls, zero-width characters, the soft hyphen and every other
+/// control character. Whitespace is handled before this is asked.
+fn invisible(c: char) -> bool {
+    c.is_control()
+        || matches!(c,
+            '\u{00AD}' | '\u{061C}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
+}
+
+/// `s` with every tag replaced by a space. A `<` opens a tag only when a
+/// letter, `/`, `!` or `?` follows it; an unterminated tag runs to the end.
+fn strip_tags(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find('<') {
+        out.push_str(&rest[..i]);
+        let after = &rest[i + 1..];
+        let opens = after
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || matches!(c, '/' | '!' | '?'));
+        if !opens {
+            out.push('<');
+            rest = after;
+            continue;
+        }
+        out.push(' ');
+        match after.find('>') {
+            Some(j) => rest = &after[j + 1..],
+            None => return out,
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// `s` with the HTML entities profiles use decoded: the five XML ones,
+/// `&nbsp;` and numeric references. Anything else is kept as written.
+fn decode_entities(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find('&') {
+        out.push_str(&rest[..i]);
+        let after = &rest[i + 1..];
+        let entity = after
+            .find(';')
+            .filter(|&j| j <= 10)
+            .and_then(|j| entity(&after[..j]).map(|c| (c, j)));
+        match entity {
+            Some((c, j)) => {
+                out.push(c);
+                rest = &after[j + 1..];
+            }
+            None => {
+                out.push('&');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+fn entity(name: &str) -> Option<char> {
+    match name {
+        "amp" => Some('&'),
+        "lt" => Some('<'),
+        "gt" => Some('>'),
+        "quot" => Some('"'),
+        "apos" => Some('\''),
+        "nbsp" => Some(' '),
+        _ => {
+            let n = name.strip_prefix('#')?;
+            let code = match n.strip_prefix(['x', 'X']) {
+                Some(hex) => u32::from_str_radix(hex, 16).ok()?,
+                None => n.parse().ok()?,
+            };
+            char::from_u32(code)
+        }
+    }
+}
+
+/// At most `max` characters; a cut text ends in an ellipsis.
+fn truncate(s: String, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s;
+    }
+    if max == 0 {
+        return String::new();
+    }
+    let mut cut: String = s.chars().take(max - 1).collect();
+    cut.truncate(cut.trim_end().len());
+    cut.push('\u{2026}');
+    cut
 }
 
 #[cfg(test)]

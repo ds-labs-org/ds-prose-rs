@@ -5,6 +5,8 @@
 //! not declare still read and edit as before, and anything a profile says
 //! about a policy is advisory. Profile text is third-party input and is made
 //! plain text before it is kept.
+// The reader that uses the hygiene lands in the next commits.
+#[allow(dead_code)]
 mod text;
 
 pub use text::LangText;
