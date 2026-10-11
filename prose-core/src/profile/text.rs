@@ -102,13 +102,20 @@ pub(crate) fn plain(s: &str, max_chars: usize) -> String {
     truncate(out, max_chars)
 }
 
-/// Bidi controls, zero-width characters, the soft hyphen and every other
-/// control character. Whitespace is handled before this is asked.
+/// Every control character, and every Unicode default-ignorable code
+/// point (bidi controls, zero-width characters, the soft hyphen, variation
+/// selectors, tag characters, fillers), plus the interlinear annotation
+/// characters: text that renders as nothing, or as a blank that is not
+/// whitespace. Whitespace is handled before this is asked.
 fn invisible(c: char) -> bool {
     c.is_control()
         || matches!(c,
-            '\u{00AD}' | '\u{061C}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}'
-            | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
+            '\u{00AD}' | '\u{034F}' | '\u{061C}' | '\u{115F}' | '\u{1160}'
+            | '\u{17B4}' | '\u{17B5}' | '\u{180B}'..='\u{180F}'
+            | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{206F}'
+            | '\u{3164}' | '\u{FE00}'..='\u{FE0F}' | '\u{FEFF}' | '\u{FFA0}'
+            | '\u{FFF0}'..='\u{FFFB}' | '\u{1BCA0}'..='\u{1BCA3}'
+            | '\u{1D173}'..='\u{1D17A}' | '\u{E0000}'..='\u{E0FFF}')
 }
 
 /// `s` with every tag replaced by a space. A `<` opens a tag only when a
