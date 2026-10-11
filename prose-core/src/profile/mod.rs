@@ -8,8 +8,38 @@
 //!
 //! Profiles are read as JSON-LD without a JSON-LD processor: inline
 //! `@context` prefixes, `@vocab`, `@base` and simple term definitions are
-//! followed, remote contexts are not. Every syntax is first read into a
-//! private triple list, and term semantics work on that list only.
+//! followed, remote contexts are not. With the `turtle` feature, a text
+//! that is not JSON is read as Turtle. Every syntax is first read into a
+//! private triple list, and term semantics work on that list only, so a
+//! Turtle profile and its JSON-LD twin read as equal [`ProfileVocab`]s.
+//!
+//! ```
+//! use prose_core::profile::{ProfileVocab, Wording};
+//!
+//! let profile = ProfileVocab::parse(r#"{
+//!   "@context": { "odrl": "http://www.w3.org/ns/odrl/2/",
+//!                 "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+//!                 "ex": "https://example.org/profile/" },
+//!   "@id": "ex:fineTune", "@type": "odrl:Action", "rdfs:label": "Fine-tune"
+//! }"#)?;
+//! let wording = Wording::new().with_profile(profile);
+//! let policy = r#"{ "@context": { "ex": "https://example.org/profile/" },
+//!   "@type": "Set", "uid": "urn:policy:1",
+//!   "permission": [{ "action": "ex:fineTune", "target": "urn:asset:1" }] }"#;
+//! let reading = prose_core::render_with(policy, &wording)?;
+//! assert!(reading.document.policies[0].rules[0].sentence.contains("may fine-tune"));
+//! assert_eq!(reading.glossary[0].terms[0].label, "Fine-tune");
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! The ds-prose extension (`prose:operator`, `prose:rightOperand`,
+//! `prose:datatype`, `prose:unit` in
+//! `https://ds-labs-org.github.io/ds-prose-rs/profile#`) is a ds-prose
+//! convention, not ODRL: on a left operand it orders the editor's
+//! suggestions ([`OperandHints`]) and never restricts them.
+//!
+//! Every read is bounded by [`ProfileLimits`]; past a limit the profile is
+//! refused, never half read.
 use serde_json::Value;
 
 mod build;

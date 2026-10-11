@@ -11,10 +11,12 @@ to accept a policy but should not have to read JSON-LD to do it.
 |---|---|
 | `prose-core/` | reads ODRL JSON-LD, builds a structured `Document`. No UI framework |
 | `prose-core/src/edit/` | the edit layer: an addressable policy model, edit events, edit rules, a JSON-LD reader and writer, and the edit sentence templates |
-| `prose-yew/` | `<OdrlProse json={...} />`: lays a `Document` out as semantic HTML. `<OdrlProseView>`: the same sentences for documents written with bare keys, read or edited |
-| `demo/` | Trunk app: paste a policy and read it, or edit the prose itself |
-| `prose-wasm/` | wasm-bindgen bridge that mounts the read-only `<OdrlProse>` into any DOM element; `prose-wasm/npm/` holds the metadata of the npm package |
-| `prose-angular/` | Angular wrapper, `<ds-odrl-prose [json]>`, over `prose-wasm` (read-only in v1; no edit mode); built with ng-packagr |
+| `prose-core/src/profile/` | reads an ODRL profile (JSON-LD, or Turtle with the `turtle` feature) into a `ProfileVocab`; `Wording` carries the loaded profiles to the reader and the editor |
+| `prose-yew/` | `<OdrlProse json={...} />`: lays a `Document` out as semantic HTML, with a glossary of profile terms. `<OdrlProseView>`: the same sentences for documents written with bare keys, read or edited |
+| `demo/` | Trunk app: paste a policy and read it, or edit the prose itself; a Profile field loads a profile by paste, preset, file or URL |
+| `demo/profiles/` | profile presets compiled into the demo only (the trimmed W3C ODRL 2.2 vocabulary) |
+| `prose-wasm/` | wasm-bindgen bridge that mounts the read-only `<OdrlProse>` into any DOM element, with `setProfile`; `prose-wasm/npm/` holds the metadata of the npm package |
+| `prose-angular/` | Angular wrapper, `<ds-odrl-prose [json] [profile]>`, over `prose-wasm` (read-only; no edit mode); built with ng-packagr |
 | `demo-angular/` | Angular demo app; installs the two packed npm packages, like a downstream app |
 
 ```rust
@@ -23,6 +25,8 @@ html! { <OdrlProse json={policy_json} /> }
 ```
 
 Or without a UI: `prose_core::render(json) -> Result<Document, ProseError>`.
+With a profile: `prose_core::render_with(json, &wording) -> Result<Reading, ProseError>`,
+where `Reading` holds the `Document` and a glossary per policy (see Profiles).
 
 ## What it reads
 
@@ -49,6 +53,146 @@ with prefixed keys renders in `OdrlProse` but reads there as no rules.
 
 Example: `{"leftOperand":"dateTime","operator":"lt","rightOperand":{"@value":"2026-12-31","@type":"xsd:date"}}`
 reads as "the date and time is before 2026-12-31".
+
+## Profiles
+
+An ODRL profile ([ODRL IM §3.3](https://www.w3.org/TR/odrl-model/#profile-mechanism))
+declares the actions, operands and values a community adds to ODRL. Loaded,
+it gives the prose that community's words; without one, nothing changes.
+
+```rust
+use prose_core::profile::{ProfileVocab, Wording};
+
+let profile = ProfileVocab::parse(&profile_text)?;      // ProfileError says why not
+let wording = Wording::new().with_profile(profile);
+let reading = prose_core::render_with(policy_json, &wording)?;
+// reading.document: the Document, worded with the profile's labels
+// reading.glossary[i]: the terms policy i uses, with their definitions
+```
+
+What a profile changes:
+
+- **Its own terms read with its labels.** "may fine-tune" rather than "may
+  fine tune", "the number of data subjects is at least 50", "is any of
+  clinical research or academic research". A left operand gets "the", an
+  operator label that is not already a verb phrase gets "is", and an
+  IRI-valued right operand reads as its label.
+- **ODRL's own terms keep this crate's phrasing.** A profile that labels
+  `odrl:distribute` "never distribute" adds a glossary entry for it, and the
+  sentence still says "distribute". A profile can explain the core
+  vocabulary but cannot change what a sentence says about it.
+- **Terms are matched by expanded IRI**, never by local name: `ex:purpose`
+  and `odrl:purpose` are two terms. A compact term is expanded with the
+  policy's own `@context` first, then the profile's prefixes.
+- **A glossary per policy.** `Reading::glossary[i]` lists every term of
+  policy `i` that a loaded profile explains, once, in reading order: label,
+  definition, usage note, what it is a kind of, what it implies, which
+  profile it comes from, whether it is deprecated. `OdrlProse` shows it as
+  a `<details class="prose-glossary">` after each policy (at most 30
+  entries), unless `glossary={false}`.
+- **Advisory warnings, only with a profile loaded.** A declared profile that
+  is not loaded; a term in a loaded profile's namespace that the profile
+  does not declare (a likely typo); a deprecated term. A term from another
+  namespace stays silent, because a policy may mix profiles. ODRL's "MUST
+  stop processing" for unknown profile terms binds an enforcing processor;
+  a renderer warns instead.
+
+A profile widens and annotates. It never closes an input: an undeclared term
+still reads, still edits, and the reducer never refuses an edit because of a
+profile.
+
+### Formats
+
+| format | read by | notes |
+|---|---|---|
+| JSON-LD, compacted (`{"@context": ..., "@graph": [...]}` or one node) | always | no JSON-LD processor: string prefixes, `@vocab`, `@base` and simple term definitions (`{"@id": ..., "@type": "@id"}`) in an inline `@context` are followed; a remote, scoped or `@import` context is not, with one warning naming it |
+| JSON-LD, expanded (a top-level array, like W3C's `ODRL22.json` or DPV's `.jsonld`) | always | |
+| Turtle | the `turtle` cargo feature (off by default; on in the npm build and the demo) | parsed by [oxttl](https://crates.io/crates/oxttl) into the same triples as JSON-LD, so a Turtle profile and its JSON-LD twin read as equal `ProfileVocab`s |
+| RDF/XML, N-Triples, others | no | refused with `ProfileError::UnsupportedFormat` |
+
+`ProfileVocab::parse` tells the syntax from the first characters: `{`, or
+`[` followed by a JSON value, is JSON-LD; anything else is Turtle when the
+feature is on. `ProfileVocab::parse_turtle` skips the guess, for a host that
+has a `text/turtle` content type. An unbound `odrl`, `rdf`, `rdfs`, `owl`,
+`skos`, `dct`, `dcterms`, `xsd`, `prof` or `prose` prefix falls back to its
+well-known namespace, with one warning each; an author's own binding always
+wins. The W3C context `http://www.w3.org/ns/odrl.jsonld` turns them on
+without a warning.
+
+What is read from each term: its kinds (`rdf:type` `odrl:Action`,
+`LeftOperand`, `Operator`, `RightOperand`, `ConflictTerm`, plus policy,
+rule, asset and party classes by `rdfs:subClassOf`, and party functions,
+asset relations and logical operands by `rdfs:subPropertyOf`); a label
+(`rdfs:label`, else `skos:prefLabel`, else `dct:title`, else the humanised
+local name); a definition (`skos:definition`, else `rdfs:comment`, else
+`dct:description`); a usage note; `odrl:includedIn`, `skos:broader`,
+`odrl:implies`, `skos:exactMatch` and `owl:deprecated`. Labels are picked by
+language: an exact tag, then the primary subtag (`de-CH` reads `de`), then
+`en`, then untagged, then the first (`Wording::with_languages`). The
+profile's own IRI, title, version and `owl:imports` are recorded; imports
+are never fetched.
+
+Errors name the likely cause and the fix, because the usual mistake is
+loading the wrong document: `LooksLikeHtml` (a server's landing page),
+`ContextOnly` (a document that is only a `@context`, such as the Dataspace
+Protocol's `odrl-profile.jsonld`), `JsonSchema` (a JSON Schema that checks
+policies, not a vocabulary), `LooksLikePolicy`, `NoTerms`, `Json`, `Turtle`,
+`UnsupportedFormat`, `TooLarge` and `LimitExceeded`.
+
+### The `prose:` extension (a ds-prose convention, not ODRL)
+
+ODRL has no machine-readable link from a left operand to the operators and
+values that suit it; profiles say it in `skos:note` prose, which this crate
+never parses. A profile author who wants narrowed suggestions in the editor
+can add four properties to a left operand, in the namespace
+`https://ds-labs-org.github.io/ds-prose-rs/profile#`:
+
+| property | meaning |
+|---|---|
+| `prose:operator` | operators to offer first for this left operand |
+| `prose:rightOperand` | suggested values; their `skos:broader` or `rdfs:subClassOf` descendants within the profile are offered under them, indented |
+| `prose:datatype` | an xsd datatype IRI: the value slot's placeholder, and an advisory lexical check (integer, decimal, boolean, date, dateTime, duration) |
+| `prose:unit` | unit suggestions |
+
+```json
+{ "@context": { "odrl": "http://www.w3.org/ns/odrl/2/",
+                "prose": "https://ds-labs-org.github.io/ds-prose-rs/profile#",
+                "ex": "https://example.org/odrl/profile/research/" },
+  "@id": "ex:researchPurpose", "@type": "odrl:LeftOperand",
+  "prose:operator": [ { "@id": "odrl:eq" }, { "@id": "odrl:isAnyOf" } ],
+  "prose:rightOperand": [ { "@id": "ex:academic" } ] }
+```
+
+The extension only orders and groups suggestions. Every other operator and
+any free value stay available, and nothing a profile says through it is
+enforced. It is read on left operands only. A profile without it still
+fills the editor's lists with all its actions, operands, operators, values
+and conflict terms, just not narrowed per operand. Other tools ignore these
+triples, as RDF allows.
+
+### Security and limits
+
+A profile is third-party input, often fetched from a URL the user typed.
+
+- **Bounded cost.** `ProfileLimits` (defaults): `max_bytes` 4 MiB, checked
+  before any parsing; `max_terms` 20,000; `max_depth` 64, walked with an
+  explicit stack, never by recursion (oxttl keeps its own stack on the
+  heap); `max_values_per_key` 256; `max_expanded_bytes` 32 MiB, counted
+  after prefixes and term definitions are expanded, so a short prefix bound
+  to a long namespace cannot turn a small text into gigabytes. Past a limit
+  the profile is refused with `LimitExceeded`; a half-read vocabulary is
+  never returned. `includedIn` and `broader` cycles end with a warning.
+  `ProfileVocab::parse_with` takes other limits.
+- **Plain text only.** Labels, definitions and notes have HTML tags
+  stripped, entities decoded, bidi, zero-width and control characters
+  removed, whitespace collapsed, and length capped (`max_label_chars` 200,
+  `max_text_chars` 4,000). The components render them as text nodes.
+- **No network access.** `prose-core`, `prose-yew` and the npm packages
+  never fetch: the host fetches the profile and passes its text. Remote
+  contexts and `owl:imports` are not followed. Only the demo fetches, when
+  the user asks it to load a URL (CORS, no credentials, 15 s, 4 MiB).
+- **No spoofing of core terms** (see above): a profile can relabel its own
+  terms only.
 
 ## Edit mode
 
@@ -82,14 +226,23 @@ drive. It knows ODRL and nothing about any particular engine or wire format.
   a host that builds the model from its own encoding.
 - `sentences`: the edit templates, as segments (text, editable slots, choices,
   lists to add to) rather than finished strings.
+- With a profile: `sentences_with(doc, &wording)` puts the profile's labels in
+  each slot's `display` (its `raw` value is unchanged, so what is written back
+  is too); `check_profile(doc, &wording)` returns advisory `Issue`s (an
+  undeclared term in a loaded profile's namespace, a deprecated term, a
+  declared profile that is not loaded, an operator outside the `prose:`
+  suggestions, a value that fails the `prose:datatype`); `left_operand_at`
+  says which left operand a right-operand, unit or reference slot belongs
+  to; `prefixes(doc)` reads the prefixes the document binds. The reducer
+  and `EditRules` do not look at the profile.
 
 ### Compatibility
 
 The enums that grow as the editor learns more of ODRL are `#[non_exhaustive]`,
 so adding a variant is a minor release, not a breaking one. In `prose-core`:
 `EditEvent`, `EditError`, `NewItem`, `FocusTarget`, `ListKind`, `Field`, `Step`,
-`NodeRef`, `Segment`, `SlotKind`, `ChoiceKind`, `EmptyText` and `IssueTarget`.
-In `prose-yew`: `FocusKind` and `DecorationAt`. Outside the defining crate a
+`NodeRef`, `Segment`, `SlotKind`, `ChoiceKind`, `EmptyText`, `IssueTarget`,
+`profile::TermKind` and `profile::ProfileError`. In `prose-yew`: `FocusKind` and `DecorationAt`. Outside the defining crate a
 `match` on one of them needs a wildcard arm with a sensible fallback. Units,
 `rightOperandReference` and `partOf` can be edited but not added today (see
 Limits); adding them is the kind of change this allows.
@@ -99,6 +252,41 @@ Left exhaustive because they are closed by nature: `Conj`, `Severity`,
 and `DocShape` (ODRL or this crate fixes their members), and the data enums
 `ConstraintNode`, `RightOperand` and `Literal`, which already carry an
 `Opaque` or raw fallback for what they do not understand.
+
+The profile types can grow too: `ProfileVocab`, `Wording`, `Prefixes` and
+`LangText` are opaque (private fields, methods only), and `Term`,
+`OperandHints`, `ProfileSummary`, `ProfileLimits`, `Reading`,
+`PolicyGlossary` and `Gloss` are `#[non_exhaustive]` structs: read their
+fields, and start from `ProfileLimits::default()` to change a limit.
+
+Changed in 0.4 (profiles; additive except for struct literals):
+
+- New: the `profile` module, `render_with` and `render_value_with` (they
+  return a `Reading`), `wording::gloss` and `wording::operator_with`, and in
+  `edit` `sentences_with`, `check_profile`, `left_operand_at` and
+  `prefixes`. In `prose-yew`: `SharedWording`, `ProseGlossary`,
+  `Vocabulary::with_profiles` and `EditConfig::with_wording`. In the npm
+  packages: `ProseHandle.setProfile`, and on `<ds-odrl-prose>` the `profile`
+  input and the `profileLoaded` and `profileError` outputs.
+- **No profile reads exactly as before.** `render`, `render_value` and
+  `sentences` are `render_with`, `render_value_with` and `sentences_with`
+  with `Wording::default()`; the v0.1 goldens and the SSR snapshots are
+  byte-identical.
+- Struct literals need the new fields: `OdrlProseProps` gained `wording` and
+  `glossary`; `EditConfig` gained `wording`; `Suggestion` gained `group`
+  (`Suggestion::new` sets `None`); `Labels` gained `group_core`,
+  `group_profile`, `glossary_heading`, `kind_of`, `implies`, `usage_note`,
+  `from_profile`, `deprecated`, `suggested_operators`, `other_operators`,
+  `profile_values` and `datatype_placeholders`. Code that uses `html!` or
+  `..Default::default()` is unaffected.
+- `prose-core` has an optional `turtle` feature (oxttl and oxrdf; on
+  wasm32 also getrandom with `js`). It is off by default, so a host that
+  does not ask for it gets no new dependency. `prose-wasm` and the demo turn
+  it on.
+- The profile reaches Yew components as a prop (`OdrlProseProps::wording`,
+  `EditConfig::wording`), not as a Yew context: a prop is explicit, keys
+  the memo, and renders the same under SSR. A context was considered and
+  left out.
 
 Changed in 0.3 (breaking, after the tagged 0.2.0; a consumer pinned to the
 `v0.2.0` tag is unaffected until it moves the pin):
@@ -184,7 +372,57 @@ Props of `OdrlProseView`:
 - `reveal`: `Always`, or `OnHoverOrFocus` to dim the controls until needed.
 - `base_css`: Edit mode ships `BASE_CSS` in a `<style>` element; turn it off to
   bring your own (also needed with server rendering, where Yew escapes style text).
+- `wording: Rc<Wording>`: the loaded profiles. Set it with
+  `EditConfig::with_wording`, which also adds the profiles' terms to `vocab`.
 - `show_raw_terms`, `suggestions`, `max_suggestions`.
+
+### Profiles in the components
+
+`<OdrlProse>` takes the profile as a prop:
+
+| prop | what it does |
+|---|---|
+| `json: AttrValue` | the policy as JSON-LD text |
+| `class: Classes` | extra classes on the root |
+| `wording: Option<SharedWording>` | the loaded profiles; `None` reads as before. `SharedWording` compares by pointer, so the component renders again only when the host hands it another one |
+| `glossary: bool` | the glossary after each policy (default `true`) |
+
+```rust
+let wording = SharedWording(Rc::new(Wording::new().with_profile(profile)));
+html! { <OdrlProse json={policy_json} wording={Some(wording)} /> }
+```
+
+`<OdrlProseView>` reads it from `EditConfig`:
+
+```rust
+let config = use_memo(wording_ptr, |_| EditConfig::default().with_wording(wording.clone()));
+let issues = use_memo((doc_ptr, wording_ptr), |_| check_profile(&doc, &wording));
+```
+
+With a profile, in Edit mode:
+
+- The action, left operand and policy type suggestions list the profile's
+  terms first, under "From profile: {title}", ordered along `includedIn`
+  and without deprecated terms, each with its definition as the hint; the
+  built-in terms follow under "ODRL core". Typing also matches the hint
+  text, ranked last, so typing "model" finds an action defined as training
+  a model.
+- A right-operand slot suggests the `prose:rightOperand` values of its left
+  operand (with their narrower values indented), or else every profile
+  right operand under "Profile values (not specific to this operand)". The
+  slot stays free text. Its placeholder comes from `prose:datatype`
+  (`Labels::datatype_placeholders`), and a unit slot suggests
+  `prose:unit`.
+- The operator select adds the profile's operators. When the left operand
+  names `prose:operator`s, the options split into two `<optgroup>`s,
+  "Suggested by the profile" and "Other operators"; nothing is hidden, and a
+  current value outside the list stays selectable. The conflict select adds
+  the profile's conflict terms.
+- A picked profile term is written as a compact IRI only when the policy's
+  own `@context` binds its namespace, else as the full IRI; a picked
+  right-operand value is written as `{"@id": ...}`. No prefix is invented.
+- In Read mode, a profile term carries `title="{label}: {definition}
+  ({raw})"` and `data-iri`.
 
 ### How editing behaves
 
@@ -275,6 +513,16 @@ only through the `"plaintext-only"` path.
   the target as its object (`use`, `distribute`, `attribute`). Unusual actions
   get a humanised name, which can read awkwardly.
 - Party and asset identifiers are shown as written; they are not resolved.
+- **Profiles: read, not reasoned over.** No JSON-LD processor, no OWL or
+  SHACL reasoning beyond bounded transitive `includedIn`, `broader` and
+  `subClassOf` within the loaded profiles, and no fetching (see Profiles).
+  Turtle needs the `turtle` feature; RDF/XML is not read. `skos:note` and
+  `skos:definition` prose is shown, never parsed into restrictions. The
+  read-only `OdrlProse` gets the profile's labels and a glossary, but no
+  per-term `title` (only `OdrlProseView`'s Read mode has those). Party
+  functions and asset relations a profile declares are read, not offered
+  in dropdowns. Only the label language is picked; the sentence templates
+  stay English.
 
 ## CI
 
@@ -283,9 +531,10 @@ for new advisories:
 
 | job | gates |
 |---|---|
-| `gates` | `cargo fmt --check`, `clippy -D warnings`, `cargo test`, `cargo doc` with warnings denied, every feature build (host, `ssr`, `csr` on wasm32) |
-| `browser` | wasm clippy, and the Edit-mode DOM tests and the demo's tab tests mounted in headless Chrome; the `wasm-bindgen-cli` version is read from `Cargo.lock` |
-| `demo` | release `trunk build` under the Pages sub-path, then `scripts/smoke-demo.sh` boots it in Chrome and fails unless a policy rendered |
+| `gates` | `cargo fmt --check`, `clippy -D warnings`, `cargo test`, `cargo doc` with warnings denied, `prose-core` tested without and with `turtle`, every feature build (host, `ssr`, `csr` and `turtle` on wasm32) |
+| `browser` | wasm clippy, and the Edit-mode DOM tests, the demo's tab and profile tests and the `prose-wasm` tests mounted in headless Chrome; the `wasm-bindgen-cli` version is read from `Cargo.lock` |
+| `demo` | release `trunk build` under the Pages sub-path, then `scripts/smoke-demo.sh` boots it in Chrome and fails unless a policy rendered and the Profile field is there |
+| `angular` | `scripts/build-npm-packages.sh` builds and packs both npm packages, `scripts/check-npm-packages.mjs` checks the tarballs, `npm publish --dry-run`, the wrapper's typecheck and node tests, then `demo-angular` is built from the tarballs only and booted in Chrome |
 | `supply-chain` | `cargo deny check` against `deny.toml`: licences, advisories, sources |
 
 `deny.toml` ignores two "unmaintained" notices that arrive only through
@@ -301,13 +550,29 @@ Two packages are published to npmjs under the `@ds-labs` scope:
 | package | what | for |
 |---|---|---|
 | [`@ds-labs/prose-wasm`](prose-wasm/npm/README.md) | the wasm and its JavaScript glue; framework-neutral | any JavaScript host |
-| [`@ds-labs/prose-angular`](prose-angular/README.md) | `<ds-odrl-prose [json]>`, Angular 19 or newer | Angular apps; depends on the wasm package |
+| [`@ds-labs/prose-angular`](prose-angular/README.md) | `<ds-odrl-prose [json] [profile]>`, Angular 19 or newer | Angular apps; depends on the wasm package |
 
 An Angular app needs `npm i @ds-labs/prose-angular` and one `angular.json`
 asset entry pointing at the wasm file inside `node_modules`; there is nothing
 to vendor or build. Both are read-only: there is no edit mode in them.
 
-The two npm packages and the Rust crates share one version number (0.3.1
+Both take a profile as text: `ProseHandle.setProfile(text | null)` returns
+the profile's summary as JSON and throws on a text that is not a profile,
+keeping the previous one; the Angular component has a `profile` input and
+`profileLoaded` and `profileError` outputs. The wasm is built with the
+`turtle` feature, so a profile can be JSON-LD or Turtle. The packages never
+fetch it; the host does.
+
+The wasm grew in 0.4 (wasm-pack release build, `wasm-opt` off, measured on
+2026-10-11):
+
+| `prose_wasm_bg.wasm` | bytes | gzip -9 |
+|---|---|---|
+| 0.3.1 | 488,862 | 174,680 |
+| 0.4.0 without `turtle` | 774,473 | 260,984 |
+| 0.4.0 as published, with `turtle` | 957,764 | 323,480 |
+
+The two npm packages and the Rust crates share one version number (0.4.0
 at the time of writing), so a number says which reader and renderer you have.
 A release bumps them together; the Rust version the wasm was built from is
 also recorded in the wasm package's `package.json`. Releases are tags, `prose-wasm-vX.Y.Z` and
@@ -325,6 +590,12 @@ node scripts/check-npm-packages.mjs  # check the tarballs
 ## Develop
 
 ```bash
-cargo test --workspace
+cargo test --workspace      # prose-core with turtle (prose-wasm turns it on)
+cargo test -p prose-core   # prose-core alone, without turtle
 cd demo && trunk serve     # Trunk 0.22.0-beta.2+, like the other ds-labs-org demos
 ```
+
+The demo's Profile field reads one profile at a time: paste it, pick a
+preset (the research profile of the tests, as JSON-LD or Turtle, or the
+W3C ODRL 2.2 vocabulary trimmed to its terms, see `demo/profiles/`), choose
+a file, or load a URL. Applying is explicit, and both tabs use it.

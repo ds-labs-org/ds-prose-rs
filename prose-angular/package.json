@@ -1,6 +1,6 @@
 {
   "name": "@ds-labs/prose-angular",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Angular component that renders ODRL JSON-LD as plain-language prose (ds-prose-rs, compiled to WebAssembly)",
   "keywords": [
     "angular",
@@ -32,7 +32,7 @@
     "@angular/core": ">=19.0.0"
   },
   "dependencies": {
-    "@ds-labs/prose-wasm": "^0.3.1",
+    "@ds-labs/prose-wasm": "^0.4.0",
     "tslib": "^2.3.0"
   },
   "devDependencies": {

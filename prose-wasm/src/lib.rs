@@ -1,9 +1,12 @@
 //! Bridge from `<OdrlProse>` (Yew) to JavaScript hosts such as Angular.
 //!
 //! A host owns a DOM element; [`ProseHandle`] mounts the Yew component into it,
-//! re-renders it when the policy or class changes, and tears it down. Yew keeps
-//! its own virtual DOM inside that element, so the host must not touch the
-//! element's children.
+//! re-renders it when the policy, class or profile changes, and tears it down.
+//! Yew keeps its own virtual DOM inside that element, so the host must not
+//! touch the element's children.
+//!
+//! `setProfile` reads an ODRL profile as JSON-LD or Turtle (prose-core's
+//! `turtle` feature is on in this crate); the host fetches it.
 use prose_core::profile::{ProfileError, ProfileVocab, Wording};
 use prose_yew::{OdrlProse, OdrlProseProps, SharedWording};
 use serde_json::{Value, json};

@@ -14,6 +14,14 @@
 //! JSON-LD processor, so a custom `@context` that renames ODRL terms is not
 //! followed; unknown terms are reported in [`Document::warnings`] instead of
 //! guessed at.
+//!
+//! Profiles: [`render_with`] reads the policy with the labels of the ODRL
+//! profiles a [`profile::Wording`] holds, and returns a [`Reading`]: the
+//! [`Document`] plus a glossary per policy. With `Wording::default()` the
+//! document is exactly what [`render`] returns. See [`profile`].
+//!
+//! Features: `turtle` (off by default) also reads profiles written in
+//! Turtle, through oxttl.
 pub mod edit;
 mod model;
 pub mod profile;

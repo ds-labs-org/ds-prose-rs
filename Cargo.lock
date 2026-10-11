@@ -100,7 +100,7 @@ dependencies = [
 
 [[package]]
 name = "demo"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "gloo-net",
  "gloo-timers",
@@ -706,7 +706,7 @@ dependencies = [
 
 [[package]]
 name = "prose-core"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "getrandom",
  "oxrdf",
@@ -716,7 +716,7 @@ dependencies = [
 
 [[package]]
 name = "prose-wasm"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "gloo-timers",
  "prose-core",
@@ -730,7 +730,7 @@ dependencies = [
 
 [[package]]
 name = "prose-yew"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "gloo-timers",
  "prose-core",

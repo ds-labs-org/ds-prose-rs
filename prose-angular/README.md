@@ -66,7 +66,11 @@ next valid input. Style the result through the `prose-*` classes
 With a profile, the sentences use its labels ("may fine-tune" rather than
 "may fine tune") and a glossary of its terms follows each policy. The
 component does no network access: fetch the profile yourself and pass its
-text. It is read again only when the text changes.
+text. It is read again only when the text changes. ODRL's own terms keep
+their built-in wording whatever a profile calls them, and a profile over
+4 MiB, or past the reader's other limits, is refused (`profileError`). See
+the [ds-prose-rs README](https://github.com/ds-labs-org/ds-prose-rs#profiles)
+for what a profile changes and which formats are read.
 
 If the wasm cannot be loaded (a wrong `PROSE_WASM_URL`, a 404, a network
 failure) the element shows an error (`<p class="prose-error" role="alert">`),

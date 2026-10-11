@@ -10,6 +10,10 @@
 //! `prose-glossary`, `prose-note`, `prose-kind-of`, `prose-implies`,
 //! `prose-deprecated`, `prose-from`.
 //!
+//! A profile reaches the components as a prop: [`OdrlProseProps::wording`]
+//! (a [`SharedWording`]) for `<OdrlProse>`, [`EditConfig::with_wording`] for
+//! [`OdrlProseView`]. Without one, both render exactly as before 0.4.
+//!
 //! [`OdrlProseView`] is the editing counterpart: the same sentences, with an
 //! Edit mode (see [`edit`]).
 pub mod edit;
