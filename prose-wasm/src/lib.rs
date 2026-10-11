@@ -6,24 +6,74 @@
 //! touch the element's children.
 //!
 //! `setProfile` reads an ODRL profile as JSON-LD or Turtle (prose-core's
-//! `turtle` feature is on in this crate); the host fetches it.
+//! `turtle` feature is on in this crate); the host fetches it. `setProfiles`
+//! reads several, and `setValidation` adds the validator's findings to the
+//! rendering.
+//!
+//! Validation also works without the DOM: [`validate`], [`rules`] and
+//! [`ProseValidator`] are plain functions over text, so a Node script can
+//! call them after `initSync`. They return the report as JSON text
+//! (`ds-prose/validation-report@1`), the same bytes everywhere.
 pub mod validation;
 use prose_core::profile::{ProfileError, ProfileVocab, Wording};
+use prose_core::validate::{Options, Validator};
 use prose_yew::{OdrlProse, OdrlProseProps, SharedWording};
 use serde_json::{Value, json};
+use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 use web_sys::Element;
 use yew::{AttrValue, Classes, Renderer};
 
-fn props(json: &str, class: Option<String>, wording: Option<SharedWording>) -> OdrlProseProps {
+fn props(
+    json: &str,
+    class: Option<String>,
+    wording: Option<SharedWording>,
+    validator: Option<Validator>,
+) -> OdrlProseProps {
     OdrlProseProps {
         json: AttrValue::from(json.to_owned()),
         class: class.map(Classes::from).unwrap_or_default(),
         wording,
         glossary: true,
-        validator: None,
-        violations: false,
+        violations: validator.is_some(),
+        validator,
     }
+}
+
+/// A JS value as JSON, through `JSON.stringify`: `None` for `undefined`.
+/// Errors when the value has no JSON form (a cycle, a BigInt, a function).
+fn to_json(v: &JsValue, what: &str) -> Result<Option<Value>, String> {
+    if v.is_undefined() {
+        return Ok(None);
+    }
+    let text = js_sys::JSON::stringify(v)
+        .ok()
+        .and_then(|t| t.as_string())
+        .ok_or_else(|| format!("{what} is not plain data"))?;
+    serde_json::from_str(&text)
+        .map(Some)
+        .map_err(|e| format!("{what} is not plain data: {e}"))
+}
+
+fn options_of(v: Option<&JsValue>) -> Result<Options, String> {
+    let value = match v {
+        Some(v) => to_json(v, "options")?,
+        None => None,
+    };
+    validation::options_from_value(value.as_ref())
+}
+
+/// The profile texts of a list; unlike [`validate`], a lone string is not
+/// accepted where the method says a list.
+fn texts_of(v: &JsValue) -> Result<Vec<String>, String> {
+    match to_json(v, "profiles")? {
+        Some(l @ Value::Array(_)) => validation::profile_list(&l),
+        _ => Err("profiles must be a list of strings".to_string()),
+    }
+}
+
+fn throw(e: String) -> JsError {
+    JsError::new(&e)
 }
 
 /// Reads `text` as a profile (JSON-LD, or Turtle: this crate turns on
@@ -78,6 +128,10 @@ pub struct ProseHandle {
     json: String,
     class: Option<String>,
     wording: Option<SharedWording>,
+    // Set by `setValidation`; the validator is rebuilt from it and the
+    // profiles whenever either changes.
+    options: Option<Options>,
+    validator: Option<Validator>,
 }
 
 #[wasm_bindgen]
@@ -85,14 +139,18 @@ impl ProseHandle {
     /// Mount into `root`. `class` is added to the component's root element.
     #[wasm_bindgen(constructor)]
     pub fn new(root: Element, json: &str, class: Option<String>) -> ProseHandle {
-        let app =
-            Renderer::<OdrlProse>::with_root_and_props(root, props(json, class.clone(), None))
-                .render();
+        let app = Renderer::<OdrlProse>::with_root_and_props(
+            root,
+            props(json, class.clone(), None, None),
+        )
+        .render();
         ProseHandle {
             app: Some(app),
             json: json.to_owned(),
             class,
             wording: None,
+            options: None,
+            validator: None,
         }
     }
 
@@ -116,29 +174,56 @@ impl ProseHandle {
             Some(p) => summary_json(p),
             None => "null".to_string(),
         };
-        self.wording = wording;
-        self.render();
+        self.set_wording(wording);
         Ok(summary)
     }
 
+    /// Load several ODRL profiles at once (JSON-LD or Turtle text each), so
+    /// a policy that mixes them can be read and validated against all of
+    /// them. An empty list means no profile. Returns the profiles' summaries
+    /// as the JSON text of a list, in order. Throws when a text is not a
+    /// readable profile (the message names which); the previous profiles
+    /// then stay. Replaces what `setProfile` loaded.
     #[wasm_bindgen(js_name = setProfiles)]
     pub fn set_profiles(
         &mut self,
-        #[wasm_bindgen(unchecked_param_type = "string[]")] _texts: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "string[]")] texts: JsValue,
     ) -> Result<String, JsError> {
-        todo!()
+        let texts = texts_of(&texts).map_err(throw)?;
+        let w = validation::wording(&texts).map_err(throw)?;
+        let summaries: Vec<String> = w.profiles().map(summary_json).collect();
+        let wording = (!w.is_empty()).then(|| SharedWording::from(w));
+        self.set_wording(wording);
+        Ok(format!("[{}]", summaries.join(",")))
     }
 
+    /// Turn validation on with `options` (see `ValidateOptions`; `{}` is
+    /// strict mode), or off with `null`. While on, the rendering gains a
+    /// section with the findings and the verdict, and `report()` returns
+    /// the report. Throws on options it cannot read; the previous options
+    /// then stay.
     #[wasm_bindgen(js_name = setValidation)]
     pub fn set_validation(
         &mut self,
-        #[wasm_bindgen(unchecked_param_type = "ValidateOptions | null")] _options: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "ValidateOptions | null")] options: JsValue,
     ) -> Result<(), JsError> {
-        todo!()
+        let options = match to_json(&options, "options").map_err(throw)? {
+            Some(Value::Null) | None => None,
+            Some(v) => Some(validation::options_from_value(Some(&v)).map_err(throw)?),
+        };
+        self.options = options;
+        self.refresh();
+        self.render();
+        Ok(())
     }
 
+    /// The validation report for the current policy and profiles, as the
+    /// JSON text of `ValidationReport`, or `null` while validation is off
+    /// (see `setValidation`).
     pub fn report(&self) -> Option<String> {
-        todo!()
+        self.validator
+            .as_ref()
+            .map(|v| validation::validate_text(&self.json, v))
     }
 
     /// Unmount and remove the rendered DOM. Safe to call more than once.
@@ -150,12 +235,91 @@ impl ProseHandle {
 }
 
 impl ProseHandle {
+    fn set_wording(&mut self, wording: Option<SharedWording>) {
+        self.wording = wording;
+        self.refresh();
+        self.render();
+    }
+
+    /// Rebuilds the validator from the options and the profiles.
+    fn refresh(&mut self) {
+        self.validator = self.options.clone().map(|o| {
+            let w = self
+                .wording
+                .as_ref()
+                .map_or_else(Wording::new, |w| (*w.0).clone());
+            Validator::new(Arc::new(w), o)
+        });
+    }
+
     fn render(&mut self) {
         if let Some(app) = self.app.as_mut() {
-            app.update(props(&self.json, self.class.clone(), self.wording.clone()));
+            app.update(props(
+                &self.json,
+                self.class.clone(),
+                self.wording.clone(),
+                self.validator.clone(),
+            ));
         }
     }
 }
+
+/// Validates the policy `json` against the profiles (one text, a list of
+/// texts, or `null`) and returns the report as JSON text
+/// (`ds-prose/validation-report@1`). Strict unless `options.strict` is
+/// `false`. Needs no DOM. Throws on options or profiles it cannot read; a
+/// problem in the policy is never thrown, it is a finding.
+#[wasm_bindgen]
+pub fn validate(
+    json: &str,
+    #[wasm_bindgen(unchecked_param_type = "string | string[] | null")] profiles: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "ValidateOptions")] options: Option<JsValue>,
+) -> Result<String, JsError> {
+    let options = options_of(options.as_ref()).map_err(throw)?;
+    let texts = match to_json(&profiles, "profiles").map_err(throw)? {
+        Some(v) => validation::profile_list(&v).map_err(throw)?,
+        None => Vec::new(),
+    };
+    let v = validation::validator(&texts, options).map_err(throw)?;
+    Ok(validation::validate_text(json, &v))
+}
+
+/// The rule catalogue as the JSON text of a list of `RuleInfo`.
+#[wasm_bindgen]
+pub fn rules() -> String {
+    validation::rules_json()
+}
+
+/// Profiles read once, to validate many policies against: the index of the
+/// profiles' terms is built here, not on every call.
+#[wasm_bindgen]
+pub struct ProseValidator {
+    validator: Validator,
+}
+
+#[wasm_bindgen]
+impl ProseValidator {
+    /// Reads `profiles` (JSON-LD or Turtle text each; possibly none) with
+    /// `options`. Throws when a profile or the options cannot be read.
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        #[wasm_bindgen(unchecked_param_type = "string[]")] profiles: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "ValidateOptions")] options: Option<JsValue>,
+    ) -> Result<ProseValidator, JsError> {
+        let options = options_of(options.as_ref()).map_err(throw)?;
+        let texts = texts_of(&profiles).map_err(throw)?;
+        let validator = validation::validator(&texts, options).map_err(throw)?;
+        Ok(ProseValidator { validator })
+    }
+
+    /// The report for the policy `json`, as JSON text.
+    pub fn validate(&self, json: &str) -> String {
+        validation::validate_text(json, &self.validator)
+    }
+}
+
+#[wasm_bindgen(typescript_custom_section)]
+const TYPES: &str = validation::TYPES_D_TS;
 
 #[cfg(test)]
 mod tests {
@@ -216,37 +380,5 @@ mod tests {
             read_profile(Some("<!doctype html><p>hi")).unwrap_err(),
             ProfileError::LooksLikeHtml
         );
-    }
-}
-
-#[wasm_bindgen]
-pub fn validate(
-    _json: &str,
-    #[wasm_bindgen(unchecked_param_type = "string | string[] | null")] _profiles: JsValue,
-    #[wasm_bindgen(unchecked_param_type = "ValidateOptions")] _options: Option<JsValue>,
-) -> Result<String, JsError> {
-    todo!()
-}
-
-#[wasm_bindgen]
-pub fn rules() -> String {
-    todo!()
-}
-
-#[wasm_bindgen]
-pub struct ProseValidator;
-
-#[wasm_bindgen]
-impl ProseValidator {
-    #[wasm_bindgen(constructor)]
-    pub fn new(
-        #[wasm_bindgen(unchecked_param_type = "string[]")] _profiles: JsValue,
-        #[wasm_bindgen(unchecked_param_type = "ValidateOptions")] _options: Option<JsValue>,
-    ) -> Result<ProseValidator, JsError> {
-        todo!()
-    }
-
-    pub fn validate(&self, _json: &str) -> String {
-        todo!()
     }
 }
