@@ -15,6 +15,8 @@ use serde_json::Value;
 mod build;
 mod jsonld;
 mod ns;
+// The hygiene is applied by term semantics, in the next commit.
+#[allow(dead_code)]
 mod text;
 mod triples;
 
@@ -35,6 +37,8 @@ pub struct ProfileVocab {
     terms: Vec<Term>,
     /// Term IRI -> index in `terms`.
     index: std::collections::HashMap<String, usize>,
+    /// Read by `Wording` (a later commit).
+    #[allow(dead_code)]
     prefixes: Vec<(String, String)>,
     warnings: Vec<String>,
 }
