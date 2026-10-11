@@ -1,9 +1,9 @@
 //! The walk over a document: every term, constraint and literal, checked in
 //! document order against the loaded profiles.
 use super::lexical::lexical;
-use super::{Finding, Mode, Options, RuleId, TermRef};
+use super::{Expected, Finding, Fix, Mode, Options, RuleId, TermRef};
 use crate::edit::*;
-use crate::profile::{Prefixes, ProfileVocab, Term, TermKind, Wording};
+use crate::profile::{OdrlVocab, Prefixes, ProfileVocab, Term, TermKind, Wording, odrl_term};
 use crate::read::join_with;
 use crate::words::local_name;
 use crate::words_ctx::{namespace, profile_name};
@@ -51,6 +51,7 @@ pub(crate) fn run(doc: &EditDoc, w: &Wording, index: &Index, o: &Options) -> Vec
         index,
         options: o,
         prefixes: prefixes(doc),
+        cur: None,
         out: Vec::new(),
     };
     for (i, p) in doc.policies.iter().enumerate() {
@@ -76,7 +77,122 @@ struct Checker<'a> {
     index: &'a Index,
     options: &'a Options,
     prefixes: Prefixes,
+    /// The policy being checked.
+    cur: Option<PolicyCtx>,
     out: Vec<Finding>,
+}
+
+/// What the terms of one policy are checked against.
+struct PolicyCtx {
+    path: NodePath,
+    id: NodeId,
+    /// How many profiles the policy lists.
+    listed: usize,
+    /// The profiles it declares, expanded, without a trailing `#` or `/`.
+    declared: Vec<String>,
+    /// A declared profile is not loaded.
+    incomplete: bool,
+}
+
+/// Where a term is written, and so which kind of term belongs there.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Pos {
+    PolicyKind,
+    Conflict,
+    Action,
+    LeftOperand,
+    Operator,
+    /// An IRI right operand value: data as much as vocabulary.
+    Value,
+    Unit,
+}
+
+impl Pos {
+    /// How `check_profile` named the position in its "not declared"
+    /// message; it said nothing about the others.
+    fn what(self) -> Option<&'static str> {
+        match self {
+            Pos::Action => Some("action"),
+            Pos::LeftOperand => Some("left operand"),
+            Pos::Operator => Some("operator"),
+            Pos::Value => Some("right operand"),
+            _ => None,
+        }
+    }
+
+    fn noun(self) -> &'static str {
+        match self {
+            Pos::PolicyKind => "policy type",
+            Pos::Conflict => "conflict strategy",
+            Pos::Action => "action",
+            Pos::LeftOperand => "left operand",
+            Pos::Operator => "operator",
+            Pos::Value => "right operand",
+            Pos::Unit => "unit",
+        }
+    }
+
+    /// The kind a term written here must have (the `rdfs:range` of the
+    /// ODRL property); `None` where any IRI may stand.
+    fn kind(self) -> Option<TermKind> {
+        match self {
+            Pos::PolicyKind => Some(TermKind::PolicyClass),
+            Pos::Conflict => Some(TermKind::ConflictTerm),
+            Pos::Action => Some(TermKind::Action),
+            Pos::LeftOperand => Some(TermKind::LeftOperand),
+            Pos::Operator => Some(TermKind::Operator),
+            Pos::Value | Pos::Unit => None,
+        }
+    }
+}
+
+/// A kind with its article, for a message.
+fn kind_noun(k: TermKind) -> &'static str {
+    match k {
+        TermKind::Action => "an action",
+        TermKind::LeftOperand => "a left operand",
+        TermKind::Operator => "an operator",
+        TermKind::RightOperand => "a right operand value",
+        TermKind::ConflictTerm => "a conflict strategy",
+        TermKind::PolicyClass => "a policy type",
+        TermKind::RuleClass => "a rule type",
+        TermKind::AssetClass => "an asset class",
+        TermKind::PartyClass => "a party class",
+        TermKind::PartyFunction => "a party function",
+        TermKind::AssetRelation => "an asset relation",
+        TermKind::LogicalOperand => "a logical operator",
+    }
+}
+
+fn trim(iri: &str) -> &str {
+    iri.trim_end_matches(['#', '/'])
+}
+
+/// A fix that writes `value` into `slot`, with the event that slot takes.
+fn fix_slot(label: String, safe: bool, slot: SlotPath, expect: NodeId, value: String) -> Fix {
+    let event = match slot.field {
+        Field::Operator | Field::Conflict | Field::LogicalOp => EditEvent::SetChoice {
+            slot,
+            expect,
+            value: value.clone(),
+        },
+        Field::RightOperand(_) => EditEvent::SetIri {
+            slot,
+            expect,
+            value: value.clone(),
+        },
+        _ => EditEvent::SetText {
+            slot,
+            expect,
+            value: value.clone(),
+        },
+    };
+    Fix {
+        label,
+        safe,
+        replacement: value,
+        events: vec![event],
+    }
 }
 
 fn slot(node: &NodePath, field: Field) -> IssueTarget {
@@ -133,17 +249,20 @@ impl<'a> Checker<'a> {
     }
 
     /// As [`Checker::emit`], about a term written in a slot.
+    #[allow(clippy::too_many_arguments)]
     fn emit_term(
         &mut self,
         rule: RuleId,
         closed: bool,
         node: &NodePath,
+        id: NodeId,
         field: Field,
         written: &str,
         message: String,
     ) -> Option<&mut Finding> {
         let iri = self.expand(written);
         let f = self.emit(rule, closed, slot(node, field), message)?;
+        f.node = Some(id);
         f.term = Some(TermRef {
             written: written.to_string(),
             iri,
@@ -151,47 +270,285 @@ impl<'a> Checker<'a> {
         Some(f)
     }
 
-    /// A term written in `field` of `node`: deprecated, or (when `what`
-    /// names it) undeclared in a loaded profile's namespace.
-    fn term(&mut self, node: &NodePath, field: Field, written: &str, what: Option<&str>) {
+    /// A term written in `field` of `node`, at position `pos`.
+    ///
+    /// Advisory, as `check_profile` always was: a loaded term that is
+    /// deprecated, or a term in a loaded profile's namespace that no loaded
+    /// profile declares. Strict adds the closed world: a compact IRI only a
+    /// profile's prefixes expand, a term ODRL and the loaded profiles do not
+    /// define, a term of the wrong kind, a profile term from a profile the
+    /// policy does not declare, and ODRL's own deprecated terms.
+    fn term(&mut self, node: &NodePath, id: NodeId, field: Field, written: &str, pos: Pos) {
         if written.is_empty() {
             return;
         }
-        if let Some((t, p)) = self.resolve(written) {
-            if t.deprecated {
-                let msg = format!(
-                    "\"{written}\" is deprecated in the profile {}",
-                    profile_name(p)
-                );
-                let profile = p.iri().map(str::to_string);
-                if let Some(f) = self.emit_term(
-                    RuleId::ProfileDeprecatedTerm,
-                    false,
-                    node,
-                    field,
-                    written,
-                    msg,
-                ) {
-                    f.profile = profile;
+        let resolved = self.resolve(written);
+        match resolved {
+            Some((t, p)) => {
+                if t.deprecated {
+                    let msg = format!(
+                        "\"{written}\" is deprecated in the profile {}",
+                        profile_name(p)
+                    );
+                    let profile = p.iri().map(str::to_string);
+                    if let Some(f) = self.emit_term(
+                        RuleId::ProfileDeprecatedTerm,
+                        false,
+                        node,
+                        id,
+                        field,
+                        written,
+                        msg,
+                    ) {
+                        f.profile = profile;
+                    }
                 }
             }
-        } else if let (Some(what), Some(p)) = (what, self.undeclared_in(written)) {
+            None => {
+                if let (Some(what), Some(p)) = (pos.what(), self.undeclared_in(written)) {
+                    let msg = format!(
+                        "the {what} \"{written}\" is not declared by the loaded profile {}",
+                        profile_name(p)
+                    );
+                    let profile = p.iri().map(str::to_string);
+                    if let Some(f) = self.emit_term(
+                        RuleId::ProfileUndeclaredInNamespace,
+                        false,
+                        node,
+                        id,
+                        field,
+                        written,
+                        msg,
+                    ) {
+                        f.profile = profile;
+                    }
+                    return;
+                }
+            }
+        }
+        if self.options.mode() != Mode::Strict {
+            return;
+        }
+        let iri = self.expand(written);
+        if let Some(prefix) = self.unbound_prefix(written, &iri) {
             let msg = format!(
-                "the {what} \"{written}\" is not declared by the loaded profile {}",
-                profile_name(p)
+                "the policy's @context does not bind the prefix \"{prefix}\" of \"{written}\"; only a loaded profile's own prefixes read it as <{iri}>"
             );
-            let profile = p.iri().map(str::to_string);
+            let fix = fix_slot(
+                "Write the full IRI".to_string(),
+                true,
+                SlotPath {
+                    node: node.clone(),
+                    field,
+                },
+                id,
+                iri.clone(),
+            );
             if let Some(f) = self.emit_term(
-                RuleId::ProfileUndeclaredInNamespace,
+                RuleId::ProfileUnboundPrefix,
                 false,
                 node,
+                id,
                 field,
                 written,
                 msg,
             ) {
-                f.profile = profile;
+                f.fixes.push(fix);
+            }
+            return;
+        }
+        // While a declared profile is missing, an unknown term may be one of
+        // its own: say nothing rather than guess.
+        let unsure = self.incomplete();
+        let odrl = odrl_term(&iri, self.options.odrl());
+        let kinds: Vec<TermKind> = match (resolved, odrl) {
+            (Some((t, _)), o) => t.kinds.iter().copied().chain(o.map(|o| o.kind)).collect(),
+            (None, Some(o)) => vec![o.kind],
+            (None, None) => Vec::new(),
+        };
+        if kinds.is_empty() {
+            match pos {
+                Pos::Value | Pos::Unit => {}
+                _ if unsure => {}
+                Pos::Conflict => self.not_a_conflict_strategy(node, id, written),
+                _ => {
+                    let source = match self.options.odrl() {
+                        OdrlVocab::Core => "the ODRL core vocabulary",
+                        _ => "ODRL",
+                    };
+                    let msg = format!(
+                        "the {} \"{written}\" is not defined by {source} or by a loaded profile",
+                        pos.noun()
+                    );
+                    let expected = pos.kind();
+                    if let Some(f) = self.emit_term(
+                        RuleId::ProfileUnknownTerm,
+                        false,
+                        node,
+                        id,
+                        field,
+                        written,
+                        msg,
+                    ) {
+                        f.expected = expected.map(|k| Expected {
+                            kinds: vec![k],
+                            ..Expected::default()
+                        });
+                    }
+                }
+            }
+            return;
+        }
+        if let Some(want) = pos.kind()
+            && !kinds.contains(&want)
+        {
+            if unsure {
+                return;
+            }
+            if pos == Pos::Conflict {
+                self.not_a_conflict_strategy(node, id, written);
+                return;
+            }
+            let msg = format!(
+                "\"{written}\" is {}, not {}",
+                kind_noun(kinds[0]),
+                kind_noun(want)
+            );
+            if let Some(f) = self.emit_term(
+                RuleId::ProfileWrongKind,
+                false,
+                node,
+                id,
+                field,
+                written,
+                msg,
+            ) {
+                f.expected = Some(Expected {
+                    kinds: vec![want],
+                    ..Expected::default()
+                });
+            }
+            return;
+        }
+        match resolved {
+            Some((t, p)) => {
+                // A profile's term: the policy must name the profile (IM 2.1,
+                // 3.2). ODRL's own terms need no declaration, whoever
+                // redeclares them.
+                if let Some(piri) = p.iri()
+                    && !t.iri.starts_with(ODRL)
+                    && !unsure
+                    && !self.declares(piri)
+                {
+                    let msg = format!(
+                        "\"{written}\" comes from the profile <{piri}>, which the policy does not declare"
+                    );
+                    let fix = self.declare_fix(piri);
+                    let piri = piri.to_string();
+                    if let Some(f) = self.emit_term(
+                        RuleId::ProfileNotDeclared,
+                        false,
+                        node,
+                        id,
+                        field,
+                        written,
+                        msg,
+                    ) {
+                        f.profile = Some(piri);
+                        f.fixes.extend(fix);
+                    }
+                }
+            }
+            None => {
+                if odrl.is_some_and(|o| o.deprecated) {
+                    let msg = format!("\"{written}\" is deprecated in ODRL 2.2");
+                    self.emit_term(
+                        RuleId::ProfileDeprecatedTerm,
+                        false,
+                        node,
+                        id,
+                        field,
+                        written,
+                        msg,
+                    );
+                }
             }
         }
+    }
+
+    fn not_a_conflict_strategy(&mut self, node: &NodePath, id: NodeId, written: &str) {
+        let msg = format!(
+            "\"{written}\" is not a conflict strategy: use perm, prohibit or invalid, or a conflict term a loaded profile declares"
+        );
+        if let Some(f) = self.emit_term(
+            RuleId::ProfileConflictTerm,
+            false,
+            node,
+            id,
+            Field::Conflict,
+            written,
+            msg,
+        ) {
+            f.expected = Some(Expected {
+                kinds: vec![TermKind::ConflictTerm],
+                ..Expected::default()
+            });
+        }
+    }
+
+    /// The prefix of `written` when only a loaded profile's own prefixes
+    /// expand it (to `iri`): the policy's `@context` does not bind it, so a
+    /// JSON-LD processor reads `written` as an IRI of its own.
+    fn unbound_prefix<'w>(&self, written: &'w str, iri: &str) -> Option<&'w str> {
+        let (prefix, suffix) = written.split_once(':')?;
+        if prefix == "_" || suffix.starts_with("//") || iri == written {
+            return None;
+        }
+        self.prefixes
+            .try_expand(written)
+            .is_none()
+            .then_some(prefix)
+    }
+
+    /// Whether the policy being checked has a declared profile it could
+    /// not load, so its vocabulary is not complete.
+    fn incomplete(&self) -> bool {
+        self.cur.as_ref().is_some_and(|c| c.incomplete)
+    }
+
+    /// Whether the policy being checked names the profile `iri`.
+    fn declares(&self, iri: &str) -> bool {
+        let want = trim(iri);
+        self.cur
+            .as_ref()
+            .is_some_and(|c| c.declared.iter().any(|d| d == want))
+    }
+
+    /// Adding `iri` to the profile list of the policy being checked.
+    fn declare_fix(&self, iri: &str) -> Option<Fix> {
+        let c = self.cur.as_ref()?;
+        let list = ListPath::of(&c.path, ListKind::Profile);
+        Some(Fix {
+            label: format!("Declare the profile <{iri}>"),
+            safe: true,
+            replacement: iri.to_string(),
+            events: vec![
+                EditEvent::Add {
+                    list,
+                    index: c.listed,
+                    expect: Some(c.id),
+                    item: NewItem::Default,
+                },
+                EditEvent::SetText {
+                    slot: SlotPath {
+                        node: c.path.clone(),
+                        field: Field::Profile(c.listed),
+                    },
+                    expect: c.id,
+                    value: iri.to_string(),
+                },
+            ],
+        })
     }
 
     fn policy(&mut self, path: NodePath, p: &PolicyNode) {
@@ -237,9 +594,20 @@ impl<'a> Checker<'a> {
                 f.node = Some(p.id);
             }
         }
-        self.term(&path, Field::Kind, &p.kind, None);
+        self.cur = Some(PolicyCtx {
+            path: path.clone(),
+            id: p.id,
+            listed: p.profile.len(),
+            declared: p
+                .profile
+                .iter()
+                .map(|d| trim(&self.expand(d)).to_string())
+                .collect(),
+            incomplete: !declared.is_empty(),
+        });
+        self.term(&path, p.id, Field::Kind, &p.kind, Pos::PolicyKind);
         if let Some(c) = &p.conflict {
-            self.term(&path, Field::Conflict, c, None);
+            self.term(&path, p.id, Field::Conflict, c, Pos::Conflict);
         }
         self.entities(&path, &p.assigner, &p.assignee, &p.target);
         self.actions(&path, &p.action);
@@ -250,6 +618,7 @@ impl<'a> Checker<'a> {
         ] {
             self.rules(&path, list, rules);
         }
+        self.cur = None;
     }
 
     fn rules(&mut self, owner: &NodePath, list: RuleList, rules: &[RuleNode]) {
@@ -298,7 +667,7 @@ impl<'a> Checker<'a> {
                 continue;
             }
             let path = owner.child(Step::Action(i));
-            self.term(&path, Field::Name, &a.name, Some("action"));
+            self.term(&path, a.id, Field::Name, &a.name, Pos::Action);
             self.constraints(&path, Step::Refinement, &a.refinement);
         }
     }
@@ -315,17 +684,17 @@ impl<'a> Checker<'a> {
     }
 
     fn atomic(&mut self, path: &NodePath, a: &AtomicConstraint) {
-        self.term(path, Field::LeftOperand, &a.left, Some("left operand"));
-        self.term(path, Field::Operator, &a.operator, Some("operator"));
+        self.term(path, a.id, Field::LeftOperand, &a.left, Pos::LeftOperand);
+        self.term(path, a.id, Field::Operator, &a.operator, Pos::Operator);
         if let RightOperand::Values(values) = &a.right {
             for (k, l) in values.iter().enumerate() {
                 if let Literal::Iri(i) = l {
-                    self.term(path, Field::RightOperand(k), i, Some("right operand"));
+                    self.term(path, a.id, Field::RightOperand(k), i, Pos::Value);
                 }
             }
         }
         if let Some(u) = &a.unit {
-            self.term(path, Field::Unit, u, None);
+            self.term(path, a.id, Field::Unit, u, Pos::Unit);
         }
         // The left operand's ds-prose hints, when a loaded profile has any.
         let Some(hints) = self
@@ -354,6 +723,7 @@ impl<'a> Checker<'a> {
                 RuleId::ProseOperatorNotAllowed,
                 false,
                 path,
+                a.id,
                 Field::Operator,
                 &op,
                 msg,
