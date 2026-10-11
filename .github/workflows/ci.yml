@@ -49,12 +49,20 @@ jobs:
         env:
           RUSTDOCFLAGS: "-D warnings"
 
+      # The workspace build turns on prose-core's turtle feature (prose-wasm
+      # asks for it); prose-core alone is tested without it and with it.
+      - name: prose-core with and without Turtle
+        run: |
+          cargo test -p prose-core --locked
+          cargo test -p prose-core --features turtle --locked
+
       # Each feature combination a consumer can pick must at least compile:
       # the host-side SSR build, and the browser build the site uses.
       - name: Feature builds
         run: |
           cargo check -p prose-core --locked
           cargo check -p prose-core --target wasm32-unknown-unknown --locked
+          cargo check -p prose-core --features turtle --target wasm32-unknown-unknown --locked
           cargo check -p prose-yew --locked
           cargo check -p prose-yew --features ssr --locked
           cargo check -p prose-yew --features csr --target wasm32-unknown-unknown --locked

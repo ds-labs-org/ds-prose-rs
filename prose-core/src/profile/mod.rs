@@ -17,6 +17,8 @@ mod jsonld;
 mod ns;
 mod text;
 mod triples;
+#[cfg(feature = "turtle")]
+mod turtle;
 
 pub use text::LangText;
 
@@ -53,34 +55,33 @@ impl PartialEq for ProfileVocab {
 }
 
 impl ProfileVocab {
-    /// Reads a profile written as JSON-LD, with the default limits.
+    /// Reads a profile written as JSON-LD (or, with the `turtle` feature, as
+    /// Turtle), with the default limits. The syntax is told from the first
+    /// characters: `{` or `[` is JSON-LD.
     pub fn parse(text: &str) -> Result<ProfileVocab, ProfileError> {
         ProfileVocab::parse_with(text, &ProfileLimits::default())
     }
 
     /// As [`ProfileVocab::parse`], with explicit limits.
     pub fn parse_with(text: &str, limits: &ProfileLimits) -> Result<ProfileVocab, ProfileError> {
-        let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
-        if text.len() > limits.max_bytes {
-            return Err(ProfileError::TooLarge {
-                bytes: text.len(),
-                limit: limits.max_bytes,
-            });
-        }
+        let text = within_size(text, limits)?;
         match sniff(text)? {
             Format::Json => {
                 let value: Value =
                     serde_json::from_str(text).map_err(|e| ProfileError::Json(e.to_string()))?;
                 ProfileVocab::from_value(&value, limits)
             }
+            #[cfg(feature = "turtle")]
+            Format::Turtle => build::vocab(turtle::read(text, limits)?, limits),
         }
     }
 
-    /// Reads a profile written in Turtle.
+    /// Reads a profile written in Turtle, without guessing the syntax (for
+    /// a host that knows it from a `text/turtle` content type).
     #[cfg(feature = "turtle")]
     pub fn parse_turtle(text: &str, limits: &ProfileLimits) -> Result<ProfileVocab, ProfileError> {
-        let _ = (text, limits);
-        Err(ProfileError::UnsupportedFormat)
+        let text = within_size(text, limits)?;
+        build::vocab(turtle::read(text, limits)?, limits)
     }
 
     /// As [`ProfileVocab::parse`], for a value that is already parsed.
@@ -348,7 +349,10 @@ impl std::fmt::Display for ProfileError {
                 "no ODRL terms found: a profile declares terms typed odrl:Action, odrl:LeftOperand, odrl:Operator, odrl:RightOperand or odrl:ConflictTerm"
             ),
             ProfileError::UnsupportedFormat => write!(f, "{UNSUPPORTED}"),
-            ProfileError::Turtle(e) => write!(f, "{e}"),
+            ProfileError::Turtle(e) => write!(
+                f,
+                "not valid Turtle: {e}. A text that does not start with {{ or [ is read as Turtle; a JSON-LD profile starts with one of them"
+            ),
             ProfileError::LimitExceeded(what) => write!(
                 f,
                 "the profile goes past the reader's limit {what}, so none of it was read; raise ProfileLimits::{what} for a profile you trust"
@@ -357,11 +361,29 @@ impl std::fmt::Display for ProfileError {
     }
 }
 
+#[cfg(not(feature = "turtle"))]
 const UNSUPPORTED: &str = "this is not JSON-LD, and Turtle is not read in this build: convert the profile to JSON-LD (W3C publishes ODRL itself as ODRL22.json)";
+#[cfg(feature = "turtle")]
+const UNSUPPORTED: &str = "this is neither JSON-LD nor Turtle (RDF/XML is not read): convert the profile to JSON-LD or Turtle (W3C publishes ODRL itself as ODRL22.json and ODRL22.ttl)";
+
+/// `text` without a byte-order mark, if it is within `max_bytes`. Checked
+/// before any parsing.
+fn within_size<'a>(text: &'a str, limits: &ProfileLimits) -> Result<&'a str, ProfileError> {
+    let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
+    if text.len() > limits.max_bytes {
+        return Err(ProfileError::TooLarge {
+            bytes: text.len(),
+            limit: limits.max_bytes,
+        });
+    }
+    Ok(text)
+}
 
 /// The syntaxes a profile text can be read in.
 enum Format {
     Json,
+    #[cfg(feature = "turtle")]
+    Turtle,
 }
 
 /// Which syntax `text` is in, from its first characters. Markup is refused
@@ -369,18 +391,27 @@ enum Format {
 fn sniff(text: &str) -> Result<Format, ProfileError> {
     let t = text.trim_start();
     match t.as_bytes().first() {
-        Some(b'{' | b'[') | None => Ok(Format::Json),
+        Some(b'{') | None => Ok(Format::Json),
+        Some(b'[') if json_array(t) => Ok(Format::Json),
         Some(b'<') if t.starts_with("<?xml") || t.starts_with("<rdf:RDF") => {
             Err(ProfileError::UnsupportedFormat)
         }
         Some(b'<') if looks_like_markup(t) => Err(ProfileError::LooksLikeHtml),
+        #[cfg(feature = "turtle")]
+        _ => Ok(Format::Turtle),
+        #[cfg(not(feature = "turtle"))]
         _ => Err(ProfileError::UnsupportedFormat),
     }
 }
 
-/// `<!doctype ..>`, `<!-- ..`, or a tag such as `<html>` or `<p class=..>`;
-/// not an IRI in angle brackets (`<https://..>`).
+/// `<!doctype ..>`, `<!-- ..`, a tag with attributes (`<p class=..>`), or
+/// an HTML element such as `<html>`; not an IRI in angle brackets
+/// (`<https://..>`, or a relative `<train>`).
 fn looks_like_markup(t: &str) -> bool {
+    const ELEMENTS: &[&str] = &[
+        "html", "head", "body", "meta", "title", "link", "script", "style", "div", "p", "span",
+        "h1", "h2", "h3", "pre", "main", "header", "nav", "section", "article", "table", "br",
+    ];
     let rest = &t[1..];
     if rest.starts_with('!') {
         return true;
@@ -390,8 +421,32 @@ fn looks_like_markup(t: &str) -> bool {
         .take_while(|c| c.is_ascii_alphanumeric())
         .collect();
     let after = rest[name.len()..].chars().next();
-    name.starts_with(|c: char| c.is_ascii_alphabetic())
-        && matches!(after, Some('>' | '/') | Some(' ' | '\t' | '\n' | '\r'))
+    if !name.starts_with(|c: char| c.is_ascii_alphabetic()) {
+        return false;
+    }
+    match after {
+        Some(' ' | '\t' | '\n' | '\r' | '/') => true,
+        Some('>') => ELEMENTS.contains(&name.to_ascii_lowercase().as_str()),
+        _ => false,
+    }
+}
+
+/// Whether a text that starts with `[` is a JSON array rather than a Turtle
+/// blank node (`[ a odrl:Action ] .` or `[] ex:p ..`): JSON's first item
+/// starts with `{`, `[`, `"`, a digit, `-`, `true`, `false` or `null`, and
+/// an empty array ends the text.
+fn json_array(t: &str) -> bool {
+    let inner = t[1..].trim_start();
+    match inner.as_bytes().first() {
+        None => true,
+        Some(b']') => inner[1..].trim().is_empty(),
+        Some(b'{' | b'[' | b'"' | b'-' | b'0'..=b'9') => true,
+        Some(_) => ["true", "false", "null"].iter().any(|w| {
+            inner
+                .strip_prefix(w)
+                .is_some_and(|r| r.starts_with(|c: char| c.is_whitespace() || c == ',' || c == ']'))
+        }),
+    }
 }
 
 impl std::error::Error for ProfileError {}

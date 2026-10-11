@@ -714,6 +714,7 @@ dependencies = [
 name = "prose-wasm"
 version = "0.3.1"
 dependencies = [
+ "prose-core",
  "prose-yew",
  "wasm-bindgen",
  "web-sys",

@@ -114,7 +114,7 @@ fn turtle_limits_terms_and_values_per_key() {
         ProfileVocab::parse_with(&text, &limits(|l| l.max_terms = 2)),
         Err(ProfileError::LimitExceeded("max_terms"))
     );
-    let labels = ["a", "b", "c", "d", "e"]
+    let labels = ["aa", "bb", "cc", "dd", "ee"]
         .iter()
         .map(|l| format!("\"label {l}\"@{l}"))
         .collect::<Vec<_>>()
@@ -171,6 +171,7 @@ fn turtle_deep_nesting_does_not_overflow() {
             let mut text =
                 format!("<https://example.org/t> a <{ODRL}Action> .\n<https://example.org/s> {p} ");
             text.push_str(&format!("[ {p} ").repeat(n));
+            text.push_str("[] ");
             text.push_str(&"] ".repeat(n));
             text.push_str(".\n<https://example.org/u> ");
             text.push_str(p);
