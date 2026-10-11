@@ -14,6 +14,7 @@
 //! can tell what the standard requires from what is a ds-prose convention.
 use crate::edit::{EditDoc, Issue, IssueTarget, NodeId, Severity};
 use crate::profile::Wording;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 mod check;
@@ -38,6 +39,12 @@ pub enum Mode {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Options {
     mode: Mode,
+    structural: bool,
+    fail_closed: bool,
+    deny_deprecated: bool,
+    ruleset: u32,
+    /// Per-rule levels set with [`Options::level`]; the last one set wins.
+    levels: BTreeMap<RuleId, Level>,
 }
 
 impl Default for Options {
@@ -51,12 +58,59 @@ impl Options {
     pub fn advisory() -> Options {
         Options {
             mode: Mode::Advisory,
+            structural: false,
+            fail_closed: false,
+            deny_deprecated: false,
+            ruleset: RULESET,
+            levels: BTreeMap::new(),
         }
     }
 
-    /// The closed world over ODRL and the loaded profiles.
+    /// The closed world over ODRL and the loaded profiles: the `profile.*`
+    /// and `prose.*` rules at their strict levels, and what could not be
+    /// checked reported as a gap. The structural `odrl.*` tier stays off
+    /// until [`Options::structural`] switches it on.
     pub fn strict() -> Options {
-        Options { mode: Mode::Strict }
+        Options {
+            mode: Mode::Strict,
+            ..Options::advisory()
+        }
+    }
+
+    /// Switches the structural `odrl.*` tier (the Information Model's own
+    /// MUSTs) on or off, in strict mode. Off by default: a catalog offer is
+    /// often written without the assigner or target the model requires.
+    pub fn structural(mut self, on: bool) -> Options {
+        self.structural = on;
+        self
+    }
+
+    /// In strict mode, makes `input.unchecked` an error that fails the
+    /// policy, rather than a gap.
+    pub fn fail_closed(mut self, on: bool) -> Options {
+        self.fail_closed = on;
+        self
+    }
+
+    /// In strict mode, makes a deprecated term an error.
+    pub fn deny_deprecated(mut self, on: bool) -> Options {
+        self.deny_deprecated = on;
+        self
+    }
+
+    /// Checks only the rules of ruleset `n` and earlier (see
+    /// [`RuleInfo::since_ruleset`]), so a pinned check does not change when
+    /// a later release adds a rule.
+    pub fn ruleset(mut self, n: u32) -> Options {
+        self.ruleset = n;
+        self
+    }
+
+    /// Sets `rule`'s level, over everything else. `input.unreadable` stays
+    /// an error whatever it is set to.
+    pub fn level(mut self, rule: RuleId, level: Level) -> Options {
+        self.levels.insert(rule, level);
+        self
     }
 
     pub fn mode(&self) -> Mode {
@@ -64,15 +118,35 @@ impl Options {
     }
 
     /// The level `rule` has under these options, on a left operand that is
-    /// `closed` by its profile or not.
+    /// `closed` by its profile or not: a level set with [`Options::level`];
+    /// else off for a rule newer than the ruleset, or a structural rule
+    /// that is not switched on; else the catalogue's level for the mode.
     pub fn level_of(&self, rule: RuleId, closed: bool) -> Level {
+        if rule == RuleId::InputUnreadable {
+            return Level::Error;
+        }
+        if let Some(&l) = self.levels.get(&rule) {
+            return l;
+        }
         let info = rule.info();
+        if info.since_ruleset > self.ruleset {
+            return Level::Off;
+        }
         match self.mode {
             Mode::Advisory => info.advisory,
-            Mode::Strict => match info.strict_closed {
-                Some(l) if closed => l,
-                _ => info.strict,
-            },
+            Mode::Strict => {
+                if info.tier == Tier::Odrl && !self.structural {
+                    return Level::Off;
+                }
+                match rule {
+                    RuleId::ProfileDeprecatedTerm if self.deny_deprecated => Level::Error,
+                    RuleId::InputUnchecked if self.fail_closed => Level::Error,
+                    _ => match info.strict_closed {
+                        Some(l) if closed => l,
+                        _ => info.strict,
+                    },
+                }
+            }
         }
     }
 }
