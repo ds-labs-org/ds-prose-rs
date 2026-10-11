@@ -801,3 +801,104 @@ fn reducer_still_accepts_out_of_profile_text() {
         json!("ex:alsoMadeUp")
     );
 }
+
+// --- pins mutation testing left open ----------------------------------------
+
+/// The research namespace with a few deprecated terms of other kinds.
+fn deprecated_kinds() -> Wording {
+    Wording::new().with_profile(
+        ProfileVocab::from_value(
+            &json!({
+                "@context": {"odrl": "http://www.w3.org/ns/odrl/2/",
+                             "owl": "http://www.w3.org/2002/07/owl#",
+                             "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+                             "ex": "https://example.org/odrl/profile/research/"},
+                "@graph": [
+                    {"@id": RESEARCH, "@type": "owl:Ontology"},
+                    {"@id": "ex:OldSet", "rdfs:subClassOf": {"@id": "odrl:Set"},
+                     "owl:deprecated": true},
+                    {"@id": "ex:oldConflict", "@type": "odrl:ConflictTerm",
+                     "owl:deprecated": true},
+                    {"@id": "ex:oldUnit", "@type": "odrl:RightOperand",
+                     "owl:deprecated": true}
+                ]
+            }),
+            &Default::default(),
+        )
+        .unwrap(),
+    )
+}
+
+#[test]
+fn deprecated_policy_kind_conflict_and_unit_warn() {
+    let doc = doc_of(json!({
+        "@context": ["http://www.w3.org/ns/odrl.jsonld",
+                     {"ex": "https://example.org/odrl/profile/research/"}],
+        "@type": "ex:OldSet", "uid": "urn:policy:d", "conflict": "ex:oldConflict",
+        "permission": [{"target": "urn:asset:1", "action": "use",
+            "constraint": [{"leftOperand": "payAmount", "operator": "eq",
+                            "rightOperand": 5, "unit": "ex:oldUnit"}]}]
+    }));
+    let issues = check_profile(&doc, &deprecated_kinds());
+    for (slot, term) in [
+        ("policy[0]#kind", "ex:OldSet"),
+        ("policy[0]#conflict", "ex:oldConflict"),
+        ("policy[0].permission[0].constraint[0]#unit", "ex:oldUnit"),
+    ] {
+        assert_eq!(
+            at(&issues, slot),
+            [(
+                Severity::Warning,
+                format!("\"{term}\" is deprecated in the profile <{RESEARCH}>")
+            )],
+            "{slot}: {issues:?}"
+        );
+    }
+    assert_eq!(issues.len(), 3, "{issues:?}");
+}
+
+#[test]
+fn declared_profile_not_loaded_once_per_policy() {
+    let doc = doc_of(json!({
+        "@context": "http://www.w3.org/ns/odrl.jsonld",
+        "@type": "Set", "uid": "urn:policy:p",
+        "profile": ["https://example.org/other", "https://example.org/other"],
+        "permission": [{"target": "urn:asset:1", "action": "use"}]
+    }));
+    assert_eq!(check_profile(&doc, &research()).len(), 1);
+}
+
+#[test]
+fn empty_operator_gets_no_operator_hint() {
+    // A constraint still being written: the operator slot is empty, which
+    // is not a choice among the profile's suggestions yet.
+    let doc = policy_with(json!({
+        "target": "urn:asset:1", "action": "use",
+        "constraint": [{"leftOperand": "ex:dataSubjectCount", "operator": "",
+                        "rightOperand": 50}]
+    }));
+    let c = "policy[0].permission[0].constraint[0]";
+    assert!(
+        matches!(doc.node(&sp(&format!("{c}#operator")).node), Some(NodeRef::Constraint(ConstraintNode::Atomic(a))) if a.operator.is_empty())
+    );
+    assert_eq!(
+        at(&check_profile(&doc, &research()), &format!("{c}#operator")),
+        []
+    );
+}
+
+#[test]
+fn string_value_naming_a_profile_value_stays_as_written() {
+    // Only an IRI value ({"@id": ..}) reads as the profile's label, in the
+    // edit sentences as in the reading; a plain string is text.
+    let doc = policy_with(json!({
+        "target": "urn:asset:1", "action": "use",
+        "constraint": [{"leftOperand": "ex:researchPurpose", "operator": "eq",
+                        "rightOperand": "ex:clinical"}]
+    }));
+    let slot = "policy[0].permission[0].constraint[0]#rightOperand[0]";
+    let with = slots(&sentences_with(&doc, &research())[0]);
+    let without = slots(&sentences(&doc)[0]);
+    assert_eq!(slot_at(&with, slot), slot_at(&without, slot));
+    assert_ne!(slot_at(&with, slot).2, "clinical research");
+}
