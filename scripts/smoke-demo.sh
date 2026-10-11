@@ -8,12 +8,15 @@
 #   CHROME=/path/to/chrome overrides the browser lookup.
 #   SMOKE_TITLE overrides the text the page must show (default: the Trunk
 #   demo's heading); the Angular demo sets it to its own.
+#   SMOKE_EXTRA is a space-separated list of further text the page must hold
+#   (default: the Trunk demo's Profile field); set it empty to check none.
 set -euo pipefail
 
 dist="${1:-demo/dist}"
 base="${2:-/ds-prose-rs/}"
 port="${SMOKE_PORT:-8741}"
 title="${SMOKE_TITLE:-ds-prose-rs demo}"
+extra="${SMOKE_EXTRA-id=\"profile-json\"}"
 
 chrome="${CHROME:-}"
 if [ -z "$chrome" ]; then
@@ -55,7 +58,8 @@ if ! grep -qi '^<!doctype html>' <<<"$dom"; then
   echo "boot check FAILED: no <!DOCTYPE html> (page would render in quirks mode)" >&2
   fail=1
 fi
-for needle in "$title" 'prose-policy'; do
+# shellcheck disable=SC2086 # $extra is a list
+for needle in "$title" 'prose-policy' $extra; do
   if ! grep -q "$needle" <<<"$dom"; then
     echo "boot check FAILED: '$needle' not in the rendered page" >&2
     fail=1

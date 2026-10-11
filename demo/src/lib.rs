@@ -2,6 +2,7 @@
 //! Edit tab where the prose itself is editable.
 mod edit;
 mod fixtures;
+pub mod profile_field;
 
 use edit::EditDemo;
 use prose_yew::OdrlProse;

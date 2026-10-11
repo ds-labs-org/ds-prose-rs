@@ -192,6 +192,7 @@ jobs:
         run: scripts/smoke-demo.sh demo-angular/dist/demo-angular/browser /
         env:
           SMOKE_TITLE: ds-prose-rs Angular demo
+          SMOKE_EXTRA: ""
 
   # Licences, advisories, banned or unknown sources: deny.toml.
   supply-chain:
