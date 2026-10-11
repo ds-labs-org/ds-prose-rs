@@ -427,3 +427,50 @@ async fn answer_over_4_mib_is_refused() {
     assert_eq!(textarea_value(&c, "textarea#profile-json"), "");
     assert!(!status(&c).contains("Reading"), "no longer loading");
 }
+
+#[wasm_bindgen_test]
+async fn answer_without_length_is_cut_at_4_mib() {
+    // A server that streams without Content-Length: `window.fetch` answers
+    // this one URL with 1 MiB chunks, up to 16 of them, and counts what was
+    // pulled. Other tests' requests pass through.
+    let stub = js_sys::Function::new_no_args(
+        "window.__pulls = 0;
+         const real = Window.prototype.fetch;
+         window.fetch = function (req, init) {
+           const url = typeof req === 'string' ? req : req.url;
+           if (url !== 'https://example.org/huge.jsonld') return real.call(this, req, init);
+           const chunk = new Uint8Array(1 << 20).fill(32);
+           const body = new ReadableStream({
+             highWaterMark: 0,
+             pull(c) {
+               window.__pulls += 1;
+               if (window.__pulls > 16) c.close(); else c.enqueue(chunk);
+             },
+           });
+           return Promise.resolve(new Response(body, {
+             headers: { 'content-type': 'application/ld+json' },
+           }));
+         };",
+    );
+    stub.call0(&JsValue::NULL).unwrap();
+    let c = mount().await;
+    set_input(&c, "input#profile-url", "https://example.org/huge.jsonld");
+    settle().await;
+    click(&c, "#profile-load").await;
+    until(&c, "the error", |c| has(c, "#profile-error")).await;
+    js_sys::Function::new_no_args("delete window.fetch;")
+        .call0(&JsValue::NULL)
+        .unwrap();
+    let pulls = js_sys::Reflect::get(&web_sys::window().unwrap(), &"__pulls".into())
+        .unwrap()
+        .as_f64()
+        .unwrap();
+    let msg = q(&c, "#profile-error").text_content().unwrap();
+    assert!(msg.contains("over 4 MiB are not read"), "{msg}");
+    assert!(
+        pulls <= 6.0,
+        "reading stops past 4 MiB, not at the end ({pulls} MiB pulled)"
+    );
+    assert_eq!(textarea_value(&c, "textarea#profile-json"), "");
+    assert!(!status(&c).contains("Reading"), "no longer loading");
+}
