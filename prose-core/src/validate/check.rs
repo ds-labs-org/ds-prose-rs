@@ -1197,7 +1197,16 @@ impl<'a> Checker<'a> {
             self.hint_unit(path, a, h);
             self.datatype_conflict(path, a, h);
         }
-        self.ill_typed(path, a, hints.and_then(|h| h.datatype.as_deref()));
+        // A literal the hint's own check already reports at least as
+        // loudly is said once.
+        let hinted = hints
+            .filter(|h| {
+                self.options
+                    .level_of(RuleId::ProseDatatypeLexical, h.closed)
+                    >= self.options.level_of(RuleId::ProseIllTypedLiteral, false)
+            })
+            .and_then(|h| h.datatype.as_deref());
+        self.ill_typed(path, a, hinted);
         self.ordered_on_unordered(path, a);
     }
 
@@ -1446,8 +1455,9 @@ impl<'a> Checker<'a> {
     }
 
     /// A typed literal outside its own datatype's lexical space (RDF 1.1
-    /// calls it ill-typed). One typed with the left operand's
-    /// `prose:datatype` is left to [`Checker::hint_datatype`].
+    /// calls it ill-typed). One typed with `hinted`, the left operand's
+    /// `prose:datatype` when [`Checker::hint_datatype`] reports it at least
+    /// as loudly, is left to that check.
     fn ill_typed(&mut self, path: &NodePath, a: &AtomicConstraint, hinted: Option<&str>) {
         let RightOperand::Values(values) = &a.right else {
             return;
