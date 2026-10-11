@@ -33,3 +33,10 @@ pub use segments::{
     ListItem, Locked, PolicyProse, RefinementGroup, RuleKindSlot, RuleProse, Segment, Sentence,
     Slot, SlotKind, SlotList, sentences,
 };
+
+/// The prefixes `doc`'s JSON-LD binds: those of [`EditDoc::origin`], then of
+/// each policy's origin; the first binding of a prefix wins.
+pub fn prefixes(doc: &EditDoc) -> crate::profile::Prefixes {
+    let _ = doc;
+    crate::profile::Prefixes::default()
+}

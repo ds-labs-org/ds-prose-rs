@@ -19,8 +19,10 @@ mod text;
 mod triples;
 #[cfg(feature = "turtle")]
 mod turtle;
+mod wording;
 
 pub use text::LangText;
+pub use wording::{Prefixes, Wording};
 
 /// The vocabulary one ODRL profile declares.
 ///
