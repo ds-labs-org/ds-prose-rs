@@ -3,7 +3,9 @@
 //! button looks. Nothing here is specific to a host; the defaults are the
 //! ODRL JSON-LD preset.
 use prose_core::edit::{EditRules, EmptyText, Field, ListKind, ListPath, NodePath, RuleList, Step};
+use prose_core::profile::{Prefixes, Wording};
 use prose_core::wording;
+use std::rc::Rc;
 use yew::prelude::*;
 
 /// What a + or - button shows. The accessible name is always the specific
@@ -35,6 +37,10 @@ pub struct Suggestion {
     pub value: AttrValue,
     pub label: AttrValue,
     pub hint: Option<AttrValue>,
+    /// The heading the suggestion is listed under, e.g. "From profile:
+    /// Research Data Profile". `None`: listed under `Labels::group_core`
+    /// when the list has groups, under no heading otherwise.
+    pub group: Option<AttrValue>,
 }
 
 impl Suggestion {
@@ -43,6 +49,7 @@ impl Suggestion {
             value: value.to_string().into(),
             label: label.to_string().into(),
             hint: hint.map(|h| h.to_string().into()),
+            group: None,
         }
     }
 }
@@ -139,6 +146,32 @@ impl Default for Vocabulary {
             ],
         }
     }
+}
+
+impl Vocabulary {
+    /// Adds the terms of the profiles `w` holds: actions, left operands and
+    /// policy classes first, each under a "From profile: {title}" group,
+    /// and operators and conflict terms after the built-in ones. Deprecated
+    /// terms are left out, and an entry already listed (compared by IRI) is
+    /// listed once. A profile term's value is its full IRI; the editor
+    /// writes it as a compact IRI only where the policy binds the prefix.
+    pub fn with_profiles(self, w: &Wording) -> Vocabulary {
+        self.with_profiles_in(w, &Labels::default().group_profile)
+    }
+
+    /// As [`Vocabulary::with_profiles`], with the group heading template.
+    pub(crate) fn with_profiles_in(self, w: &Wording, group: &str) -> Vocabulary {
+        let _ = (w, group);
+        self
+    }
+}
+
+/// How a suggested value is written into a policy whose prefixes are
+/// `prefixes`: a full IRI as a compact IRI or bare ODRL term where the
+/// policy binds it, else in full; any other text as it is.
+pub(crate) fn written_form(value: &str, prefixes: &Prefixes) -> AttrValue {
+    let _ = prefixes;
+    AttrValue::from(value.to_string())
 }
 
 /// Texts shown where a list is empty.
@@ -314,6 +347,11 @@ pub struct Labels {
     pub nouns: Nouns,
     pub fields: FieldNames,
     pub placeholders: Placeholders,
+    /// The heading of the built-in suggestions in a list that also has
+    /// profile suggestions.
+    pub group_core: AttrValue,
+    /// The heading of one profile's suggestions; `{profile}` is its title.
+    pub group_profile: AttrValue,
 }
 
 impl Default for Labels {
@@ -360,6 +398,8 @@ impl Default for Labels {
             nouns: Nouns::default(),
             fields: FieldNames::default(),
             placeholders: Placeholders::default(),
+            group_core: a("ODRL core"),
+            group_profile: a("From profile: {profile}"),
         }
     }
 }
@@ -608,6 +648,21 @@ pub struct EditConfig {
     /// the operator select offers every operator. Off: only the switches the
     /// reducer accepts as they are.
     pub host_plans_operator_switches: bool,
+    /// The loaded profiles: their labels in the sentences, their terms in
+    /// the suggestions and selects. Set it with [`EditConfig::with_wording`],
+    /// which also extends `vocab`.
+    pub wording: Rc<Wording>,
+}
+
+impl EditConfig {
+    /// Uses the profiles `w` holds, and adds their terms to `vocab` (with
+    /// the `labels.group_profile` heading, so set the labels first). Meant
+    /// for a configuration without a profile yet: the terms of a profile
+    /// set before are not taken out.
+    pub fn with_wording(mut self, w: Rc<Wording>) -> EditConfig {
+        self.wording = w;
+        self
+    }
 }
 
 impl Default for EditConfig {
@@ -626,6 +681,7 @@ impl Default for EditConfig {
             suggestions: true,
             max_suggestions: 8,
             host_plans_operator_switches: false,
+            wording: Rc::new(Wording::default()),
         }
     }
 }
@@ -718,5 +774,208 @@ mod tests {
         assert_eq!(v.operators.len(), 12);
         assert_eq!(v.policy_kinds.len(), 7);
         assert_eq!(v.conflicts[0].value, "");
+    }
+
+    // --- profiles -------------------------------------------------------------
+
+    use prose_core::profile::ProfileVocab;
+
+    const EX: &str = "https://example.org/odrl/profile/research/";
+    const ODRL: &str = "http://www.w3.org/ns/odrl/2/";
+
+    fn research() -> Wording {
+        let text = include_str!("../../../prose-core/tests/profiles/research.jsonld");
+        Wording::new().with_profile(ProfileVocab::parse(text).unwrap())
+    }
+
+    fn odrl22() -> Wording {
+        let text = include_str!("../../../prose-core/tests/profiles/odrl22-excerpt.json");
+        Wording::new().with_profile(ProfileVocab::parse(text).unwrap())
+    }
+
+    fn values(list: &[Suggestion]) -> Vec<&str> {
+        list.iter().map(|s| s.value.as_str()).collect()
+    }
+
+    #[test]
+    fn profile_actions_first_grouped_with_definition_hint() {
+        let v = Vocabulary::default().with_profiles(&research());
+        let group = Some(AttrValue::from("From profile: Research Data Profile"));
+        let head: Vec<(&str, &str)> = v.actions[..3]
+            .iter()
+            .map(|s| (s.value.as_str(), s.label.as_str()))
+            .collect();
+        assert_eq!(
+            head,
+            [
+                (&*format!("{EX}train"), "Train"),
+                (&*format!("{EX}fineTune"), "Fine-tune"),
+                (&*format!("{EX}pseudonymise"), "Pseudonymise"),
+            ]
+        );
+        assert!(v.actions[..3].iter().all(|s| s.group == group));
+        assert_eq!(
+            v.actions[1].hint.as_deref(),
+            Some("To adapt an already trained model using the Asset. \u{b7} part of Train")
+        );
+        assert!(
+            v.actions[0]
+                .hint
+                .as_deref()
+                .unwrap()
+                .starts_with("To use the Asset as training data"),
+            "{:?}",
+            v.actions[0].hint
+        );
+        // The built-in actions follow, unchanged and ungrouped.
+        assert_eq!(v.actions[3..], Vocabulary::default().actions[..]);
+
+        // Left operands: the profile's first, with their definition.
+        assert_eq!(
+            values(&v.left_operands[..3]),
+            [
+                format!("{EX}dataSubjectCount"),
+                format!("{EX}researchPurpose"),
+                format!("{EX}retentionPeriod"),
+            ]
+        );
+        assert_eq!(v.left_operands[0].label, "Number of data subjects");
+        assert!(v.left_operands[..3].iter().all(|s| s.group == group));
+        assert_eq!(
+            v.left_operands[1].hint.as_deref(),
+            Some("The research purpose the action of the Rule is exercised for.")
+        );
+        assert_eq!(
+            v.left_operands[3..],
+            Vocabulary::default().left_operands[..]
+        );
+    }
+
+    #[test]
+    fn actions_follow_included_in_depth_first_without_deprecated() {
+        let p = ProfileVocab::parse(&format!(
+            r#"{{
+                "@context": {{"odrl": "{ODRL}", "ex": "{EX}",
+                             "owl": "http://www.w3.org/2002/07/owl#",
+                             "rdfs": "http://www.w3.org/2000/01/rdf-schema#"}},
+                "@graph": [
+                    {{"@id": "ex:child", "@type": "odrl:Action", "odrl:includedIn": {{"@id": "ex:parent"}}}},
+                    {{"@id": "ex:other", "@type": "odrl:Action"}},
+                    {{"@id": "ex:old", "@type": "odrl:Action", "owl:deprecated": true}},
+                    {{"@id": "ex:parent", "@type": "odrl:Action", "rdfs:label": "Parent"}}
+                ]
+            }}"#
+        ))
+        .unwrap();
+        let v = Vocabulary::default().with_profiles(&Wording::new().with_profile(p));
+        assert_eq!(
+            values(&v.actions[..3]),
+            [
+                format!("{EX}parent"),
+                format!("{EX}child"),
+                format!("{EX}other")
+            ]
+        );
+        assert!(!values(&v.actions).contains(&&*format!("{EX}old")));
+        assert_eq!(v.actions[1].hint.as_deref(), Some("part of Parent"));
+        assert_eq!(
+            v.actions[1].group.as_deref(),
+            Some("From profile: unnamed profile")
+        );
+    }
+
+    #[test]
+    fn dedup_by_iri() {
+        let v = Vocabulary::default().with_profiles(&odrl22());
+        let uses: Vec<&Suggestion> = v.actions.iter().filter(|s| s.value == "use").collect();
+        assert_eq!(uses.len(), 1, "{:?}", values(&v.actions));
+        assert_eq!(uses[0].label, "Use");
+        assert_eq!(
+            uses[0].group.as_deref(),
+            Some("From profile: ODRL Version 2.2")
+        );
+        // An ODRL term is offered bare, so it is written bare.
+        assert!(values(&v.actions).contains(&"commercialize"));
+        assert_eq!(
+            v.actions.iter().filter(|s| s.value == "distribute").count(),
+            1
+        );
+        // A closed list keeps its built-in entry and wording.
+        assert_eq!(v.operators.iter().filter(|o| *o == "gteq").count(), 1);
+        assert_eq!(v.operators.len(), 12);
+        assert_eq!(v.conflicts.iter().filter(|c| c.value == "perm").count(), 1);
+        assert_eq!(v.conflicts, Vocabulary::default().conflicts);
+        // Applied twice, nothing is listed twice.
+        let twice = v.clone().with_profiles(&odrl22());
+        assert_eq!(twice, v);
+    }
+
+    #[test]
+    fn value_is_curie_only_if_policy_binds_prefix() {
+        let doc = |context: &str| {
+            let json = format!(r#"{{"@context": {context}, "@type": "Set", "permission": []}}"#);
+            prose_core::edit::prefixes(&prose_core::edit::read_model(&json).unwrap())
+        };
+        let policy = doc(&format!(
+            r#"["http://www.w3.org/ns/odrl.jsonld", {{"ex": "{EX}"}}]"#
+        ));
+        let unbound = doc(r#""http://www.w3.org/ns/odrl.jsonld""#);
+        let iri = format!("{EX}fineTune");
+        assert_eq!(written_form(&iri, &policy), "ex:fineTune");
+        assert_eq!(written_form(&iri, &unbound), iri.as_str());
+        assert_eq!(written_form(&format!("{ODRL}use"), &unbound), "use");
+        // Text that is not a full IRI is written as it is.
+        assert_eq!(written_form("use", &policy), "use");
+        assert_eq!(written_form("ex:fineTune", &unbound), "ex:fineTune");
+    }
+
+    #[test]
+    fn operators_conflicts_policy_kinds_extended() {
+        let v = Vocabulary::default().with_profiles(&research());
+        let d = Vocabulary::default();
+        assert_eq!(v.operators[..12], d.operators[..]);
+        assert_eq!(
+            v.operators[12..],
+            [AttrValue::from(format!("{EX}withinRegion"))]
+        );
+        assert_eq!(v.conflicts[..4], d.conflicts[..]);
+        assert_eq!(
+            v.conflicts[4..],
+            [Choice::new(&format!("{EX}ignore"), "Ignore conflicts")]
+        );
+        assert_eq!(v.policy_kinds[0].value, format!("{EX}ResearchAgreement"));
+        assert_eq!(v.policy_kinds[0].label, "Research agreement");
+        assert_eq!(v.policy_kinds[1..], d.policy_kinds[..]);
+        // Party and asset lists are not touched.
+        assert_eq!(v.parties, d.parties);
+        assert_eq!(v.assets, d.assets);
+    }
+
+    #[test]
+    fn ex_archive_absent() {
+        let v = Vocabulary::default().with_profiles(&research());
+        let archive = format!("{EX}archive");
+        for list in [&v.actions, &v.left_operands, &v.policy_kinds] {
+            assert!(!values(list).contains(&archive.as_str()));
+        }
+        assert!(!v.operators.iter().any(|o| *o == archive));
+        assert!(!v.conflicts.iter().any(|c| c.value == archive));
+    }
+
+    #[test]
+    fn with_wording_extends_the_vocabulary_with_the_labels_heading() {
+        let mut cfg = EditConfig::default();
+        cfg.labels.group_profile = "Profil : {profile}".into();
+        let w = Rc::new(research());
+        let cfg = cfg.with_wording(w.clone());
+        assert!(Rc::ptr_eq(&cfg.wording, &w));
+        assert_eq!(cfg.actions_group(), Some("Profil : Research Data Profile"));
+        assert_eq!(EditConfig::default().wording.as_ref(), &Wording::default());
+    }
+
+    impl EditConfig {
+        fn actions_group(&self) -> Option<&str> {
+            self.vocab.actions.first().and_then(|s| s.group.as_deref())
+        }
     }
 }

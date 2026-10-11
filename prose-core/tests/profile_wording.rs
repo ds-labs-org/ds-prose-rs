@@ -235,3 +235,50 @@ fn wording_can_cross_threads() {
     send_sync::<Prefixes>();
     send_sync::<ProfileVocab>();
 }
+
+#[test]
+fn compact_writes_a_curie_only_with_a_bound_prefix() {
+    let policy = Prefixes::of_document(&json!({
+        "@context": ["http://www.w3.org/ns/odrl.jsonld", {"ex": EX}]
+    }));
+    assert_eq!(
+        policy.compact(&format!("{EX}fineTune")).as_deref(),
+        Some("ex:fineTune")
+    );
+    // An ODRL term is written bare.
+    assert_eq!(
+        policy.compact(&format!("{ODRL}use")).as_deref(),
+        Some("use")
+    );
+    assert_eq!(
+        Prefixes::default()
+            .compact(&format!("{ODRL}gteq"))
+            .as_deref(),
+        Some("gteq")
+    );
+    // No prefix is invented.
+    assert_eq!(Prefixes::default().compact(&format!("{EX}fineTune")), None);
+    // The longest namespace wins, and the local part must be a plain name.
+    let nested = Prefixes::of_document(&json!({
+        "@context": {"ex": "https://example.org/", "r": EX}
+    }));
+    assert_eq!(
+        nested.compact(&format!("{EX}train")).as_deref(),
+        Some("r:train")
+    );
+    assert_eq!(nested.compact(EX), None);
+    assert_eq!(nested.compact("https://example.org/a/b#c"), None);
+    // A bare word the policy binds elsewhere is not written bare.
+    let rebound = Prefixes::of_document(&json!({
+        "@context": {"use": "https://example.org/use"}
+    }));
+    assert_eq!(rebound.compact(&format!("{ODRL}use")), None);
+    // Every CURIE written expands back to the IRI.
+    for (p, iri) in [
+        (&policy, format!("{EX}fineTune")),
+        (&nested, format!("{EX}train")),
+    ] {
+        let c = p.compact(&iri).unwrap();
+        assert_eq!(p.expand(&c), iri);
+    }
+}

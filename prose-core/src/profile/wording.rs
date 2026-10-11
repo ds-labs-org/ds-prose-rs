@@ -159,6 +159,14 @@ impl Prefixes {
         self.try_expand(term).unwrap_or_else(|| term.to_string())
     }
 
+    /// `iri` as a policy with these prefixes would write it: an ODRL term
+    /// bare, any other as a compact IRI with a prefix bound here, never with
+    /// an invented prefix. `None` when no bound prefix fits.
+    pub fn compact(&self, iri: &str) -> Option<String> {
+        let _ = iri;
+        None
+    }
+
     /// `None` for a compact IRI whose prefix nothing here binds.
     pub(crate) fn try_expand(&self, term: &str) -> Option<String> {
         match term.split_once(':') {

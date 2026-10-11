@@ -155,6 +155,7 @@ fn options_for(env: &Env, slot: &Slot) -> Vec<Suggestion> {
                 value: uid.clone(),
                 label: uid.clone(),
                 hint: None,
+                group: None,
             })
             .collect(),
         _ => vec![],
