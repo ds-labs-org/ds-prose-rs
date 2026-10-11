@@ -39,8 +39,7 @@ pub mod wording {
         prefixes: &crate::profile::Prefixes,
         written: &str,
     ) -> Option<crate::Gloss> {
-        let _ = (wording, prefixes, written);
-        None
+        crate::words_ctx::gloss(wording, prefixes, written)
     }
 }
 

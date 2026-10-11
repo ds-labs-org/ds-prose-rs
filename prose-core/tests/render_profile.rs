@@ -242,7 +242,7 @@ fn core_profile_changes_no_sentence() {
     assert_eq!(r.document, render(&text).unwrap());
     assert_eq!(
         written(&r, 0),
-        vec!["prohibit", "odrl:distribute", "purpose", "spatial"]
+        vec!["Agreement", "odrl:distribute", "purpose", "spatial"]
     );
 }
 
@@ -356,7 +356,9 @@ fn hostile_label_is_plain_in_sentence() {
         !s.contains(['<', '>', '\u{202e}', '\u{200b}', '\u{0}']),
         "{s:?}"
     );
-    assert!(s.contains("fine-tune & train"), "{s:?}");
+    // Only the first letter is lower-cased, and only that of the label.
+    assert!(s.starts_with("Anyone may exe.gnp "), "{s:?}");
+    assert!(s.contains("Fine-tune & train"), "{s:?}");
 }
 
 #[test]

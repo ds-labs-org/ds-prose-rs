@@ -1,0 +1,222 @@
+Ok(
+    Reading {
+        document: Document {
+            policies: [
+                Policy {
+                    kind: Agreement,
+                    uid: Some(
+                        "urn:policy:research-1",
+                    ),
+                    heading: "Agreement urn:policy:research-1",
+                    intro: "An agreement between http://example.com/org:hospital (assigner) and http://example.com/org:university (assignee).",
+                    notes: [
+                        "Written to the profile Research Data Profile (https://example.org/odrl/profile/research, version 0.1.0).",
+                    ],
+                    rules: [
+                        Rule {
+                            kind: Permission,
+                            uid: None,
+                            sentence: "http://example.com/org:university may fine-tune http://example.com/data:cohort-2026, as permitted by http://example.com/org:hospital.",
+                            refinements: [
+                                Condition {
+                                    text: "The action \"fine-tune\" is limited to cases where",
+                                    children: [
+                                        Condition {
+                                            text: "the number of data subjects is at least 50",
+                                            children: [],
+                                        },
+                                    ],
+                                },
+                            ],
+                            conditions: [
+                                Condition {
+                                    text: "the research purpose is any of clinical research or academic research",
+                                    children: [],
+                                },
+                                Condition {
+                                    text: "the retention period is at most P2Y",
+                                    children: [],
+                                },
+                            ],
+                            follow_ups: [],
+                        },
+                        Rule {
+                            kind: Permission,
+                            uid: None,
+                            sentence: "http://example.com/org:university may distill http://example.com/data:cohort-2026, as permitted by http://example.com/org:hospital.",
+                            refinements: [],
+                            conditions: [],
+                            follow_ups: [],
+                        },
+                        Rule {
+                            kind: Prohibition,
+                            uid: None,
+                            sentence: "http://example.com/org:university must not commercialize http://example.com/data:cohort-2026, as prohibited by http://example.com/org:hospital.",
+                            refinements: [],
+                            conditions: [],
+                            follow_ups: [],
+                        },
+                        Rule {
+                            kind: Obligation,
+                            uid: None,
+                            sentence: "http://example.com/org:university must pseudonymise http://example.com/data:cohort-2026, as required by http://example.com/org:hospital.",
+                            refinements: [],
+                            conditions: [],
+                            follow_ups: [],
+                        },
+                    ],
+                },
+            ],
+            warnings: [
+                "the action \"ex:distill\" is not declared by the loaded profile <https://example.org/odrl/profile/research>",
+            ],
+        },
+        glossary: [
+            PolicyGlossary {
+                terms: [
+                    Gloss {
+                        written: "ex:fineTune",
+                        iri: "https://example.org/odrl/profile/research/fineTune",
+                        kind: Action,
+                        label: "Fine-tune",
+                        definition: Some(
+                            "To adapt an already trained model using the Asset.",
+                        ),
+                        note: Some(
+                            "Fine-tuning implies that the Asset may be read.",
+                        ),
+                        broader: [
+                            (
+                                "https://example.org/odrl/profile/research/train",
+                                "Train",
+                            ),
+                        ],
+                        implies: [
+                            (
+                                "http://www.w3.org/ns/odrl/2/read",
+                                "read",
+                            ),
+                        ],
+                        profile: Some(
+                            "Research Data Profile",
+                        ),
+                        deprecated: false,
+                    },
+                    Gloss {
+                        written: "ex:dataSubjectCount",
+                        iri: "https://example.org/odrl/profile/research/dataSubjectCount",
+                        kind: LeftOperand,
+                        label: "Number of data subjects",
+                        definition: Some(
+                            "The number of distinct data subjects represented in a result derived from the Asset. Right operand value MUST be an xsd:integer.",
+                        ),
+                        note: Some(
+                            "Only the gteq and gt operators SHOULD be used. Small counts risk re-identification.",
+                        ),
+                        broader: [],
+                        implies: [],
+                        profile: Some(
+                            "Research Data Profile",
+                        ),
+                        deprecated: false,
+                    },
+                    Gloss {
+                        written: "ex:researchPurpose",
+                        iri: "https://example.org/odrl/profile/research/researchPurpose",
+                        kind: LeftOperand,
+                        label: "Research purpose",
+                        definition: Some(
+                            "The research purpose the action of the Rule is exercised for.",
+                        ),
+                        note: None,
+                        broader: [
+                            (
+                                "http://www.w3.org/ns/odrl/2/purpose",
+                                "purpose",
+                            ),
+                        ],
+                        implies: [],
+                        profile: Some(
+                            "Research Data Profile",
+                        ),
+                        deprecated: false,
+                    },
+                    Gloss {
+                        written: "ex:clinical",
+                        iri: "https://example.org/odrl/profile/research/clinical",
+                        kind: RightOperand,
+                        label: "Clinical research",
+                        definition: Some(
+                            "Academic research that involves human participants under an approved study protocol.",
+                        ),
+                        note: None,
+                        broader: [
+                            (
+                                "https://example.org/odrl/profile/research/academic",
+                                "Academic research",
+                            ),
+                        ],
+                        implies: [],
+                        profile: Some(
+                            "Research Data Profile",
+                        ),
+                        deprecated: false,
+                    },
+                    Gloss {
+                        written: "ex:academic",
+                        iri: "https://example.org/odrl/profile/research/academic",
+                        kind: RightOperand,
+                        label: "Academic research",
+                        definition: Some(
+                            "Research carried out by an accredited academic institution with no commercial sponsor.",
+                        ),
+                        note: None,
+                        broader: [],
+                        implies: [],
+                        profile: Some(
+                            "Research Data Profile",
+                        ),
+                        deprecated: false,
+                    },
+                    Gloss {
+                        written: "ex:retentionPeriod",
+                        iri: "https://example.org/odrl/profile/research/retentionPeriod",
+                        kind: LeftOperand,
+                        label: "Retention period",
+                        definition: Some(
+                            "How long results derived from the Asset may be kept, counted from their creation.",
+                        ),
+                        note: None,
+                        broader: [],
+                        implies: [],
+                        profile: Some(
+                            "Research Data Profile",
+                        ),
+                        deprecated: false,
+                    },
+                    Gloss {
+                        written: "ex:pseudonymise",
+                        iri: "https://example.org/odrl/profile/research/pseudonymise",
+                        kind: Action,
+                        label: "Pseudonymise",
+                        definition: Some(
+                            "To replace direct identifiers in the Asset with pseudonyms before any other use.",
+                        ),
+                        note: None,
+                        broader: [
+                            (
+                                "http://www.w3.org/ns/odrl/2/modify",
+                                "modify",
+                            ),
+                        ],
+                        implies: [],
+                        profile: Some(
+                            "Research Data Profile",
+                        ),
+                        deprecated: false,
+                    },
+                ],
+            },
+        ],
+    },
+)

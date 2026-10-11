@@ -25,3 +25,5 @@ Software and Document License,
 <https://www.w3.org/copyright/software-license-2023/>; the vocabulary's own
 licence statement is kept in the excerpt (`dct:license` on its ontology
 node).
+`../golden_profile/agreement_odrl22.txt` quotes labels and definitions
+from the excerpt; the same notice applies to them.
