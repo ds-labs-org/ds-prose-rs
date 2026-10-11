@@ -1131,5 +1131,6 @@ async fn no_empty_other_operators_group() {
     let sel = select_of(&html, "policy[0].permission[0].constraint[0]#operator");
     assert!(sel.contains("Suggested by the profile"), "{sel}");
     assert!(!sel.contains("Other operators"), "{sel}");
-    assert!(!sel.contains("></optgroup>"), "{sel}");
+    // No group is empty: none closes right after its opening tag.
+    assert!(!sel.contains("\"></optgroup>"), "{sel}");
 }

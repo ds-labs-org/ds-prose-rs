@@ -263,9 +263,13 @@ pub(crate) fn choice_select(props: &ChoiceSelectProps) -> Html {
                 <optgroup label={cfg.labels.suggested_operators.clone()}>
                     { for opts.iter().filter(|o| o.suggested).map(|o| option(o, &selected)) }
                 </optgroup>
-                <optgroup label={cfg.labels.other_operators.clone()}>
-                    { for opts.iter().filter(|o| !o.suggested && !o.extra).map(|o| option(o, &selected)) }
-                </optgroup>
+                // Only when something is left for it: an empty group is
+                // announced as one.
+                if opts.iter().any(|o| !o.suggested && !o.extra) {
+                    <optgroup label={cfg.labels.other_operators.clone()}>
+                        { for opts.iter().filter(|o| !o.suggested && !o.extra).map(|o| option(o, &selected)) }
+                    </optgroup>
+                }
             } else {
                 { for opts.iter().map(|o| option(o, &selected)) }
             }
