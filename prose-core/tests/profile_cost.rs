@@ -152,3 +152,35 @@ fn many_prefixes_in_turtle() {
     });
     assert_eq!(v.terms().count(), 1);
 }
+
+#[test]
+fn many_left_operands_suggesting_a_dense_hierarchy() {
+    // 256 values, each narrower than every other (the most links one node
+    // may have), and 15 000 left operands that all suggest them.
+    const PROSE: &str = "https://ds-labs-org.github.io/ds-prose-rs/profile#";
+    const SKOS: &str = "http://www.w3.org/2004/02/skos/core#";
+    let ids: Vec<String> = (0..256)
+        .map(|i| format!(r#"{{"@id":"https://e/v{i}"}}"#))
+        .collect();
+    let all = ids.join(",");
+    let mut nodes: Vec<String> = (0..256)
+        .map(|i| {
+            format!(
+                r#"{{"@id":"https://e/v{i}","@type":"{ODRL}RightOperand","{SKOS}broader":[{all}]}}"#
+            )
+        })
+        .collect();
+    for i in 0..15_000 {
+        nodes.push(format!(
+            r#"{{"@id":"https://e/lo{i}","@type":"{ODRL}LeftOperand","{PROSE}rightOperand":{{"@id":"https://e/v{}"}}}}"#,
+            i % 256
+        ));
+    }
+    let text = format!("[{}]", nodes.join(","));
+    let v = quick("dense value hierarchy", move || {
+        ProfileVocab::parse_with(&text, &big()).unwrap()
+    });
+    let lo = v.term("https://e/lo0").unwrap();
+    assert!(!lo.hints.value_tree.is_empty());
+    assert!(lo.hints.value_tree.len() <= 256);
+}

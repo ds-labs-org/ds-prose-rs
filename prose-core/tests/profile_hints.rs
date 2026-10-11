@@ -216,3 +216,70 @@ fn blank_node_hint_values_are_dropped() {
     assert_eq!(h.operators, [odrl("eq")]);
     assert_eq!(h.datatype, None);
 }
+
+#[test]
+fn value_tree_capped_with_a_warning() {
+    let mut graph = vec![json!({"@id": "ex:op", "@type": "odrl:LeftOperand",
+                                "prose:rightOperand": "ex:root"})];
+    graph.push(json!({"@id": "ex:root", "@type": "odrl:RightOperand"}));
+    for i in 0..20 {
+        graph.push(
+            json!({"@id": format!("ex:v{i}"), "@type": "odrl:RightOperand",
+                          "skos:broader": "ex:root"}),
+        );
+    }
+    let mut limits = ProfileLimits::default();
+    limits.max_values_per_key = 8;
+    let v =
+        ProfileVocab::from_value(&json!({"@context": ctx(), "@graph": graph}), &limits).unwrap();
+    let t = tree(term(&v, &ex("op")));
+    assert_eq!(t.len(), 8);
+    assert_eq!(t[0], (ex("root"), 0));
+    assert_eq!(t[1], (ex("v0"), 1));
+    assert!(
+        v.warnings()
+            .iter()
+            .any(|w| w.contains("suggested values") && w.contains(&ex("op"))),
+        "{:?}",
+        v.warnings()
+    );
+    // Within the cap, no warning.
+    assert!(
+        !research()
+            .warnings()
+            .iter()
+            .any(|w| w.contains("suggested values"))
+    );
+}
+
+#[test]
+fn value_trees_share_one_budget_per_profile() {
+    // Three left operands suggest the same 4-value hierarchy; with room for
+    // 7 descendants in the whole profile (max_terms), the third tree is cut
+    // after one.
+    let mut graph = vec![json!({"@id": "ex:root", "@type": "odrl:RightOperand"})];
+    for i in 0..3 {
+        graph.push(
+            json!({"@id": format!("ex:v{i}"), "@type": "odrl:RightOperand",
+                          "skos:broader": "ex:root"}),
+        );
+    }
+    for i in 0..3 {
+        graph.push(
+            json!({"@id": format!("ex:lo{i}"), "@type": "odrl:LeftOperand",
+                          "prose:rightOperand": "ex:root"}),
+        );
+    }
+    let mut limits = ProfileLimits::default();
+    limits.max_terms = 7;
+    let v =
+        ProfileVocab::from_value(&json!({"@context": ctx(), "@graph": graph}), &limits).unwrap();
+    assert_eq!(tree(term(&v, &ex("lo0"))).len(), 4);
+    assert_eq!(tree(term(&v, &ex("lo1"))).len(), 4);
+    assert_eq!(tree(term(&v, &ex("lo2"))), [(ex("root"), 0), (ex("v0"), 1)]);
+    assert!(
+        v.warnings()
+            .iter()
+            .any(|w| w.contains("suggested values") && w.contains(&ex("lo2")))
+    );
+}

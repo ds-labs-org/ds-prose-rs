@@ -127,9 +127,89 @@ pub(crate) fn vocab(parsed: Parsed, limits: &ProfileLimits) -> Result<ProfileVoc
     if v.terms.is_empty() {
         return Err(ProfileError::NoTerms);
     }
+    value_trees(&mut v.terms, limits, &mut notes);
     b.cycles(&mut notes);
     v.warnings = notes.list;
     Ok(v)
+}
+
+/// Each left operand's suggested values with their descendants: the right
+/// operands whose broader links lead to them, depth first, each once.
+///
+/// Bounded three ways, so neither a dense or cyclic hierarchy nor many left
+/// operands suggesting it costs more than the profile's size: depth stays
+/// below `max_depth`, one tree holds at most `max_values_per_key` values,
+/// and the whole profile adds at most `max_terms` descendants and looks at
+/// most sixteen times that many links. A suggested value itself is always
+/// kept (up to the per-tree cap); a tree cut short says so in a warning.
+fn value_trees(terms: &mut [Term], limits: &ProfileLimits, notes: &mut Notes) {
+    // Broader value -> its narrower right operands, in document order.
+    let mut narrower: HashMap<&str, Vec<&str>> = HashMap::new();
+    for t in terms.iter() {
+        if t.kinds.contains(&TermKind::RightOperand) {
+            for b in &t.broader {
+                narrower.entry(b).or_default().push(&t.iri);
+            }
+        }
+    }
+    let cap = limits.max_values_per_key;
+    let mut room = limits.max_terms;
+    let mut looks = limits.max_terms.saturating_mul(16);
+    let mut trees: Vec<(usize, Vec<(String, usize)>)> = Vec::new();
+    for (i, t) in terms.iter().enumerate() {
+        if t.hints.values.is_empty() {
+            continue;
+        }
+        let mut out: Vec<(String, usize)> = Vec::new();
+        let mut seen: HashSet<&str> = HashSet::new();
+        let roots: Vec<&str> = t.hints.values.iter().map(String::as_str).collect();
+        // (the links still to look at, their depth), innermost last.
+        let mut stack: Vec<(std::slice::Iter<&str>, usize)> = vec![(roots.iter(), 0)];
+        let mut cut = false;
+        while let Some((links, depth)) = stack.last_mut() {
+            let depth = *depth;
+            let Some(&next) = links.next() else {
+                stack.pop();
+                continue;
+            };
+            if depth > 0 {
+                if looks == 0 || room == 0 {
+                    // Out of budget: keep the remaining suggested values only.
+                    cut = true;
+                    stack.truncate(1);
+                    continue;
+                }
+                looks -= 1;
+            }
+            if !seen.insert(next) {
+                continue;
+            }
+            if out.len() == cap {
+                cut = true;
+                break;
+            }
+            if depth > 0 {
+                room -= 1;
+            }
+            out.push((next.to_string(), depth));
+            if depth + 1 < limits.max_depth
+                && let Some(kids) = narrower.get(next)
+            {
+                stack.push((kids.iter(), depth + 1));
+            }
+        }
+        if cut {
+            notes.warn(format!(
+                "the suggested values of \"{}\" are cut at {} values",
+                t.iri,
+                out.len()
+            ));
+        }
+        trees.push((i, out));
+    }
+    for (i, tree) in trees {
+        terms[i].hints.value_tree = tree;
+    }
 }
 
 /// Not a blank node. Blank node labels are made up by the reader (at random
@@ -338,6 +418,14 @@ impl Builder<'_, '_> {
             .literals(s, &format!("{}deprecated", ns::OWL))
             .iter()
             .any(|(_, v)| matches!(*v, "true" | "1"));
+        // The ds-prose extension, on left operands only.
+        if t.kinds.contains(&TermKind::LeftOperand) {
+            let prose = |local: &str| iris(format!("{}{local}", ns::PROSE));
+            t.hints.operators = prose("operator");
+            t.hints.values = prose("rightOperand");
+            t.hints.datatype = prose("datatype").into_iter().next();
+            t.hints.units = prose("unit");
+        }
         t
     }
 
