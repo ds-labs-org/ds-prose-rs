@@ -52,6 +52,7 @@ mod turtle;
 mod wording;
 
 pub use text::LangText;
+pub(crate) use wording::Budget;
 pub use wording::{Prefixes, Wording};
 
 /// The vocabulary one ODRL profile declares.

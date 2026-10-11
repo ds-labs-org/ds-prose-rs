@@ -125,10 +125,25 @@ fn name(p: &ProfileVocab) -> String {
 /// The prefixes and term definitions a policy document's `@context` binds.
 /// Only inline contexts are read; the W3C ODRL context, named as a remote
 /// context, adds the prefixes it is known to bind.
-#[derive(Clone, Debug, Default, PartialEq)]
+///
+/// Equality compares the bindings in effect.
+#[derive(Clone, Debug, Default)]
 pub struct Prefixes {
     /// Prefix or term -> IRI. A map, so a large `@context` costs its size.
     entries: BTreeMap<String, String>,
+    /// The scope these bindings sit in (a node's own `@context` inside its
+    /// document's): a key not bound here is looked up there. Shared, not
+    /// copied, so many nodes under one large `@context` stay cheap.
+    outer: Option<Arc<Prefixes>>,
+}
+
+impl PartialEq for Prefixes {
+    fn eq(&self, other: &Prefixes) -> bool {
+        match (&self.outer, &other.outer) {
+            (None, None) => self.entries == other.entries,
+            _ => self.bindings() == other.bindings(),
+        }
+    }
 }
 
 impl Prefixes {
@@ -154,7 +169,7 @@ impl Prefixes {
         let mut budget = Budget::default();
         for n in nodes {
             if let Some(c) = n.get("@context") {
-                out.merge(Prefixes::of_context_within(c, &mut budget));
+                out.merge(Prefixes::of_context(c, &mut budget));
             }
         }
         out
@@ -170,6 +185,9 @@ impl Prefixes {
     /// bare, any other as a compact IRI with a prefix bound here, never with
     /// an invented prefix. `None` when no bound prefix fits.
     pub fn compact(&self, iri: &str) -> Option<String> {
+        if self.outer.is_some() {
+            return self.flattened().compact(iri);
+        }
         let fits = |written: String| {
             (self.try_expand(&written).as_deref() == Some(iri)).then_some(written)
         };
@@ -209,14 +227,69 @@ impl Prefixes {
         }
     }
 
+    /// What `key` is bound to here, else in the enclosing scopes.
     fn get(&self, key: &str) -> Option<&str> {
-        self.entries.get(key).map(String::as_str)
+        let mut layer = self;
+        loop {
+            if let Some(v) = layer.entries.get(key) {
+                return Some(v);
+            }
+            layer = layer.outer.as_deref()?;
+        }
+    }
+
+    /// Every binding in effect: an inner one hides an outer one of the same
+    /// key.
+    fn bindings(&self) -> BTreeMap<&str, &str> {
+        let mut out = BTreeMap::new();
+        let mut layer = Some(self);
+        while let Some(l) = layer {
+            for (k, v) in &l.entries {
+                out.entry(k.as_str()).or_insert(v.as_str());
+            }
+            layer = l.outer.as_deref();
+        }
+        out
+    }
+
+    /// The bindings in effect, in one layer.
+    fn flattened(&self) -> Prefixes {
+        Prefixes {
+            entries: self
+                .bindings()
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            outer: None,
+        }
+    }
+
+    /// These bindings, inside the scope `outer`: a key not bound here is
+    /// looked up there.
+    pub(crate) fn inside(self, outer: Arc<Prefixes>) -> Prefixes {
+        match self.outer {
+            None => Prefixes {
+                entries: self.entries,
+                outer: Some(outer),
+            },
+            // Not built by the crate; kept correct all the same.
+            Some(_) => Prefixes {
+                entries: self.flattened().entries,
+                outer: Some(outer),
+            },
+        }
     }
 
     /// Adds `other`'s keys that are not bound here yet.
     pub(crate) fn merge(&mut self, other: Prefixes) {
-        for (k, v) in other.entries {
-            self.entries.entry(k).or_insert(v);
+        let other = match other.outer {
+            None => other.entries,
+            Some(_) => other.flattened().entries,
+        };
+        for (k, v) in other {
+            if self.get(&k).is_none() {
+                self.entries.insert(k, v);
+            }
         }
     }
 
@@ -225,13 +298,9 @@ impl Prefixes {
     }
 
     /// One `@context` value: a string, an object, or an array of them.
-    pub(crate) fn of_context(c: &Value) -> Prefixes {
-        Prefixes::of_context_within(c, &mut Budget::default())
-    }
-
-    /// [`Prefixes::of_context`], expanding compact values only while
-    /// `budget` lasts; one budget is shared by the contexts of a document.
-    pub(crate) fn of_context_within(c: &Value, budget: &mut Budget) -> Prefixes {
+    /// Compact values are expanded only while `budget` lasts; one budget is
+    /// shared by the contexts of a document.
+    pub(crate) fn of_context(c: &Value, budget: &mut Budget) -> Prefixes {
         let mut out = Prefixes::default();
         let list: Vec<&Value> = match c {
             Value::Array(a) => a.iter().collect(),

@@ -1,10 +1,11 @@
 //! JSON-LD in, [`Document`] out.
 use crate::ProseError;
 use crate::model::*;
-use crate::profile::{Prefixes, TermKind, Wording};
+use crate::profile::{Budget, Prefixes, TermKind, Wording};
 use crate::words::{join, local_name};
 use crate::words_ctx::{WordCtx, profile_name};
 use serde_json::{Map, Value};
+use std::sync::Arc;
 
 pub(crate) type Obj = Map<String, Value>;
 
@@ -118,7 +119,7 @@ pub fn document_with(value: &Value, wording: &Wording) -> Result<Reading, ProseE
         match v {
             Value::Object(o) if looks_like_policy(o) => {
                 if let Some(p) = scopes.get(i) {
-                    r.ctx.set_prefixes(p.clone());
+                    r.ctx.set_prefixes(Prefixes::default().inside(p.clone()));
                 }
                 doc.policies.push(r.policy(o));
                 r.glossed.clear();
@@ -303,27 +304,28 @@ pub(crate) fn policy_nodes(v: &Value) -> Vec<&Value> {
 
 /// The prefixes of each node [`policy_nodes`] yields, in the same order:
 /// the node's own context, then those of the objects whose `@graph` holds
-/// it. A sibling's context is not in scope.
-fn node_prefixes(v: &Value) -> Vec<Prefixes> {
-    fn walk(v: &Value, outer: &Prefixes, out: &mut Vec<Prefixes>) {
-        let mut own = v
-            .get("@context")
-            .map(Prefixes::of_context)
-            .unwrap_or_default();
+/// it. A sibling's context is not in scope. Scopes are shared, never
+/// copied: a node without a context of its own costs one pointer, and one
+/// with a context costs that context.
+fn node_prefixes(v: &Value) -> Vec<Arc<Prefixes>> {
+    fn walk(v: &Value, outer: &Arc<Prefixes>, out: &mut Vec<Arc<Prefixes>>, budget: &mut Budget) {
+        let scope = match v.get("@context") {
+            Some(c) => Arc::new(Prefixes::of_context(c, budget).inside(outer.clone())),
+            None => outer.clone(),
+        };
         match v {
-            Value::Array(a) => a.iter().for_each(|x| walk(x, outer, out)),
-            Value::Object(o) if o.contains_key("@graph") => {
-                own.merge(outer.clone());
-                walk(&o["@graph"], &own, out);
-            }
-            _ => {
-                own.merge(outer.clone());
-                out.push(own);
-            }
+            Value::Array(a) => a.iter().for_each(|x| walk(x, outer, out, budget)),
+            Value::Object(o) if o.contains_key("@graph") => walk(&o["@graph"], &scope, out, budget),
+            _ => out.push(scope),
         }
     }
     let mut out = Vec::new();
-    walk(v, &Prefixes::default(), &mut out);
+    walk(
+        v,
+        &Arc::new(Prefixes::default()),
+        &mut out,
+        &mut Budget::default(),
+    );
     out
 }
 
