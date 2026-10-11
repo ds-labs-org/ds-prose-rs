@@ -151,9 +151,10 @@ impl Prefixes {
             }
         }
         let mut out = Prefixes::default();
+        let mut budget = Budget::default();
         for n in nodes {
             if let Some(c) = n.get("@context") {
-                out.merge(Prefixes::of_context(c));
+                out.merge(Prefixes::of_context_within(c, &mut budget));
             }
         }
         out
@@ -225,6 +226,12 @@ impl Prefixes {
 
     /// One `@context` value: a string, an object, or an array of them.
     pub(crate) fn of_context(c: &Value) -> Prefixes {
+        Prefixes::of_context_within(c, &mut Budget::default())
+    }
+
+    /// [`Prefixes::of_context`], expanding compact values only while
+    /// `budget` lasts; one budget is shared by the contexts of a document.
+    pub(crate) fn of_context_within(c: &Value, budget: &mut Budget) -> Prefixes {
         let mut out = Prefixes::default();
         let list: Vec<&Value> = match c {
             Value::Array(a) => a.iter().collect(),
@@ -255,20 +262,63 @@ impl Prefixes {
                 _ => {}
             }
         }
+        budget.grant(
+            out.entries
+                .iter()
+                .map(|(k, v)| k.len() + v.len())
+                .sum::<usize>(),
+        );
         // Values written as compact IRIs ("fineTune": "ex:fineTune"); a few
-        // passes resolve chains.
+        // passes resolve chains. Each pass reads the values of the one
+        // before. A value the budget cannot pay for stays as written.
         for _ in 0..4 {
-            let snapshot = out.clone();
-            for (k, v) in &mut out.entries {
+            let mut changed: Vec<(String, String)> = Vec::new();
+            for (k, v) in &out.entries {
                 if let Some((prefix, suffix)) = v.split_once(':')
                     && prefix != k
                     && !suffix.starts_with("//")
-                    && let Some(iri) = snapshot.get(prefix)
+                    && let Some(iri) = out.get(prefix)
+                    && budget.spend(iri.len() + suffix.len())
                 {
-                    *v = format!("{iri}{suffix}");
+                    changed.push((k.clone(), format!("{iri}{suffix}")));
                 }
             }
+            if changed.is_empty() {
+                break;
+            }
+            out.entries.extend(changed);
         }
         out
+    }
+}
+
+/// What expanding a policy's compact `@context` values may add: 64 KiB,
+/// plus 16 times the bytes of every context read. Many short terms bound
+/// to one long namespace (`"k1": "big:"`) would otherwise each hold a copy
+/// of it, gigabytes from a small text.
+#[derive(Debug)]
+pub(crate) struct Budget {
+    left: usize,
+}
+
+impl Default for Budget {
+    fn default() -> Budget {
+        Budget { left: 64 * 1024 }
+    }
+}
+
+impl Budget {
+    /// Adds what a context of `written` bytes may expand to.
+    fn grant(&mut self, written: usize) {
+        self.left = self.left.saturating_add(written.saturating_mul(16));
+    }
+
+    /// Takes `bytes`, if they are left.
+    fn spend(&mut self, bytes: usize) -> bool {
+        let ok = bytes <= self.left;
+        if ok {
+            self.left -= bytes;
+        }
+        ok
     }
 }

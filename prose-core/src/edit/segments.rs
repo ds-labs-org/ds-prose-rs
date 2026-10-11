@@ -278,7 +278,12 @@ pub fn sentences(doc: &EditDoc) -> Vec<PolicyProse> {
 
 /// As [`sentences`], worded with the profiles `wording` holds.
 pub fn sentences_with(doc: &EditDoc, wording: &crate::profile::Wording) -> Vec<PolicyProse> {
-    sentences_in(doc, &WordCtx::new(wording, super::prefixes(doc)))
+    // Without a profile no term is expanded, so the prefixes are not read.
+    let prefixes = match wording.is_empty() {
+        true => crate::profile::Prefixes::default(),
+        false => super::prefixes(doc),
+    };
+    sentences_in(doc, &WordCtx::new(wording, prefixes))
 }
 
 fn sentences_in(doc: &EditDoc, ctx: &WordCtx) -> Vec<PolicyProse> {
