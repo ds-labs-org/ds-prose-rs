@@ -208,3 +208,16 @@ fn short_prefix_bound_to_a_long_namespace() {
         "{r:?}"
     );
 }
+
+#[test]
+fn default_limits_are_the_documented_ones() {
+    // The README and the npm READMEs quote these numbers.
+    let l = ProfileLimits::default();
+    assert_eq!(l.max_bytes, 4 * 1024 * 1024);
+    assert_eq!(l.max_terms, 20_000);
+    assert_eq!(l.max_depth, 64);
+    assert_eq!(l.max_values_per_key, 256);
+    assert_eq!(l.max_label_chars, 200);
+    assert_eq!(l.max_text_chars, 4_000);
+    assert_eq!(l.max_expanded_bytes, 32 * 1024 * 1024);
+}

@@ -286,3 +286,36 @@ fn null_base_in_a_nested_context_clears_it() {
         v.warnings()
     );
 }
+
+#[test]
+fn every_documented_well_known_prefix_falls_back() {
+    // The README lists these as the prefixes read without a binding.
+    for (prefix, ns) in [
+        ("odrl", ODRL),
+        ("rdf", "http://www.w3.org/1999/02/22-rdf-syntax-ns#"),
+        ("rdfs", "http://www.w3.org/2000/01/rdf-schema#"),
+        ("owl", "http://www.w3.org/2002/07/owl#"),
+        ("skos", SKOS),
+        ("dct", "http://purl.org/dc/terms/"),
+        ("dcterms", "http://purl.org/dc/terms/"),
+        ("xsd", "http://www.w3.org/2001/XMLSchema#"),
+        ("prof", "http://www.w3.org/ns/dx/prof/"),
+        (
+            "prose",
+            "https://ds-labs-org.github.io/ds-prose-rs/profile#",
+        ),
+    ] {
+        let v = from(json!({
+            "@id": format!("{prefix}:t"),
+            "@type": format!("{ODRL}Action")
+        }))
+        .unwrap_or_else(|e| panic!("{prefix}: {e}"));
+        assert_eq!(iris(&v), vec![format!("{ns}t")], "{prefix}");
+        assert_eq!(v.warnings().len(), 1, "{prefix}: {:?}", v.warnings());
+        assert!(
+            v.warnings()[0].contains(&format!("\"{prefix}\"")),
+            "{prefix}: {:?}",
+            v.warnings()
+        );
+    }
+}

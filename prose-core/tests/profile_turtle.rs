@@ -221,3 +221,16 @@ fn turtle_short_prefix_long_namespace_refused() {
         Err(ProfileError::LimitExceeded("max_expanded_bytes"))
     );
 }
+
+#[test]
+fn n_triples_is_read_as_turtle() {
+    // N-Triples is a subset of Turtle, so the feature reads it too.
+    let text = format!(
+        "<https://example.org/a> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <{ODRL}Action> .\n\
+         <https://example.org/a> <http://www.w3.org/2000/01/rdf-schema#label> \"Ay\"@en .\n"
+    );
+    let v = ProfileVocab::parse(&text).unwrap();
+    let t = v.term("https://example.org/a").unwrap();
+    assert_eq!(t.kinds, vec![TermKind::Action]);
+    assert_eq!(t.display_label(&[]), "Ay");
+}
