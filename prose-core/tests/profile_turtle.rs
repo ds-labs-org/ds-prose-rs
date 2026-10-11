@@ -162,6 +162,25 @@ fn turtle_blank_node_subject_is_not_a_term() {
 }
 
 #[test]
+fn turtle_with_blank_nodes_equals_its_jsonld_twin() {
+    // Turtle names blank nodes at random, JSON-LD in order: equal only if
+    // no blank node label reaches the vocabulary.
+    let ttl = format!(
+        "@prefix odrl: <{ODRL}> .\n@prefix owl: <http://www.w3.org/2002/07/owl#> .\n@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n\
+         [] a owl:Ontology ; rdfs:label \"Anonymous\"@en .\n\
+         <https://example.org/a> a odrl:Action ; rdfs:subClassOf [ a owl:Restriction ] ; odrl:includedIn [ a odrl:Action ] .\n"
+    );
+    let jsonld = format!(
+        r#"[{{"@type":"http://www.w3.org/2002/07/owl#Ontology","http://www.w3.org/2000/01/rdf-schema#label":{{"@value":"Anonymous","@language":"en"}}}},
+           {{"@id":"https://example.org/a","@type":"{ODRL}Action","http://www.w3.org/2000/01/rdf-schema#subClassOf":{{"@type":"http://www.w3.org/2002/07/owl#Restriction"}},"{ODRL}includedIn":{{"@type":"{ODRL}Action"}}}}]"#
+    );
+    let ttl = ProfileVocab::parse(&ttl).unwrap();
+    let jsonld = ProfileVocab::parse(&jsonld).unwrap();
+    assert_eq!(ttl.iri(), None);
+    assert_eq!(ttl, jsonld);
+}
+
+#[test]
 fn turtle_deep_nesting_does_not_overflow() {
     std::thread::Builder::new()
         .stack_size(1 << 20)

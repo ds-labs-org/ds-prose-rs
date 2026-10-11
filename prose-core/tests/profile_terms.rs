@@ -403,3 +403,39 @@ fn ex_purpose_and_odrl_purpose_distinct() {
     assert!(v.term("purpose").is_none());
     assert!(v.term("ex:purpose").is_none());
 }
+
+#[test]
+fn blank_nodes_are_never_named() {
+    // An OWL-style profile: an anonymous ontology header, a restriction as
+    // a superclass, an anonymous action as a parent. Blank node labels are
+    // made up by the reader, so none of them is shown as an IRI.
+    let owl = "http://www.w3.org/2002/07/owl#";
+    let rdfs = "http://www.w3.org/2000/01/rdf-schema#";
+    let v = from(json!([
+        {
+            "@type": format!("{owl}Ontology"),
+            format!("{rdfs}label"): {"@value": "Anonymous profile", "@language": "en"},
+            format!("{owl}imports"): [{"@id": "https://example.org/base"}, {"@type": format!("{owl}Ontology")}]
+        },
+        {
+            "@id": "https://example.org/a",
+            "@type": odrl("Action"),
+            format!("{rdfs}isDefinedBy"): {"@id": "https://example.org/p"},
+            format!("{rdfs}subClassOf"): [{"@type": format!("{owl}Restriction")}, {"@id": "https://example.org/b"}],
+            odrl("includedIn"): {"@type": odrl("Action")},
+            odrl("implies"): {"@type": odrl("Action")},
+            "http://www.w3.org/2004/02/skos/core#exactMatch": {"@type": odrl("Action")}
+        }
+    ]))
+    .unwrap();
+    // The header has no IRI: the profile IRI falls back to isDefinedBy, and
+    // the header's label is still the title.
+    assert_eq!(v.iri(), Some("https://example.org/p"));
+    assert_eq!(v.title().pick(&en()), Some("Anonymous profile"));
+    assert_eq!(v.imports(), ["https://example.org/base"]);
+    let t = term(&v, "https://example.org/a");
+    assert_eq!(t.broader, vec!["https://example.org/b"]);
+    assert!(t.included_in.is_empty(), "{:?}", t.included_in);
+    assert!(t.implies.is_empty(), "{:?}", t.implies);
+    assert!(t.exact_match.is_empty(), "{:?}", t.exact_match);
+}
