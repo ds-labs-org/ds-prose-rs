@@ -331,5 +331,10 @@ if (entry === fileURLToPath(import.meta.url)) {
     process.stderr.write(`ds-prose-validate: ${safe(e?.message ?? e)}\n`);
     code = 2;
   }
-  process.exitCode = outputFailed ? 2 : code;
+  process.exitCode = code;
+  // A write error is reported after run() returns (on a later tick, or once a
+  // pending write fails), so it is read when the process is about to exit.
+  process.once('exit', () => {
+    if (outputFailed) process.exitCode = 2;
+  });
 }
