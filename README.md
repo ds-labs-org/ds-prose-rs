@@ -5,6 +5,22 @@
 and writes it as plain-language prose, for people who have to decide whether
 to accept a policy but should not have to read JSON-LD to do it.
 
+## Documentation and demos
+
+The site is at <https://ds-labs-org.github.io/ds-prose-rs/>. Each part of it is a page of its own.
+
+| page | what it holds |
+|---|---|
+| [Home](https://ds-labs-org.github.io/ds-prose-rs/) | an ODRL policy and the sentences the renderer writes for it, and where each package runs |
+| [Yew demo](https://ds-labs-org.github.io/ds-prose-rs/demo/) | paste a policy and read it, or edit the prose; a Profile field; strict validation; a switch between unstyled and the example stylesheet |
+| [Angular demo](https://ds-labs-org.github.io/ds-prose-rs/demo-angular/) | the read-only Angular component with `strict`, `profile` and `validationChange`, and the same switch |
+| [Yew docs](https://ds-labs-org.github.io/ds-prose-rs/yew/) | `prose-yew`: [interface](https://ds-labs-org.github.io/ds-prose-rs/yew/interface/), [styling](https://ds-labs-org.github.io/ds-prose-rs/yew/styling/), [validation](https://ds-labs-org.github.io/ds-prose-rs/yew/validation/), [CSS hooks](https://ds-labs-org.github.io/ds-prose-rs/yew/css-hooks/) |
+| [Angular docs](https://ds-labs-org.github.io/ds-prose-rs/angular/) | `@ds-labs/prose-angular`: [interface](https://ds-labs-org.github.io/ds-prose-rs/angular/interface/), [styling](https://ds-labs-org.github.io/ds-prose-rs/angular/styling/), [validation](https://ds-labs-org.github.io/ds-prose-rs/angular/validation/), [CSS hooks](https://ds-labs-org.github.io/ds-prose-rs/angular/css-hooks/) |
+
+The two demos and the docs share one top navigation. The stylesheets the
+Styling pages print are files in `site/content/examples/`, and both demos load
+those files, so the docs and the demos cannot drift apart.
+
 ## Layout
 
 | path | what it is |
@@ -917,15 +933,15 @@ for new advisories:
 |---|---|
 | `gates` | `cargo fmt --check`, `clippy -D warnings`, `cargo test`, `cargo doc` with warnings denied, `prose-core` tested without and with `turtle`, the ignored time-budget test of strict validation run in release (`validate_perf`), every feature build (host, `ssr`, `csr` and `turtle` on wasm32) |
 | `browser` | wasm clippy, and the Edit-mode DOM tests, the demo's tab and profile tests and the `prose-wasm` tests mounted in headless Chrome; the `wasm-bindgen-cli` version is read from `Cargo.lock` |
-| `demo` | release `trunk build` under the Pages sub-path, then `scripts/smoke-demo.sh` boots it in Chrome and fails unless a policy rendered and the Profile field is there |
-| `angular` | `scripts/build-npm-packages.sh` builds and packs both npm packages, `scripts/check-npm-packages.mjs` checks the tarballs, the `ds-prose-validate` tests (`node --test scripts/test/*.test.mjs`, and every exit code through the bin of the packed tarball), `npm publish --dry-run`, the wrapper's typecheck and node tests, then `demo-angular` is built from the tarballs only and booted in Chrome |
+| `demo` | release `trunk build` under the Pages sub-path `/ds-prose-rs/demo/`, then `scripts/smoke-demo.sh` boots it in Chrome and fails unless a policy rendered and the Profile field is there |
+| `angular` | `scripts/build-npm-packages.sh` builds and packs both npm packages, `scripts/check-npm-packages.mjs` checks the tarballs, the `ds-prose-validate` tests (`node --test scripts/test/*.test.mjs`, and every exit code through the bin of the packed tarball), `npm publish --dry-run`, the wrapper's typecheck and node tests, then `demo-angular` is built from the tarballs only under `/ds-prose-rs/demo-angular/` and booted in Chrome. The job then builds the Yew demo, runs the site tests (`node --test "site/test/*.test.mjs"`), assembles `site/dist` with `node site/build.mjs` and runs `site/test/layout-check.mjs` on it: every page and both demos at 1280 and 400 px, light and dark, with the demos' stylesheet switch, theme and validation controls |
 | `supply-chain` | `cargo deny check` against `deny.toml`: licences, advisories, sources |
 
 `deny.toml` ignores two "unmaintained" notices that arrive only through
 `yew`, each with its reason. Dependabot proposes cargo and Actions updates
 weekly. Third-party Actions are pinned by commit SHA (Dependabot keeps them
-current) and `cargo-deny` by version. `.github/workflows/pages.yml` deploys the demo from `main` after the
-same boot check.
+current) and `cargo-deny` by version. `.github/workflows/pages.yml` deploys the site from `main` after the same
+boot checks of both stamped demos and the layout check.
 
 ## npm packages
 
@@ -985,6 +1001,22 @@ cargo test -p prose-core --release --test validate_perf -- --ignored  # a time b
 node --test scripts/test/*.test.mjs   # the ds-prose-validate command, with a fake engine
 cd demo && trunk serve     # Trunk 0.22.0-beta.2+, like the other ds-labs-org demos
 ```
+
+The site (see `site/README.md`) builds from the two demos. The demos are built
+under the sub-paths they are served from, and `SITE_BASE` is the Pages prefix:
+
+```bash
+(cd demo && trunk build --release --public-url /ds-prose-rs/demo/)
+scripts/build-npm-packages.sh
+(cd demo-angular && npm ci && npm install --no-save ../dist-npm/tarballs/*.tgz \
+  && npx ng build --base-href /ds-prose-rs/demo-angular/)
+node --test "site/test/*.test.mjs"                  # generator, contract and browser tests
+SITE_BASE=/ds-prose-rs/ node site/build.mjs         # assembles site/dist, stamps the navigation
+node site/test/layout-check.mjs site/dist /ds-prose-rs/   # CHROME=... if there is no google-chrome; SHOT_DIR=... for screenshots
+```
+
+`trunk serve` shows the demo without the navigation: the stamp markers in
+`demo/index.html` are comments until `site/build.mjs` replaces them.
 
 The demo's Profile field reads one profile at a time: paste it, pick a
 preset (the research profile of the tests, as JSON-LD or Turtle, or the

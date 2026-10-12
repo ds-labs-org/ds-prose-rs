@@ -19,6 +19,10 @@ handle.update(otherPolicyJsonText, 'my-class'); // re-render
 handle.destroy();                               // unmount
 ```
 
+## Documentation
+
+The [Angular docs](https://ds-labs-org.github.io/ds-prose-rs/angular/) describe the component that wraps this package, including how it loads the wasm file. The [site](https://ds-labs-org.github.io/ds-prose-rs/) has a demo of each side.
+
 ## Profiles
 
 `setProfile(text)` loads the ODRL profile the prose is worded with: its

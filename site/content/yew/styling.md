@@ -71,6 +71,14 @@ Not every element has a field. The problems panel, `prose-slot-wrap`, `prose-slo
 
 `ProseProblems` is a separate component and is placed by the host, usually next to the view and outside `.ds-prose`. Its rules are therefore not scoped under `.ds-prose`: its root is `.prose-problems`. `ProseGlossary` is written by `OdrlProse` inside the article, after each policy.
 
+## See it in the demo
+
+The [Yew demo](/demo/) loads the two example stylesheets of this page, `site/content/examples/prose.css` and `site/content/examples/prose-editor.css`, with the Trunk `<link data-trunk rel="css">` route. The files are the ones printed here, so the page and the demo cannot differ.
+
+Under the navigation, the switch "Example stylesheet" has two settings. Unstyled disables both files and shows the markup as the library emits it. The editor still has its `BASE_CSS`, because the library injects that itself. Themed turns them back on.
+
+The demo's own layout sheet stays on in both settings. It holds the columns, the tabs and the Profile field, and none of the rules above.
+
 ## Shadow DOM
 
 Shadow DOM is not supported and not tested. The read-only output has no events and no document lookups, so mounting it in a shadow root is plausible, and global CSS would not reach it. For the editor it is not safe. `slot.rs` looks an element up with `document.get_element_by_id`, and `problems.rs` uses `document.active_element()` and `closest(".prose-problems")`. Inside a shadow root those lookups fail silently, so scrolling the active option into view and restoring focus after a fix degrade.

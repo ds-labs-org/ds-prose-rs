@@ -11,6 +11,10 @@ edit mode.
 <ds-odrl-prose [json]>  ->  ProseHandle (@ds-labs/prose-wasm)  ->  <OdrlProse> (prose-yew)
 ```
 
+## Documentation and demo
+
+The [Angular docs](https://ds-labs-org.github.io/ds-prose-rs/angular/) cover the interface, styling, validation and the CSS hooks. The [Angular demo](https://ds-labs-org.github.io/ds-prose-rs/demo-angular/) runs the component with `strict`, `profile` and `validationChange`.
+
 ## Install
 
 ```bash
