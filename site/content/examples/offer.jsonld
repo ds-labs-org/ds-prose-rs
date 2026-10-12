@@ -1,0 +1,20 @@
+{
+  "@context": "http://www.w3.org/ns/odrl.jsonld",
+  "@type": "Offer",
+  "uid": "http://example.com/policy:1010",
+  "profile": "http://example.com/odrl:profile:01",
+  "assigner": "http://example.com/org:abc",
+  "permission": [{
+    "target": "http://example.com/asset:9898.movie",
+    "action": "display",
+    "constraint": [{
+      "leftOperand": "dateTime",
+      "operator": "lt",
+      "rightOperand": { "@value": "2026-12-31", "@type": "xsd:date" }
+    }],
+    "duty": [{
+      "action": "attribute",
+      "target": "http://example.com/asset:9898.movie"
+    }]
+  }]
+}
