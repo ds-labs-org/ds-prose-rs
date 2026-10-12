@@ -2287,3 +2287,34 @@ async fn ux1_past_the_check_budget_a_refusing_host_is_still_not_refused() {
     assert_eq!(state_attr(&c, "data-refused"), "false");
     assert_eq!(slot(&c, &last).text_content().as_deref(), Some("foo:bar"));
 }
+
+/// UX-2: taking the slot's current value from the list after a rejected
+/// draft ends the rejection: no event is needed, but the message and
+/// aria-invalid must go.
+#[wasm_bindgen_test]
+async fn ux2_picking_the_current_value_after_a_rejection_clears_the_message() {
+    let log = Log::default();
+    let (c, _h) = mount_strict(strict_props(STRICT_POLICY, &log, true, StrictEdit::Flag)).await;
+    type_into(&slot(&c, ACTION), "us");
+    key(&slot(&c, ACTION), "Enter", false, false);
+    settle().await;
+    assert!(c.query_selector(".prose-slot-message").unwrap().is_some());
+    let shown = shown_options(&c);
+    let idx = shown
+        .iter()
+        .position(|(l, _)| l == "use")
+        .expect("the current value is offered");
+    // The highlight starts on the first entry.
+    for _ in 0..idx {
+        key(&slot(&c, ACTION), "ArrowDown", false, false);
+        settle().await;
+    }
+    key(&slot(&c, ACTION), "Enter", false, false);
+    settle().await;
+    let el = slot(&c, ACTION);
+    assert_eq!(el.text_content().as_deref(), Some("use"));
+    assert!(set_texts(&log).is_empty(), "the value did not change");
+    assert!(c.query_selector(".prose-slot-message").unwrap().is_none());
+    assert_eq!(el.get_attribute("aria-invalid"), None);
+    assert_eq!(el.get_attribute("aria-describedby"), None);
+}
