@@ -2369,3 +2369,52 @@ async fn ux3_a_render_of_the_panel_does_not_steal_the_focus() {
         "the panel took the focus"
     );
 }
+
+/// UX-4: a closed list is taller than its box; moving the highlight with the
+/// arrow keys keeps the active option in view, in both directions.
+#[wasm_bindgen_test]
+async fn ux4_the_active_option_stays_in_view_in_a_long_closed_list() {
+    let log = Log::default();
+    let (c, _h) = mount_strict(strict_props(STRICT_POLICY, &log, true, StrictEdit::Flag)).await;
+    type_into(&slot(&c, ACTION), "");
+    settle().await;
+    let list = q(&c, "[role=listbox]");
+    assert!(
+        list.scroll_height() > list.client_height(),
+        "the fixture's list must overflow its box"
+    );
+    let in_view = |c: &Element| {
+        let list = q(c, "[role=listbox]");
+        let id = slot(c, ACTION)
+            .get_attribute("aria-activedescendant")
+            .expect("an active descendant");
+        let option = document().get_element_by_id(&id).unwrap();
+        let (l, o) = (
+            list.get_bounding_client_rect(),
+            option.get_bounding_client_rect(),
+        );
+        (
+            o.top() >= l.top() - 0.5 && o.bottom() <= l.bottom() + 0.5,
+            id,
+        )
+    };
+    for n in 1..=15 {
+        key(&slot(&c, ACTION), "ArrowDown", false, false);
+        settle().await;
+        let (ok, id) = in_view(&c);
+        assert!(ok, "{id} is out of view after {n} ArrowDown");
+    }
+    for n in 1..=15 {
+        key(&slot(&c, ACTION), "ArrowUp", false, false);
+        settle().await;
+        let (ok, id) = in_view(&c);
+        assert!(ok, "{id} is out of view after {n} ArrowUp");
+    }
+    // Wrapping from the first entry to the last shows the last.
+    key(&slot(&c, ACTION), "ArrowUp", false, false);
+    settle().await;
+    assert!(
+        in_view(&c).0,
+        "the last entry is out of view after wrapping"
+    );
+}
