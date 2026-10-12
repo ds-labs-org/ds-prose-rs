@@ -44,7 +44,7 @@ test('type: system stacks only, tabular numerals, 65ch measure, no webfonts, no 
 test('no gradients, no outline removal, no box shadows', () => {
   assert.doesNotMatch(CSS, /gradient\(/);
   assert.doesNotMatch(CSS, /outline:\s*(none|0)\b/);
-  assert.doesNotMatch(CSS, /box-shadow:\s*(?!none)/);
+  assert.doesNotMatch(CSS, /box-shadow:(?!\s*none)/);
 });
 
 test('reduced motion turns off transitions and smooth scrolling', () => {
