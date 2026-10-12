@@ -276,6 +276,31 @@ mod tests {
         assert_eq!(fixtures::ALL[3].label, "Research agreement");
     }
 
+    /// UX-11: the hint under the Strict checkbox names the presets written to
+    /// the closed profile by their labels, all three, and the profile by its
+    /// button's label; it does not count them ("the two Strict presets"),
+    /// since only one of them has "Strict" in its label.
+    #[test]
+    fn the_strict_hint_names_the_presets_and_the_profile_it_means() {
+        let lib = include_str!("lib.rs");
+        let at = lib
+            .find("Reads ODRL and the loaded profile")
+            .expect("the strict hint");
+        let hint = &lib[at..at + lib[at..].find("\" }").unwrap()];
+        for label in [VIOLATES, "Strict clean", "Profile not declared (has a fix)"] {
+            assert!(
+                hint.contains(label),
+                "the hint does not name {label:?}: {hint}"
+            );
+        }
+        assert!(!hint.contains("two Strict presets"), "{hint}");
+        let closed = PRESETS
+            .iter()
+            .find(|p| p.id == "profile-sample-closed")
+            .unwrap();
+        assert!(hint.contains(closed.label), "{hint}");
+    }
+
     #[test]
     fn closed_sample_is_the_closed_profile_file() {
         let s = closed();
