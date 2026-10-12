@@ -71,6 +71,7 @@
 }
 html {
   scroll-behavior: smooth;
+  scroll-padding-top: calc(var(--nav-h) + var(--s4));
   -webkit-text-size-adjust: 100%;
 }
 body.site {
