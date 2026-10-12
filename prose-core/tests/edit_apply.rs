@@ -915,3 +915,33 @@ fn literal_text_rules() {
     );
     assert_eq!(Literal::Num(3.into()).raw(), "3");
 }
+
+/// ODRL22.ttl defines isA, hasPart and isPartOf as set-based operators, and
+/// odrl.set-operator-cardinality accepts a list with them, so the
+/// permissive preset lets the editor build that list too.
+#[test]
+fn the_vocabulary_set_operators_take_several_values_in_the_editor() {
+    let r = rules();
+    for op in ["isA", "hasPart", "isPartOf", "odrl:isPartOf"] {
+        assert!(r.is_set_operator(op), "{op}");
+        assert!(r.operator_switch_allowed("isAnyOf", op, 3), "{op}");
+        let doc = read_model(
+            &serde_json::json!({
+                "@context": "http://www.w3.org/ns/odrl.jsonld",
+                "@type": "Set", "uid": "urn:policy:s",
+                "permission": [{"target": "urn:asset:1", "action": "use",
+                    "constraint": [{"leftOperand": "spatial", "operator": op,
+                                    "rightOperand": {"@id": "urn:region:eu"}}]}]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let list = lp("policy[0].permission[0].constraint[0]@rightOperand");
+        assert_eq!(r.limit(&doc, &list), Limit::at_least(1), "{op}");
+        assert!(r.can_add(&doc, &list), "{op}");
+    }
+    for op in ["eq", "neq", "gt", "gteq", "lt", "lteq"] {
+        assert!(!r.is_set_operator(op), "{op}");
+        assert!(!r.operator_switch_allowed("isPartOf", op, 2), "{op}");
+    }
+}
