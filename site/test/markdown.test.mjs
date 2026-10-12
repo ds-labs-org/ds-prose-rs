@@ -219,3 +219,60 @@ test('{{file}} escapes a hostile extension used as the language class', () => {
   assert.ok(!html.includes('"onmouseover="'));
   assertInert(html, 'file ext');
 });
+
+// --- {{source}} and {{rendered}} -------------------------------------------------
+
+const repoWith = (files) => tmpContent(files);
+
+test('{{source path#region}} embeds the lines between the region markers, dedented, markers removed', () => {
+  const repo = repoWith({
+    'a/ex.rs': 'fn before() {}\n    // region: one\n    let a = 1;\n      let b = 2;\n    // endregion: one\nfn after() {}\n',
+  });
+  const html = md('{{source a/ex.rs#one}}\n', { repoDir: repo });
+  assert.match(html, /<code class="language-rust">let a = 1;\n  let b = 2;\n<\/code>/);
+  assert.ok(!html.includes('region'));
+  assert.ok(!html.includes('before'));
+});
+
+test('{{source}} names its origin so a reader can find the compiled file', () => {
+  const repo = repoWith({ 'a/ex.ts': '// region: r\nconst x = 1;\n// endregion: r\n' });
+  const html = md('{{source a/ex.ts#r}}\n', { repoDir: repo });
+  assert.match(html, /class="language-typescript"/);
+  assert.match(html, /<p class="source-note">From <code>a\/ex\.ts<\/code>, region <code>r<\/code>\.<\/p>/);
+});
+
+test('{{source}} fails on a missing file, a missing region, an unclosed region, and a path outside the repo', () => {
+  const repo = repoWith({ 'ex.rs': '// region: open\nx\n', 'ok.rs': '// region: r\nx\n// endregion: r\n' });
+  assert.throws(() => md('{{source nope.rs#r}}', { repoDir: repo }), /nope\.rs/);
+  assert.throws(() => md('{{source ok.rs#absent}}', { repoDir: repo }), /absent/);
+  assert.throws(() => md('{{source ex.rs#open}}', { repoDir: repo }), /endregion/);
+  assert.throws(() => md('{{source ../../../etc/passwd#r}}', { repoDir: repo }), /outside/i);
+  assert.throws(() => md('{{source ok.rs}}', { repoDir: repo }), /#/);
+});
+
+test('{{source}} escapes what it embeds', () => {
+  const repo = repoWith({ 'x.rs': '// region: r\nlet s = "<script>alert(1)</script>";\n// endregion: r\n' });
+  const html = md('{{source x.rs#r}}\n', { repoDir: repo });
+  assert.ok(!html.includes('<script>'));
+});
+
+test('{{rendered}} embeds a renderer output file in a labelled region, comments removed', () => {
+  const dir = tmpContent({ 'examples/o.html': '<!--<[x::Y]>--><article class="ds-prose"><p>Hi</p></article><!--</[x::Y]>-->' });
+  const html = md('{{rendered examples/o.html}}\n', { contentDir: dir });
+  assert.match(html, /<div class="rendered" role="region" aria-label="Rendered output" tabindex="0"><article class="ds-prose"><p>Hi<\/p><\/article><\/div>/);
+  assert.ok(!html.includes('<!--'));
+});
+
+test('{{rendered}} refuses a file that holds a script or an event handler, and a missing one', () => {
+  const dir = tmpContent({ 'bad.html': '<p onclick="x()">a</p>', 'bad2.html': '<script>1</script>' });
+  assert.throws(() => md('{{rendered bad.html}}', { contentDir: dir }), /not renderer output/i);
+  assert.throws(() => md('{{rendered bad2.html}}', { contentDir: dir }), /not renderer output/i);
+  assert.throws(() => md('{{rendered nope.html}}', { contentDir: dir }), /nope\.html/);
+  assert.throws(() => md('{{rendered ../x.html}}', { contentDir: dir }), /outside/i);
+});
+
+test('{{rendered repo:path}} reads a file under the repository (a pinned snapshot)', () => {
+  const repo = repoWith({ 's/snap.html': '<article class="ds-prose"><p>S</p></article>' });
+  const html = md('{{rendered repo:s/snap.html}}\n', { repoDir: repo });
+  assert.match(html, /<article class="ds-prose"><p>S<\/p><\/article>/);
+});
