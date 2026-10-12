@@ -90,7 +90,10 @@ export interface Finding {
   expected: {
     kinds: string[];
     operators: string[];
+    /** At most 8 of the allowed values. */
     values: string[];
+    /** How many values the profile allows; present only when `values` was cut short. */
+    valuesTotal?: number;
     units: string[];
     datatype: string | null;
     closed: boolean;
