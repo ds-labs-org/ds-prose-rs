@@ -2455,3 +2455,50 @@ async fn ux5_a_closed_value_slot_follows_the_validators_level_for_the_rule() {
         Some("true")
     );
 }
+
+/// UX-10: a rejected draft that matches no entry keeps the list: the
+/// message says what is wrong, the list shows what is allowed, and one of
+/// its entries can be taken without deleting the text.
+#[wasm_bindgen_test]
+async fn ux10_a_rejected_draft_that_matches_nothing_keeps_the_list() {
+    let log = Log::default();
+    let (c, _h) = mount_strict(strict_props(STRICT_POLICY, &log, true, StrictEdit::Flag)).await;
+    type_into(&slot(&c, ACTION), "zzz");
+    // While typing, a draft that matches nothing lists nothing.
+    assert!(shown_options(&c).is_empty());
+    key(&slot(&c, ACTION), "Enter", false, false);
+    settle().await;
+    assert!(c.query_selector(".prose-slot-message").unwrap().is_some());
+    let shown = shown_options(&c);
+    assert!(shown.len() > 3, "the allowed entries are listed: {shown:?}");
+    assert_eq!(slot(&c, ACTION).text_content().as_deref(), Some("zzz"));
+    // One can be taken with the keyboard.
+    key(&slot(&c, ACTION), "ArrowDown", false, false);
+    settle().await;
+    key(&slot(&c, ACTION), "Enter", false, false);
+    settle().await;
+    assert_eq!(set_texts(&log).len(), 1, "{:?}", set_texts(&log));
+    assert!(c.query_selector(".prose-slot-message").unwrap().is_none());
+    // Typing again goes back to a list filtered by what is typed.
+    let el = slot(&c, ACTION);
+    type_into(&el, "zzz");
+    key(&el, "Enter", false, false);
+    settle().await;
+    assert!(!shown_options(&c).is_empty());
+    type_into(&slot(&c, ACTION), "zzzy");
+    settle().await;
+    assert!(shown_options(&c).is_empty());
+}
+
+/// UX-10: Alt+ArrowDown opens the list of a closed slot even when its text
+/// matches nothing.
+#[wasm_bindgen_test]
+async fn ux10_alt_arrow_down_lists_the_allowed_entries_for_any_draft() {
+    let log = Log::default();
+    let (c, _h) = mount_strict(strict_props(STRICT_POLICY, &log, true, StrictEdit::Flag)).await;
+    type_into(&slot(&c, ACTION), "zzz");
+    assert!(shown_options(&c).is_empty());
+    key(&slot(&c, ACTION), "ArrowDown", false, true);
+    settle().await;
+    assert!(shown_options(&c).len() > 3, "{:?}", shown_options(&c));
+}
