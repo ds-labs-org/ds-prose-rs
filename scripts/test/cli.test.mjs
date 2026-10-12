@@ -223,3 +223,11 @@ test('--rule with an id that is an Object.prototype key is passed on, not droppe
   const r = await cli(['--strict', '--rule', '__proto__=off', 'a.json'], { files: { 'a.json': 'A' } });
   assert.deepEqual(Object.keys(r.calls[0].options.rules), ['__proto__']);
 });
+
+test('--rule and --ruleset are passed on without --strict: the engine honours levels in the advisory reading too', async () => {
+  let r = await cli(['--rule', 'profile.unknown-term=error', 'a.json'], { files: { 'a.json': '{}' } });
+  assert.equal(r.code, 0);
+  assert.deepEqual(r.calls[0].options, { strict: false, rules: { 'profile.unknown-term': 'error' } });
+  r = await cli(['--ruleset', '1', 'a.json'], { files: { 'a.json': '{}' } });
+  assert.deepEqual(r.calls[0].options, { strict: false, ruleset: 1 });
+});
