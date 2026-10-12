@@ -269,3 +269,69 @@ fn many_skipped_keys_are_named_up_to_a_cap_then_counted() {
     assert_eq!(u.iter().filter(|f| f.term.is_some()).count(), 20);
     assert!(u.iter().any(|f| f.message.starts_with("5 more")), "{u:?}");
 }
+
+/// A prefix may be defined through another prefix, and a term through the
+/// @vocab: JSON-LD expands both, so the keys are ODRL's and were skipped.
+#[test]
+fn odrl_keys_reached_through_other_definitions_are_reported() {
+    let cases = [
+        (
+            "prefix through odrl:",
+            json!({"odrl": ODRL, "o": "odrl:"}),
+            "o:permission",
+        ),
+        (
+            "prefix through another prefix",
+            json!({"w3": "http://www.w3.org/ns/", "o": "w3:odrl/2/"}),
+            "o:permission",
+        ),
+        (
+            "compact key through a non-ODRL prefix",
+            json!({"w3": "http://www.w3.org/ns/"}),
+            "w3:odrl/2/permission",
+        ),
+        (
+            "alias through another prefix",
+            json!({"o": ODRL, "rules": "o:permission"}),
+            "rules",
+        ),
+        (
+            "alias relative to the @vocab",
+            json!({"@vocab": ODRL, "rules": "permission"}),
+            "rules",
+        ),
+    ];
+    for (name, ctx, key) in cases {
+        let mut v = json!({"@context": ctx, "@type": "Set", "uid": "urn:p"});
+        v[key] = json!([{"target": "urn:a", "action": {"@id": "http://www.w3.org/ns/odrl/2/notAnAction"}}]);
+        let r = run(&v, &Options::strict());
+        assert_eq!(r.verdict, Verdict::Incomplete, "{name}: {:?}", r.findings);
+        assert!(
+            unchecked(&r)
+                .iter()
+                .any(|f| f.message.contains(&format!("\"{key}\""))),
+            "{name}: {:?}",
+            r.findings
+        );
+        let r = run(&v, &Options::strict().fail_closed(true));
+        assert_eq!(r.verdict, Verdict::Violations, "{name}");
+    }
+}
+
+/// A term typed `@json` holds a JSON literal: its keys are data, not
+/// properties, as with `@value`.
+#[test]
+fn a_json_typed_term_holds_data_not_keys() {
+    let v = json!({
+        "@context": ["http://www.w3.org/ns/odrl.jsonld", {
+            "odrl": ODRL,
+            "meta": {"@id": "http://example.com/meta", "@type": "@json"}
+        }],
+        "@type": "Set",
+        "uid": "urn:p",
+        "meta": {"odrl:permission": [{"odrl:action": "x"}]},
+        "permission": [{"target": "urn:a", "action": "use"}]
+    });
+    let r = run(&v, &Options::strict().fail_closed(true));
+    assert_eq!(r.verdict, Verdict::Conforms, "{:?}", r.findings);
+}
