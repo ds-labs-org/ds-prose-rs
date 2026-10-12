@@ -1117,11 +1117,13 @@ async fn a_full_iri_conflict_selects_its_listed_option() {
 #[tokio::test]
 async fn no_empty_other_operators_group() {
     // With two values only the set operators remain, and the profile
-    // suggests all three: "Other operators" would be an empty group.
+    // suggests all six (ODRL22.ttl: isA, hasPart, isPartOf, isAnyOf,
+    // isAllOf, isNoneOf): "Other operators" would be an empty group.
     let profile = r#"{"@context": {"odrl": "http://www.w3.org/ns/odrl/2/", "ex": "https://example.org/s/",
         "prose": "https://ds-labs-org.github.io/ds-prose-rs/profile#"},
       "@graph": [{"@id": "ex:tags", "@type": "odrl:LeftOperand",
-        "prose:operator": [{"@id": "odrl:isAnyOf"}, {"@id": "odrl:isAllOf"}, {"@id": "odrl:isNoneOf"}]}]}"#;
+        "prose:operator": [{"@id": "odrl:isAnyOf"}, {"@id": "odrl:isAllOf"}, {"@id": "odrl:isNoneOf"},
+                           {"@id": "odrl:isA"}, {"@id": "odrl:hasPart"}, {"@id": "odrl:isPartOf"}]}]}"#;
     let w = Rc::new(Wording::new().with_profile(ProfileVocab::parse(profile).unwrap()));
     let json = r#"{"@context": {"ex": "https://example.org/s/"}, "@type": "Set", "uid": "urn:p",
         "permission": [{"action": "use",
