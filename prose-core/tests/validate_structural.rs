@@ -432,3 +432,38 @@ fn a_remote_parent_is_a_gap_even_with_the_cycle_rule_off() {
     assert_eq!(r.gaps[0].rule, RuleId::InputUnchecked);
     assert_eq!(r.verdict, Verdict::Incomplete);
 }
+
+#[test]
+fn an_agreement_with_no_parties_of_its_own_and_a_remote_parent_is_a_gap() {
+    let child = json!({"@type": "Agreement", "uid": "urn:p:b", "inheritFrom": "urn:remote",
+                       "permission": [{"target": "urn:asset:1", "action": "use"}]});
+    let r = validate_json(&graph(vec![child]), &Wording::new(), &structural());
+    assert_eq!(odrl_findings(&r), pairs(&[]), "{:?}", r.findings);
+    assert_eq!(r.verdict, Verdict::Incomplete);
+}
+
+#[test]
+fn each_inheritance_reading_rule_honours_inheritance_when_on_alone() {
+    let parent = json!({"@type": "Set", "uid": "urn:p:a", "assigner": "urn:org:1",
+                        "assignee": "urn:org:2", "target": "urn:asset:1", "action": "use",
+                        "permission": [{}]});
+    for (rule, kind) in [
+        (RuleId::OdrlAgreementParties, "Agreement"),
+        (RuleId::OdrlOfferAssigner, "Offer"),
+        (RuleId::OdrlRuleTarget, "Set"),
+        (RuleId::OdrlRuleAction, "Set"),
+    ] {
+        let o = Options::strict().level(rule, Level::Error);
+        let child = json!({"@type": kind, "uid": "urn:p:b", "inheritFrom": "urn:p:a",
+                           "permission": [{}]});
+        let r = validate_json(&graph(vec![parent.clone(), child]), &Wording::new(), &o);
+        assert_eq!(odrl_findings(&r), pairs(&[]), "{rule}: {:?}", r.findings);
+        assert_eq!(r.verdict, Verdict::Conforms, "{rule}: {:?}", r.findings);
+        // A parent outside the document: no error, and the gap says why.
+        let child = json!({"@type": kind, "uid": "urn:p:b", "inheritFrom": "urn:remote",
+                           "permission": [{}]});
+        let r = validate_json(&graph(vec![child]), &Wording::new(), &o);
+        assert_eq!(odrl_findings(&r), pairs(&[]), "{rule}: {:?}", r.findings);
+        assert_eq!(r.verdict, Verdict::Incomplete, "{rule}: {:?}", r.findings);
+    }
+}
