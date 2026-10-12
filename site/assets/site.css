@@ -444,6 +444,9 @@ code {
 .table-scroll th {
   background: var(--surface-2);
 }
+.table-scroll td:last-child {
+  min-width: 16rem;
+}
 .table-scroll code {
   white-space: nowrap;
   overflow-wrap: normal;
