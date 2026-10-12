@@ -2141,3 +2141,149 @@ async fn a_refusal_does_not_outlive_a_change_of_strictness() {
     settle().await;
     assert_eq!(state_attr(&c, "data-refused"), "true");
 }
+
+// --- Hosts that set the editor's own switches (suggestions, validator options)
+
+#[derive(Properties, PartialEq, Clone)]
+struct TuneProps {
+    json: AttrValue,
+    log: Log,
+    options: Option<Options>,
+    policy: StrictEdit,
+    suggestions: bool,
+}
+
+/// A strict host without the problems panel, whose suggestions switch and
+/// validator options the test sets.
+#[function_component(TuneHost)]
+fn tune_host(p: &TuneProps) -> Html {
+    let config = use_memo((p.options.clone(), p.suggestions), |(o, s)| {
+        let mut cfg = EditConfig::default().with_wording(closed_wording());
+        cfg.suggestions = *s;
+        if let Some(o) = o {
+            cfg = cfg.with_strict(o.clone());
+        }
+        cfg
+    });
+    let json = p.json.clone();
+    let with = use_prose_editor_with(
+        move || read_model(&json).expect("a readable fixture"),
+        Rc::new(config.rules.clone()),
+        config.validator.clone(),
+        p.policy,
+    );
+    let report = use_validation(&with.editor.doc, config.validator.as_ref());
+    let issues = Rc::new(report.issues());
+    let refusal = with.refused.as_ref().and_then(|(ev, e)| e.issue(ev));
+    let onedit = {
+        let log = p.log.clone();
+        let inner = with.editor.onedit.clone();
+        Callback::from(move |ev: EditEvent| {
+            log.borrow_mut().push(ev.clone());
+            inner.emit(ev);
+        })
+    };
+    html! {
+        <>
+            <p id="state"
+               data-refused={with.refused.is_some().to_string()}
+               data-verdict={format!("{:?}", report.verdict)} />
+            <OdrlProseView
+                doc={with.editor.doc.clone()}
+                mode={EditMode::Edit}
+                config={config.clone()}
+                onedit={onedit}
+                issues={issues}
+                refusal={refusal}
+            />
+        </>
+    }
+}
+
+async fn mount_tune(p: TuneProps) -> Element {
+    let container = document().create_element("div").unwrap();
+    document().body().unwrap().append_child(&container).unwrap();
+    let handle = yew::Renderer::<TuneHost>::with_root_and_props(container.clone(), p).render();
+    std::mem::forget(handle);
+    settle().await;
+    container
+}
+
+fn tune(json: &str, log: &Log, options: Option<Options>, suggestions: bool) -> TuneProps {
+    TuneProps {
+        json: json.to_string().into(),
+        log: log.clone(),
+        options,
+        policy: StrictEdit::RefuseTerms,
+        suggestions,
+    }
+}
+
+/// UX-1 (I7): the stock view never triggers a refusal, with or without the
+/// suggestions, and the typed text stays to be corrected.
+#[wasm_bindgen_test]
+async fn ux1_without_suggestions_a_refusing_host_keeps_the_draft_and_is_not_refused() {
+    let log = Log::default();
+    let c = mount_tune(tune(STRICT_POLICY, &log, Some(Options::strict()), false)).await;
+    let el = slot(&c, ACTION);
+    type_into(&el, "foo:bar");
+    key(&el, "Enter", false, false);
+    settle().await;
+    assert!(set_texts(&log).is_empty(), "sent {:?}", set_texts(&log));
+    assert_eq!(state_attr(&c, "data-refused"), "false");
+    let el = slot(&c, ACTION);
+    assert_eq!(el.text_content().as_deref(), Some("foo:bar"));
+    assert_eq!(el.get_attribute("aria-invalid").as_deref(), Some("true"));
+    assert!(c.query_selector(".prose-slot-message").unwrap().is_some());
+    assert!(c.query_selector("[role=listbox]").unwrap().is_none());
+    // A term the profile has still commits.
+    type_into(&el, "ex:train");
+    key(&el, "Enter", false, false);
+    settle().await;
+    assert_eq!(
+        set_texts(&log),
+        [(ACTION.to_string(), "ex:train".to_string())]
+    );
+    assert_eq!(state_attr(&c, "data-refused"), "false");
+}
+
+/// UX-1: past the render's check budget a slot is rendered open, but a
+/// commit asks the validator once and does not send what it would refuse.
+#[wasm_bindgen_test]
+async fn ux1_past_the_check_budget_a_refusing_host_is_still_not_refused() {
+    // Each policy's kind and action slots take two checks to find out
+    // whether they are closed and whether the text in them is outside, so
+    // a few hundred policies use the budget up.
+    const POLICIES: usize = 700;
+    let one = |i: usize| {
+        format!(
+            r#"{{"@type": "Set", "uid": "urn:policy:{i}",
+                "profile": "https://example.org/odrl/profile/research",
+                "permission": [{{"target": "urn:asset:1", "action": "use"}}]}}"#
+        )
+    };
+    let all = (0..POLICIES).map(one).collect::<Vec<_>>().join(",");
+    let json = format!(
+        r#"{{"@context": ["http://www.w3.org/ns/odrl.jsonld",
+                          {{"ex": "https://example.org/odrl/profile/research/"}}],
+            "@graph": [{all}]}}"#
+    );
+    let log = Log::default();
+    let c = mount_tune(tune(&json, &log, Some(Options::strict()), true)).await;
+    // Past the budget some action slots are rendered open (which ones
+    // depends on the order the components render in).
+    let open_slot = c
+        .query_selector("[data-slot$=\"action[0]#name\"]:not([data-closed])")
+        .unwrap()
+        .expect("a slot past the budget is rendered open")
+        .dyn_into::<HtmlElement>()
+        .unwrap();
+    let last = open_slot.get_attribute("data-slot").unwrap();
+    let el = slot(&c, &last);
+    type_into(&el, "foo:bar");
+    key(&el, "Enter", false, false);
+    settle().await;
+    assert!(set_texts(&log).is_empty(), "sent {:?}", set_texts(&log));
+    assert_eq!(state_attr(&c, "data-refused"), "false");
+    assert_eq!(slot(&c, &last).text_content().as_deref(), Some("foo:bar"));
+}
