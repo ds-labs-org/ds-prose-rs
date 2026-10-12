@@ -276,3 +276,8 @@ test('{{rendered repo:path}} reads a file under the repository (a pinned snapsho
   const html = md('{{rendered repo:s/snap.html}}\n', { repoDir: repo });
   assert.match(html, /<article class="ds-prose"><p>S<\/p><\/article>/);
 });
+
+test('a heading id keeps the underscores of inline code: `use_prose_editor` is use-prose-editor', () => {
+  const { headings } = renderMarkdown('## `use_prose_editor`\n\n## **Bold** and _em_ text\n\n## `PROSE_WASM_URL`\n');
+  assert.deepEqual(headings.map((h) => h.id), ['use-prose-editor', 'bold-and-em-text', 'prose-wasm-url']);
+});
