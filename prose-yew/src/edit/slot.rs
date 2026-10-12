@@ -216,8 +216,8 @@ fn closure(env: &Env, slot: &Slot) -> Option<Closure> {
     }
 }
 
-/// What a closed slot offers: the entries the validator would take. Asks
-/// it once per entry.
+/// What a closed slot offers: the entries the validator would take. Asks it
+/// about all of them in one call, which reads the document once.
 fn allowed_options(
     env: &Env,
     slot: &Slot,
@@ -225,11 +225,16 @@ fn allowed_options(
     options: &[Suggestion],
 ) -> Vec<Suggestion> {
     match (closure, strict(env)) {
-        (Closure::Terms, Some(v)) => options
-            .iter()
-            .filter(|o| v.admissible(&env.doc, &set_text(slot, &o.value)).is_ok())
-            .cloned()
-            .collect(),
+        (Closure::Terms, Some(v)) => {
+            let values: Vec<&str> = options.iter().map(|o| o.value.as_ref()).collect();
+            let verdicts = v.admissible_values(&env.doc, &slot.path, &values);
+            options
+                .iter()
+                .zip(verdicts)
+                .filter(|(_, verdict)| verdict.is_ok())
+                .map(|(o, _)| o.clone())
+                .collect()
+        }
         _ => options.to_vec(),
     }
 }

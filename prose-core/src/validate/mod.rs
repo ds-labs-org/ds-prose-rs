@@ -247,6 +247,19 @@ impl Validator {
         check::admissible(doc, &self.wording, &self.index, &self.options, ev)
     }
 
+    /// [`Validator::admissible`] for several values written into one slot,
+    /// the answers in the order of `values`. What it reads of the document
+    /// is read once for all of them, so a closed list of a thousand entries
+    /// costs one pass over the document, not a thousand.
+    pub fn admissible_values(
+        &self,
+        doc: &EditDoc,
+        slot: &crate::edit::SlotPath,
+        values: &[&str],
+    ) -> Vec<Result<(), Box<Finding>>> {
+        check::admissible_values(doc, &self.wording, &self.index, &self.options, slot, values)
+    }
+
     /// As [`Validator::validate`], for a policy given as JSON-LD text. Never
     /// fails: a text that is not a policy is an `input.unreadable` finding.
     pub fn validate_json(&self, json: &str) -> Report {
