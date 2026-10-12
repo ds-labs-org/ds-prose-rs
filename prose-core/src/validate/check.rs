@@ -1408,10 +1408,15 @@ impl<'a> Checker<'a> {
             self.term(path, a.id, Field::Unit, u, Pos::Unit);
         }
         // The left operand's ds-prose hints, when a loaded profile has any.
+        // Strict mode does not bind on them while an `@context` was not
+        // read: it may rebind the prefix, so the operand may not be the
+        // profile's term, and a guessed reading is never an error.
+        let strict = self.options.mode() == Mode::Strict;
         let hints = self
             .resolve(&a.left)
             .filter(|(t, _)| t.kinds.contains(&TermKind::LeftOperand))
-            .map(|(t, _)| &t.hints);
+            .map(|(t, _)| &t.hints)
+            .filter(|h| !(strict && h.closed && self.context_unread));
         if let Some(h) = hints {
             self.hint_operator(path, a, h);
             self.hint_datatype(path, a, h);
@@ -1570,6 +1575,11 @@ impl<'a> Checker<'a> {
                     f.expected = Some(expected());
                     f.fixes.push(fix);
                 }
+                continue;
+            }
+            if h.closed && self.options.mode() == Mode::Strict && self.incomplete() {
+                // A profile that is not loaded may add a value narrower
+                // than an allowed one: not a violation until it is read.
                 continue;
             }
             let msg = format!(

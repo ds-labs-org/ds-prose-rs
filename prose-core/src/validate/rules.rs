@@ -216,6 +216,14 @@ macro_rules! rule {
 /// vocabulary used by expressions in the Policy") and IM 3.2 under a closed
 /// world, which the standard does not itself call for; an `odrl.*` rule is
 /// a MUST the IM states. A `prose.*` rule is a ds-prose convention.
+///
+/// A `prose.*` rule that binds (a closed operand, strict mode) reads a
+/// loaded term's hints, so it is silent while an `@context` was not read (the
+/// prefix may be rebound) and, for `prose.value-not-allowed` alone, while a
+/// declared profile is not loaded (it may add a value narrower than an
+/// allowed one). The operator, unit, datatype and string-for-IRI rules read
+/// the loaded term and the written value only, which a missing profile cannot
+/// change, so they hold. `prose.ill-typed-literal` reads no hints.
 pub static RULES: &[RuleInfo] = &[
     rule!(
         ProfileNotLoaded,
