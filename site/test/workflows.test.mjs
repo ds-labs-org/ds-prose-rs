@@ -136,7 +136,7 @@ test('ci: the angular job builds under /demo-angular/, boots it there, and runs 
     'scripts/build-npm-packages.sh',
     'npx ng build --base-href /ds-prose-rs/demo-angular/',
     'trunk build --release --public-url /ds-prose-rs/demo/',
-    'node --test "site/test/*.test.mjs"',
+    'node --test --test-reporter=spec --test-timeout=240000 "site/test/*.test.mjs"',
     'node site/build.mjs',
     'node site/test/layout-check.mjs site/dist /ds-prose-rs/',
   ]);
