@@ -142,3 +142,80 @@ test('{{file}} cannot read outside the content directory', () => {
   const dir = tmpContent({});
   assert.throws(() => md('{{file ../../../etc/passwd}}', { contentDir: dir }), /outside/i);
 });
+
+// Hostile input. Every tag in the output must be one the renderer emits on
+// purpose, with only the attributes it emits, and attribute values must carry
+// no markup. Text that looks like markup must end up as text.
+const TAGS = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'a', 'code', 'pre', 'div', 'button', 'em', 'strong', 'ul', 'ol', 'li', 'blockquote', 'hr', 'table', 'thead', 'tbody', 'tr', 'th', 'td']);
+const ATTRS = new Set(['href', 'class', 'id', 'type', 'data-copy', 'tabindex', 'role', 'aria-label', 'scope']);
+function assertInert(html, label) {
+  const TAG = /<(\/?)([a-z0-9]+)((?:\s+[a-z-]+(?:="[^"<>]*")?)*)\s*>/g;
+  const rest = html.replace(TAG, (all, close, name, attrs) => {
+    assert.ok(TAGS.has(name), `${label}: unexpected tag <${name}> in ${all}`);
+    for (const a of attrs.matchAll(/\s([a-z-]+)(?:="([^"]*)")?/g)) {
+      assert.ok(ATTRS.has(a[1]), `${label}: unexpected attribute ${a[1]} in ${all}`);
+      if (a[1] === 'href') assert.doesNotMatch(a[2], /^\s*(javascript|data|vbscript):/i, `${label}: script URL in ${all}`);
+    }
+    return '';
+  });
+  assert.doesNotMatch(rest, /[<>]/, `${label}: stray angle bracket outside a known tag: ${rest.match(/.{0,30}[<>].{0,30}/)?.[0]}`);
+}
+
+const HOSTILE = [
+  '## Say "hi" <script>x</script> & `<b>`',
+  '[x](/a`" onmouseover="alert(1)`)',
+  '[x](`javascript:alert(1)`)',
+  '[<img src=x onerror=alert(1)>](https://a.b)',
+  '[x](JaVaScRiPt:alert(1))',
+  '[x](data:text/html;base64,AAA)',
+  '[x](vbscript:foo)',
+  '[x](&#106;avascript:alert(1))',
+  '[x](javascript&#58;alert(1))',
+  '[x](/a"onmouseover="x)',
+  '[x](/a<script>)',
+  '| <script>x</script> | b |\n|--|--|\n| [l](javascript:1) | `<img onerror=1>` |',
+  '> <script>x</script>',
+  '- <img src=x onerror=1>\n  - <svg onload=1>',
+  '*<b>* _<i>_ **<u>**',
+  '````md\n</code></pre><script>alert(1)</script>\n````',
+  '```a"onmouseover="x\ncode\n```',
+  '<!-- comment --> <iframe src=javascript:1></iframe>',
+  '&lt;script&gt; &#60;script&#62;',
+];
+
+test('hostile markdown produces only known tags and attributes, and no script URL', () => {
+  for (const src of HOSTILE) assertInert(md(src), JSON.stringify(src));
+});
+
+test('a policy snippet with a script tag in a fenced block stays inside the code element as text', () => {
+  const policy = '{"@type":"Offer","rdfs:comment":"</code></pre><script>alert(1)</script>","uid":"x\\"><img src=x onerror=alert(1)>"}';
+  const html = md('```json\n' + policy + '\n```\n');
+  assertInert(html, 'policy');
+  assert.equal((html.match(/<script/g) || []).length, 0);
+  assert.equal((html.match(/<\/pre>/g) || []).length, 1);
+  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+});
+
+test('a link whose target contains inline code is not turned into an href holding markup', () => {
+  const html = md('[x](/a`" onmouseover="alert(1)`)');
+  assert.doesNotMatch(html, /href="[^"]*[<>]/);
+  assert.ok(!html.includes('onmouseover=alert'));
+});
+
+test('a NUL character in the source cannot reach an inline code slot', () => {
+  const html = md('\u00000\u0000 text `a`');
+  assert.equal((html.match(/<code>/g) || []).length, 1);
+});
+
+test('a heading with quotes and markup escapes its anchor label', () => {
+  const html = md('## Say "hi" <b>\n');
+  assert.match(html, /aria-label="Link to Say &quot;hi&quot; &lt;b&gt;"/);
+  assertInert(html, 'heading');
+});
+
+test('{{file}} escapes a hostile extension used as the language class', () => {
+  const dir = tmpContent({ 'x.a"onmouseover="y': 'text\n' });
+  const html = md('{{file x.a"onmouseover="y}}\n', { contentDir: dir });
+  assert.ok(!html.includes('"onmouseover="'));
+  assertInert(html, 'file ext');
+});
