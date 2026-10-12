@@ -675,8 +675,12 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                 }
             }
             *dirty.borrow_mut() = false;
-            if value != raw {
+            // The text taken is valid, whether or not it changes the value
+            // (the slot's own value picked after a rejection changes nothing).
+            if invalid.is_some() {
                 invalid.set(None);
+            }
+            if value != raw {
                 onedit.emit(if as_iri {
                     EditEvent::SetIri {
                         slot: path.clone(),
