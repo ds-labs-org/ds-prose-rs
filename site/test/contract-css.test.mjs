@@ -25,7 +25,14 @@ function documented(md, prefix) {
 
 const SRC_FILES = walkFiles(path.join(REPO, 'prose-yew/src'), (p) => p.endsWith('.rs') && !p.endsWith('css.rs'));
 const emittedByView = new Set(SRC_FILES.flatMap((f) => [...hookClasses(fs.readFileSync(f, 'utf8'))]));
-const emittedByReader = hookClasses(source('prose-yew/src/lib.rs'));
+// lib.rs writes the verdict class through edit::status (problems.rs); those
+// three names reach the read-only output too.
+const emittedByReader = new Set([...hookClasses(source('prose-yew/src/lib.rs')), 'prose-conforms', 'prose-incomplete', 'prose-violations-found']);
+test('the verdict classes lib.rs borrows from status() are the ones status() returns', () => {
+  const status = /pub\(crate\) fn status[\s\S]*?\n\}/.exec(source('prose-yew/src/edit/problems.rs'))[0];
+  assert.deepEqual([...status.matchAll(/"(prose-[a-z-]+)"/g)].map((m) => m[1]).sort(), ['prose-conforms', 'prose-incomplete', 'prose-violations-found']);
+  assert.match(source('prose-yew/src/lib.rs'), /status\(/);
+});
 
 const stable = documented(yewHooks, 'Stable');
 const internal = documented(yewHooks, 'Internal');
@@ -82,7 +89,7 @@ test('the read-only renderer reads no custom property: the docs say so, the code
 
 test('data attributes named in the docs exist in the sources', () => {
   const all = SRC_FILES.map((f) => fs.readFileSync(f, 'utf8')).join('\n');
-  const attrs = new Set([...(yewHooks + ngHooks).matchAll(/`\[?(data-[a-z]+)/g)].map((m) => m[1]));
+  const attrs = new Set([...(yewHooks + ngHooks).matchAll(/`\[?(data-[a-z]+)/g)].map((m) => m[1]).filter((a) => a !== 'data-theme')); // data-theme is the example stylesheet's own switch
   assert.ok(attrs.size >= 5);
   for (const a of attrs) assert.ok(all.includes(a), `${a} is not in prose-yew/src`);
 });

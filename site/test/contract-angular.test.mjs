@@ -6,7 +6,7 @@ import { content, frontMatterless, sections, source, squash, tableRows, tick, ti
 const interfaceMd = frontMatterless(content('angular/interface.md'));
 const SEC = sections(interfaceMd);
 const sec = (h) => {
-  const s = SEC.get(h);
+  const s = SEC.get(h) ?? SEC.get(`\`${h}\``);
   assert.ok(s !== undefined, `angular/interface.md has no "## ${h}"; has ${[...SEC.keys()].join(', ')}`);
   return s;
 };
@@ -146,4 +146,88 @@ test('the package facts on the overview page: versions, peer range, client-side 
   assert.match(md, /no editor|read-only/i);
   const version = pkg.version.split('.').slice(0, 2).join('.');
   assert.ok(md.includes(`@ds-labs/prose-angular@${version}`) || md.includes(`"@ds-labs/prose-angular": "^${version}`) || md.includes(`npm install @ds-labs/prose-angular`));
+});
+
+test('the zone claims: wasm work runs outside the zone, the report is published inside it', () => {
+  assert.match(COMPONENT, /this\.zone\.runOutsideAngular\(/);
+  assert.match(COMPONENT, /this\.zone\.run\(/);
+  assert.match(interfaceMd, /runOutsideAngular/);
+});
+
+test('both npm packages have the same version', () => {
+  assert.equal(JSON.parse(source('prose-angular/package.json')).version, JSON.parse(source('prose-wasm/npm/package.json')).version);
+});
+
+// --- the validation page ---------------------------------------------------------------
+
+const validationMd = frontMatterless(content('angular/validation.md'));
+const VSEC = sections(validationMd);
+const vsec = (h) => {
+  const s = VSEC.get(h);
+  assert.ok(s !== undefined, `angular/validation.md has no "## ${h}"`);
+  return s;
+};
+const { validationOptions, profileTexts } = await import('../../prose-angular/src/validation-sync.ts');
+const json = (cell) => JSON.parse(tick(cell));
+
+test('the strict/validation table is what validationOptions returns', () => {
+  const rows = tableRows(vsec('Turning validation on'));
+  assert.ok(rows.length >= 4);
+  for (const r of rows) assert.deepEqual(validationOptions(json(r[0]), json(r[1])), json(r[2]), `strict=${r[0]} validation=${r[1]}`);
+});
+
+test('the profile/profiles table is what profileTexts returns', () => {
+  const rows = tableRows(vsec('Profiles'));
+  assert.ok(rows.length >= 6);
+  for (const r of rows) assert.deepEqual(profileTexts(json(r[0]), json(r[1])), json(r[2]), `profile=${r[0]} profiles=${r[1]}`);
+});
+
+const norm = (s) => s.replace(/[\s;]+/g, '');
+const dts = source('prose-wasm/src/types.d.ts');
+function interfaceFields(name) {
+  const at = dts.indexOf(`export interface ${name} {`);
+  let depth = 0;
+  let end = at;
+  for (let i = dts.indexOf('{', at); i < dts.length; i++) {
+    if (dts[i] === '{') depth++;
+    else if (dts[i] === '}' && --depth === 0) { end = i; break; }
+  }
+  const body = dts.slice(dts.indexOf('{', at) + 1, end).replace(/\/\*\*[\s\S]*?\*\//g, '');
+  const out = [];
+  let d = 0, cur = '';
+  for (const c of body) {
+    if ('{[<('.includes(c)) d++;
+    if ('}]>)'.includes(c)) d--;
+    if (c === ';' && d === 0) { out.push(cur.trim()); cur = ''; } else cur += c;
+  }
+  return out.filter(Boolean).map((f) => /^(\w+)(\?)?:\s*([\s\S]+)$/.exec(f)).map((m) => ({ name: m[1], type: norm(m[3]) }));
+}
+
+test('ValidateOptions: the options table lists every field with the type of types.d.ts', () => {
+  const fields = interfaceFields('ValidateOptions');
+  const rows = tableRows(vsec('Options'));
+  assert.deepEqual(rows.map((r) => tick(r[0])).sort(), fields.map((f) => f.name).sort());
+  for (const f of fields) assert.equal(norm(tick(rows.find((r) => tick(r[0]) === f.name)[1])), f.type, f.name);
+});
+
+test('ValidationReport: the report table lists every field with the type of types.d.ts', () => {
+  const fields = interfaceFields('ValidationReport');
+  const rows = tableRows(vsec('The report'));
+  assert.deepEqual(rows.map((r) => tick(r[0])).sort(), fields.map((f) => f.name).sort());
+  for (const f of fields) assert.equal(norm(tick(rows.find((r) => tick(r[0]) === f.name)[1])), f.type, f.name);
+});
+
+test('Finding: the fields the page names exist, and the schema string is the code\'s', () => {
+  const names = interfaceFields('Finding').map((f) => f.name);
+  for (const n of ['rule', 'severity', 'message', 'target', 'fingerprint', 'fixes']) assert.ok(names.includes(n), n);
+  assert.ok(vsec('The report').includes('ds-prose/validation-report@1'));
+  assert.ok(dts.includes('"ds-prose/validation-report@1"'));
+});
+
+test('reportChanged: the page\'s statement is what the function does (first report counts; wording and order do not)', async () => {
+  const { reportChanged } = await import('../../prose-angular/src/validation-sync.ts');
+  const f = (fp, severity = 'error', message = 'x') => ({ fingerprint: fp, severity, message });
+  assert.equal(reportChanged(null, { verdict: 'conforms' }), true);
+  assert.equal(reportChanged({ verdict: 'violations', findings: [f('a'), f('b')] }, { verdict: 'violations', findings: [f('b', 'error', 'reworded'), f('a')] }), false);
+  assert.match(vsec('The report'), /The first report counts/);
 });

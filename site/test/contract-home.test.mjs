@@ -47,3 +47,12 @@ test('the claims about what the renderer does not do are the README\'s: no edito
   const md = content('index.md');
   assert.match(md, /ships no CSS|emits no CSS|no stylesheet/i);
 });
+
+test('the versions in the table are the packages\' versions', () => {
+  const md = content('index.md');
+  const crate = /^version\s*=\s*"([^"]+)"/m.exec(source('Cargo.toml'))[1];
+  const ng = JSON.parse(source('prose-angular/package.json')).version;
+  const wasm = JSON.parse(source('prose-wasm/npm/package.json')).version;
+  for (const [name, version] of [['`prose-yew` (crate)', crate], ['`@ds-labs/prose-wasm` (npm)', wasm], ['`@ds-labs/prose-angular` (npm)', ng]])
+    assert.ok(md.includes(`| ${name} | ${version} |`), `${name} ${version}`);
+});

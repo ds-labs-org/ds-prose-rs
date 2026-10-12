@@ -69,3 +69,9 @@ test('a page can name an extra stylesheet; it is linked after site.css and must 
   assert.ok(site > 0 && extra > site, 'extra stylesheet follows site.css');
   assert.doesNotMatch(renderPage({ title: 'T', description: 'A description.', active: null, base: '/', body: '' }), /examples\/prose\.css/);
 });
+
+test('renderer-output fragments in content/examples are embedded in pages and not shipped as pages', async () => {
+  const fs = await import('node:fs');
+  assert.ok(!fs.existsSync(path.join(site.out, 'examples/offer.html')));
+  assert.ok(fs.existsSync(path.join(site.out, 'examples/prose.css')));
+});

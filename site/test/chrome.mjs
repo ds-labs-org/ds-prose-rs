@@ -13,7 +13,7 @@ export function inChrome(html, { dark = false, width = 1000 } = {}) {
   const file = path.join(dir, 'page.html');
   fs.writeFileSync(file, html);
   const args = ['--headless=new', '--disable-gpu', '--no-sandbox', `--user-data-dir=${path.join(dir, 'profile')}`, `--window-size=${width},800`, '--virtual-time-budget=3000', '--dump-dom'];
-  if (dark) args.push('--blink-settings=preferredColorScheme=1');
+  if (dark) args.push('--force-dark-mode');
   const r = spawnSync(chrome, [...args, `file://${file}`], { encoding: 'utf8', timeout: 60_000 });
   fs.rmSync(dir, { recursive: true, force: true });
   const m = /<pre id="result">([\s\S]*?)<\/pre>/.exec(r.stdout ?? '');
