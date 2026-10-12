@@ -59,7 +59,7 @@ const expectCurrent = {
 
 test('the nav is the same on every page and both demos, apart from aria-current', () => {
   const navs = files.map((f) => ({ url: f.url, nav: topnav(f.html) }));
-  assert.ok(navs.length >= 8, `only ${navs.length} pages carry a nav`);
+  assert.ok(navs.some((n) => n.url.endsWith('/demo/')) && navs.some((n) => n.url.endsWith('/demo-angular/')), 'both demos are checked');
   for (const n of navs) assert.ok(n.nav, `no topnav on ${n.url}`);
   const ref = normalise(navs[0].nav);
   for (const n of navs) assert.equal(normalise(n.nav), ref, `nav differs on ${n.url}`);
