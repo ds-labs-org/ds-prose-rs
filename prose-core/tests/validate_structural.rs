@@ -326,3 +326,97 @@ fn a_long_inheritance_chain_is_cheap_and_has_no_cycle() {
             .all(|f| f.rule == RuleId::OdrlInheritanceCycle)
     );
 }
+
+/// IM Example 31 (the parent, with the assigner) and Example 32 (the
+/// Agreement that inherits from it), profile lines removed.
+fn im_31() -> Value {
+    json!({"@type": "Policy", "uid": "policy:default",
+           "assigner": "org-01",
+           "permission": [{"target": "http://example.com/asset:1", "action": "use"}]})
+}
+
+fn im_32() -> Value {
+    json!({"@type": "Agreement", "uid": "policy:0001",
+           "inheritFrom": "policy:default",
+           "assignee": "user:0001",
+           "permission": [{"target": "http://example.com/asset:1", "action": "display"}]})
+}
+
+fn graph(items: Vec<Value>) -> String {
+    json!({"@context": "http://www.w3.org/ns/odrl.jsonld", "@graph": items}).to_string()
+}
+
+#[test]
+fn inherited_parties_satisfy_the_agreement_im_examples_31_and_32() {
+    let r = validate_json(
+        &graph(vec![im_31(), im_32()]),
+        &Wording::new(),
+        &structural(),
+    );
+    assert!(
+        r.findings
+            .iter()
+            .all(|f| f.rule != RuleId::OdrlAgreementParties),
+        "{:?}",
+        r.findings
+    );
+    assert!(r.gaps.is_empty(), "{:?}", r.gaps);
+    assert!(r.conforms(), "{:?}", r.findings);
+}
+
+#[test]
+fn inherited_assets_actions_and_assigner_reach_a_grandchild() {
+    let parent = json!({"@type": "Set", "uid": "urn:p:a", "target": "urn:asset:1", "action": "use",
+                         "permission": [{}]});
+    let mid = json!({"@type": "Offer", "uid": "urn:p:b", "inheritFrom": "urn:p:a", "assigner": "urn:org:1"});
+    let leaf = json!({"@type": "Offer", "uid": "urn:p:c", "inheritFrom": "urn:p:b",
+                      "permission": [{}]});
+    let r = validate_json(
+        &graph(vec![parent, mid, leaf]),
+        &Wording::new(),
+        &structural(),
+    );
+    assert_eq!(odrl_findings(&r), pairs(&[]), "{:?}", r.findings);
+}
+
+#[test]
+fn a_missing_part_a_present_parent_does_not_supply_is_still_an_error() {
+    let parent = json!({"@type": "Set", "uid": "urn:p:a", "target": "urn:asset:1"});
+    let child = json!({"@type": "Set", "uid": "urn:p:b", "inheritFrom": "urn:p:a",
+                       "permission": [{}]});
+    let r = validate_json(&graph(vec![parent, child]), &Wording::new(), &structural());
+    assert!(odrl_findings(&r).contains(&(
+        "odrl.rule-action".to_string(),
+        "policy[1].permission[0]".to_string()
+    )));
+}
+
+#[test]
+fn a_parent_outside_the_document_leaves_a_gap_not_a_hard_error() {
+    let r = validate_json(&graph(vec![im_32()]), &Wording::new(), &structural());
+    assert_eq!(odrl_findings(&r), pairs(&[]), "{:?}", r.findings);
+    assert_eq!(r.gaps.len(), 1, "{:?}", r.gaps);
+    assert_eq!(r.gaps[0].rule, RuleId::InputUnchecked);
+    assert_eq!(r.verdict, Verdict::Incomplete);
+}
+
+#[test]
+fn a_remote_grandparent_also_leaves_only_a_gap() {
+    let mid = json!({"@type": "Offer", "uid": "urn:p:b", "inheritFrom": "urn:remote"});
+    let leaf = json!({"@type": "Offer", "uid": "urn:p:c", "inheritFrom": "urn:p:b",
+                      "permission": [{}]});
+    let r = validate_json(&graph(vec![mid, leaf]), &Wording::new(), &structural());
+    assert_eq!(odrl_findings(&r), pairs(&[]), "{:?}", r.findings);
+    assert_eq!(r.verdict, Verdict::Incomplete);
+}
+
+#[test]
+fn inherited_parts_survive_a_cycle_without_looping() {
+    let a = json!({"@type": "Set", "uid": "urn:p:a", "inheritFrom": "urn:p:b",
+                   "target": "urn:asset:1", "action": "use"});
+    let b = json!({"@type": "Set", "uid": "urn:p:b", "inheritFrom": "urn:p:a",
+                   "permission": [{}]});
+    let r = validate_json(&graph(vec![a, b]), &Wording::new(), &structural());
+    let rules: Vec<_> = odrl_findings(&r).into_iter().map(|x| x.0).collect();
+    assert_eq!(rules, ["odrl.inheritance-cycle", "odrl.inheritance-cycle"]);
+}
