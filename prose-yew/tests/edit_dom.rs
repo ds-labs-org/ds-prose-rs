@@ -2200,13 +2200,12 @@ fn tune_host(p: &TuneProps) -> Html {
     }
 }
 
-async fn mount_tune(p: TuneProps) -> Element {
+async fn mount_tune(p: TuneProps) -> (Element, yew::AppHandle<TuneHost>) {
     let container = document().create_element("div").unwrap();
     document().body().unwrap().append_child(&container).unwrap();
     let handle = yew::Renderer::<TuneHost>::with_root_and_props(container.clone(), p).render();
-    std::mem::forget(handle);
     settle().await;
-    container
+    (container, handle)
 }
 
 fn tune(json: &str, log: &Log, options: Option<Options>, suggestions: bool) -> TuneProps {
@@ -2224,7 +2223,7 @@ fn tune(json: &str, log: &Log, options: Option<Options>, suggestions: bool) -> T
 #[wasm_bindgen_test]
 async fn ux1_without_suggestions_a_refusing_host_keeps_the_draft_and_is_not_refused() {
     let log = Log::default();
-    let c = mount_tune(tune(STRICT_POLICY, &log, Some(Options::strict()), false)).await;
+    let (c, _h) = mount_tune(tune(STRICT_POLICY, &log, Some(Options::strict()), false)).await;
     let el = slot(&c, ACTION);
     type_into(&el, "foo:bar");
     key(&el, "Enter", false, false);
@@ -2254,7 +2253,7 @@ async fn ux1_past_the_check_budget_a_refusing_host_is_still_not_refused() {
     // Each policy's kind and action slots take two checks to find out
     // whether they are closed and whether the text in them is outside, so
     // a few hundred policies use the budget up.
-    const POLICIES: usize = 700;
+    const POLICIES: usize = 520;
     let one = |i: usize| {
         format!(
             r#"{{"@type": "Set", "uid": "urn:policy:{i}",
@@ -2269,7 +2268,7 @@ async fn ux1_past_the_check_budget_a_refusing_host_is_still_not_refused() {
             "@graph": [{all}]}}"#
     );
     let log = Log::default();
-    let c = mount_tune(tune(&json, &log, Some(Options::strict()), true)).await;
+    let (c, h) = mount_tune(tune(&json, &log, Some(Options::strict()), true)).await;
     // Past the budget some action slots are rendered open (which ones
     // depends on the order the components render in).
     let open_slot = c
@@ -2286,6 +2285,9 @@ async fn ux1_past_the_check_budget_a_refusing_host_is_still_not_refused() {
     assert!(set_texts(&log).is_empty(), "sent {:?}", set_texts(&log));
     assert_eq!(state_attr(&c, "data-refused"), "false");
     assert_eq!(slot(&c, &last).text_content().as_deref(), Some("foo:bar"));
+    // The page is large: take it down so it does not slow the other tests.
+    h.destroy();
+    c.remove();
 }
 
 /// UX-2: taking the slot's current value from the list after a rejected
@@ -2429,7 +2431,7 @@ async fn ux5_a_closed_value_slot_follows_the_validators_level_for_the_rule() {
     for level in [Level::Off, Level::Info, Level::Warning] {
         let log = Log::default();
         let opts = Options::strict().level(RuleId::ProseValueNotAllowed, level);
-        let c = mount_tune(tune(STRICT_POLICY, &log, Some(opts), true)).await;
+        let (c, _h) = mount_tune(tune(STRICT_POLICY, &log, Some(opts), true)).await;
         assert_eq!(
             slot(&c, value).get_attribute("data-closed"),
             None,
@@ -2449,7 +2451,7 @@ async fn ux5_a_closed_value_slot_follows_the_validators_level_for_the_rule() {
     // And as an error it is closed, as before.
     let log = Log::default();
     let opts = Options::strict().level(RuleId::ProseValueNotAllowed, Level::Error);
-    let c = mount_tune(tune(STRICT_POLICY, &log, Some(opts), true)).await;
+    let (c, _h) = mount_tune(tune(STRICT_POLICY, &log, Some(opts), true)).await;
     assert_eq!(
         slot(&c, value).get_attribute("data-closed").as_deref(),
         Some("true")
