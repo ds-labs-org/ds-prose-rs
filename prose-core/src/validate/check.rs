@@ -14,6 +14,13 @@ use crate::words_ctx::{namespace, profile_name};
 use std::collections::{HashMap, HashSet};
 
 const ODRL: &str = "http://www.w3.org/ns/odrl/2/";
+
+/// Whether `iri` is one of ODRL's own terms: in its namespace, or one of
+/// the Creative Commons actions its Common Vocabulary lists. Such a term
+/// needs no profile declaration, whoever redeclares it.
+fn odrl_owned(iri: &str) -> bool {
+    iri.starts_with(ODRL) || odrl_term(iri, OdrlVocab::Common).is_some()
+}
 const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
 
 /// The most profiles that are not loaded one policy's findings name; one
@@ -492,6 +499,11 @@ impl<'a> Checker<'a> {
             return None;
         }
         let iri = self.expand(written);
+        if !iri.starts_with(ODRL) && odrl_owned(&iri) {
+            // ODRL's own, as its Common Vocabulary lists the cc: actions,
+            // whichever way a loaded copy of the vocabulary spells them.
+            return None;
+        }
         let i = *self.index.namespaces.get(namespace(&iri))?;
         self.profiles.get(i).copied()
     }
@@ -734,7 +746,7 @@ impl<'a> Checker<'a> {
                 // own terms need no declaration, whoever redeclares them, and
                 // a profile without an IRI cannot be named.
                 if let Some(piri) = p.iri()
-                    && !t.iri.starts_with(ODRL)
+                    && !odrl_owned(&t.iri)
                     && !unsure
                     && !declaring
                         .iter()

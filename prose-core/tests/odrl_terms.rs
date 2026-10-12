@@ -51,7 +51,7 @@ fn odrl_terms_kinds() {
     // The Creative Commons actions the Common Vocabulary lists, as written.
     let t = odrl_term(&format!("{CC}Distribution"), OdrlVocab::Common).unwrap();
     assert_eq!((t.kind, t.core), (TermKind::Action, false));
-    assert!(odrl_term(&format!("{CC}CommericalUse"), OdrlVocab::Common).is_some());
+    assert!(odrl_term(&format!("{CC}CommercialUse"), OdrlVocab::Common).is_some());
 }
 
 #[test]

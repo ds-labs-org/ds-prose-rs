@@ -9,6 +9,13 @@
 //! is in the Common Vocabulary (ODRL Vocabulary & Expression 2.2, section
 //! 4, non-normative); a term of `#deprecatedTerms` is deprecated (appendix
 //! A); every other one is in the Core Vocabulary (section 3).
+//!
+//! One correction to that source: `ODRL22.json` misspells the Creative
+//! Commons action `cc:CommercialUse` as `cc:CommericalUse`. `ODRL22.ttl`
+//! has the right spelling, and so does this table. The deprecated party
+//! scopes (`odrl:All`, `odrl:Group`, ...) and undefined-term values
+//! (`odrl:ignore`, `odrl:support`) have no kind here and are not listed.
+//! `tests/validate_cc_terms.rs` compares the table with `ODRL22.ttl`.
 use super::TermKind;
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -118,8 +125,10 @@ static TERMS: &[OdrlTerm] = &[
     t(o!("transfer"), Action, Core),
     t(o!("use"), Action, Core),
     t("http://creativecommons.org/ns#Attribution", Action, Common),
+    // W3C's ODRL22.json spells this one "cc:CommericalUse"; ODRL22.ttl, the
+    // vocabulary text and Creative Commons spell it as here.
     t(
-        "http://creativecommons.org/ns#CommericalUse",
+        "http://creativecommons.org/ns#CommercialUse",
         Action,
         Common,
     ),
