@@ -2,9 +2,10 @@
 //! (`http://creativecommons.org/ns#`), which ODRL 2.2 lists as its own
 //! (Vocabulary & Expression 2.2, 3.1 and appendix A).
 //!
-//! The W3C `ODRL22.json` spells one of them `cc:CommericalUse`; the Turtle
-//! `ODRL22.ttl`, the vocabulary text and Creative Commons all spell it
-//! `cc:CommercialUse`. The table follows the correct spelling.
+//! The W3C `ODRL22.json` and the Vocabulary REC's identifier (4.4.8) spell
+//! one of them `cc:CommericalUse`; the Turtle `ODRL22.ttl` and Creative
+//! Commons spell it `cc:CommercialUse`. The table follows the correct
+//! spelling, and the validator reads the misspelling as the same term.
 mod common;
 mod corpus;
 use corpus::*;

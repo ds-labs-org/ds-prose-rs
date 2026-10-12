@@ -6,7 +6,7 @@ use super::{Expected, Finding, Fix, Level, Mode, Options, RuleId, TermRef};
 use crate::edit::*;
 use crate::profile::{
     OdrlVocab, OperandHints, Prefixes, ProfileVocab, Term, TermKind, Wording, is_odrl_context,
-    odrl_term,
+    odrl_spelling, odrl_term,
 };
 use crate::read::join_with;
 use crate::words::local_name;
@@ -16,10 +16,11 @@ use std::collections::{HashMap, HashSet};
 const ODRL: &str = "http://www.w3.org/ns/odrl/2/";
 
 /// Whether `iri` is one of ODRL's own terms: in its namespace, or one of
-/// the Creative Commons actions its Common Vocabulary lists. Such a term
-/// needs no profile declaration, whoever redeclares it.
-fn odrl_owned(iri: &str) -> bool {
-    iri.starts_with(ODRL) || odrl_term(iri, OdrlVocab::Common).is_some()
+/// the Creative Commons actions its Common Vocabulary lists when `vocab`
+/// counts that vocabulary. Such a term needs no profile declaration,
+/// whoever redeclares it.
+fn odrl_owned(iri: &str, vocab: OdrlVocab) -> bool {
+    iri.starts_with(ODRL) || odrl_term(odrl_spelling(iri), vocab).is_some()
 }
 const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
 
@@ -499,7 +500,7 @@ impl<'a> Checker<'a> {
             return None;
         }
         let iri = self.expand(written);
-        if !iri.starts_with(ODRL) && odrl_owned(&iri) {
+        if !iri.starts_with(ODRL) && odrl_owned(&iri, self.options.odrl()) {
             // ODRL's own, as its Common Vocabulary lists the cc: actions,
             // whichever way a loaded copy of the vocabulary spells them.
             return None;
@@ -657,7 +658,7 @@ impl<'a> Checker<'a> {
         // While a declared profile is missing, an unknown term may be one of
         // its own: say nothing rather than guess.
         let unsure = self.incomplete();
-        let odrl = odrl_term(&iri, self.options.odrl());
+        let odrl = odrl_term(odrl_spelling(&iri), self.options.odrl());
         // Every loaded profile that declares the term, first loaded first:
         // the term is every kind any of them gives it.
         let declaring: Vec<&'a ProfileVocab> = match resolved {
@@ -746,7 +747,7 @@ impl<'a> Checker<'a> {
                 // own terms need no declaration, whoever redeclares them, and
                 // a profile without an IRI cannot be named.
                 if let Some(piri) = p.iri()
-                    && !odrl_owned(&t.iri)
+                    && !odrl_owned(&t.iri, self.options.odrl())
                     && !unsure
                     && !declaring
                         .iter()

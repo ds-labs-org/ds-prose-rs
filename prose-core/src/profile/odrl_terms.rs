@@ -10,9 +10,12 @@
 //! 4, non-normative); a term of `#deprecatedTerms` is deprecated (appendix
 //! A); every other one is in the Core Vocabulary (section 3).
 //!
-//! One correction to that source: `ODRL22.json` misspells the Creative
-//! Commons action `cc:CommercialUse` as `cc:CommericalUse`. `ODRL22.ttl`
-//! has the right spelling, and so does this table. The deprecated party
+//! One correction to that source: `ODRL22.json`, like the identifier in
+//! section 4.4.8 of the Vocabulary REC, misspells the Creative Commons
+//! action `cc:CommercialUse` as `cc:CommericalUse`. `ODRL22.ttl`, the
+//! `skos:exactMatch` of `odrl:commercialize` and Creative Commons have the
+//! right spelling, and so does this table; the validator reads the
+//! misspelling as the same term ([`odrl_spelling`]). The deprecated party
 //! scopes (`odrl:All`, `odrl:Group`, ...) and undefined-term values
 //! (`odrl:ignore`, `odrl:support`) have no kind here and are not listed.
 //! `tests/validate_cc_terms.rs` compares the table with `ODRL22.ttl`.
@@ -60,6 +63,18 @@ pub fn odrl_term(iri: &str, vocab: OdrlVocab) -> Option<&'static OdrlTerm> {
     match vocab {
         OdrlVocab::Core if !t.core => None,
         _ => Some(t),
+    }
+}
+
+/// `iri`, or the table's spelling of it when it is the W3C texts'
+/// misspelling `cc:CommericalUse`: a policy written from the REC or from
+/// `ODRL22.json` uses that one.
+pub(crate) fn odrl_spelling(iri: &str) -> &str {
+    match iri {
+        "http://creativecommons.org/ns#CommericalUse" => {
+            "http://creativecommons.org/ns#CommercialUse"
+        }
+        _ => iri,
     }
 }
 
@@ -125,8 +140,9 @@ static TERMS: &[OdrlTerm] = &[
     t(o!("transfer"), Action, Core),
     t(o!("use"), Action, Core),
     t("http://creativecommons.org/ns#Attribution", Action, Common),
-    // W3C's ODRL22.json spells this one "cc:CommericalUse"; ODRL22.ttl, the
-    // vocabulary text and Creative Commons spell it as here.
+    // W3C's ODRL22.json and the REC's 4.4.8 spell this one
+    // "cc:CommericalUse"; ODRL22.ttl and Creative Commons spell it as here.
+    // See odrl_spelling.
     t(
         "http://creativecommons.org/ns#CommercialUse",
         Action,
