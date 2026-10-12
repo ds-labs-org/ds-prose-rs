@@ -15,7 +15,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const USAGE = `Usage: ds-prose-validate [options] <policy.json>...
 
 Validates ODRL policies (JSON-LD) against ODRL profiles (JSON-LD or Turtle).
-A policy of "-" is read from standard input.
+A policy of "-" is read from standard input (once).
+Input must be UTF-8; a leading byte order mark is ignored.
 
 Options:
   -p, --profile <file>    Load a profile; repeat for several.
@@ -98,6 +99,7 @@ export function parseArgs(argv) {
       throw new UsageError(`unknown option ${arg}`);
     }
   }
+  if (a.files.filter((f) => f === '-').length > 1) throw new UsageError('standard input ("-") can be given once: it is read to the end the first time');
   if (!a.strict) {
     for (const [flag, on] of [['--structural', a.structural], ['--fail-closed', a.failClosed], ['--deny-deprecated', a.denyDeprecated], ['--odrl', a.odrl !== undefined]]) {
       if (on) throw new UsageError(`${flag} needs --strict`);

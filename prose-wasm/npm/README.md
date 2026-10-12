@@ -100,7 +100,8 @@ npx ds-prose-validate --strict --profile research.ttl policy.json
 Options: `--profile` (repeatable; JSON-LD or Turtle), `--strict`,
 `--structural`, `--fail-closed`, `--deny-deprecated`, `--odrl common|core`,
 `--ruleset <n>`, `--rule <id>=<level>`, `--format text|json`,
-`--allow-incomplete`. A policy of `-` is read from standard input. Exit
+`--allow-incomplete`. A policy of `-` is read from standard input (once);
+input must be UTF-8. `--rule` and `--ruleset` work with or without `--strict`. Exit
 codes: `0` every policy conforms, `1` violations, `2` usage error or a policy
 or profile that cannot be read, `3` no violations but incomplete (`0` with
 `--allow-incomplete`). When several apply, 2 outranks 1, and 1 outranks 3.
