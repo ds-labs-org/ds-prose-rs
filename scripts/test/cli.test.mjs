@@ -314,11 +314,18 @@ test('a closed output pipe does not turn a pass into the violations exit code', 
   const child = spawn(process.execPath, [bin, '--strict', ...Array(5000).fill(ok)], { stdio: ['ignore', 'pipe', 'pipe'] });
   let err = '';
   child.stderr.on('data', (d) => { err += d; });
-  child.stdout.once('data', () => child.stdout.destroy());
+  // The reader is gone before the first byte is written: a certain EPIPE, not a race.
+  child.stdout.destroy();
   const code = await new Promise((resolve) => child.on('close', resolve));
   assert.notEqual(code, 1, `exit 1 means violations: ${err}`);
   assert.equal(code, 0, err);
   assert.doesNotMatch(err, /EPIPE|Unhandled/);
+});
+
+test('a failure to write the output other than a closed pipe is exit 2', { skip: process.platform !== 'linux' }, () => {
+  const ok = file('ok2.json', '{"uid":"urn:ok"}');
+  const r = spawnSync('sh', ['-c', `"$0" "$1" --strict "$2" > /dev/full`, process.execPath, bin, ok], { encoding: 'utf8' });
+  assert.equal(r.status, 2, r.stderr);
 });
 
 test('an uncaught error is exit 2 with a message, never the violations code', () => {
