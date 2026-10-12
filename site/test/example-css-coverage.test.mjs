@@ -164,3 +164,16 @@ test('prose-editor.css wins over BASE_CSS where both set the same property (the 
   assert.equal(r.locked, rgb(LIGHT['--ds-border']), 'the locked border takes the token, not currentColor');
   assert.equal(r.issue, rgb(LIGHT['--ds-deny']), 'the issue text takes --prose-error from prose.css');
 });
+
+test('prose.css colours the load error that the Angular component writes as a child of the host', { skip, timeout: 120_000 }, () => {
+  const component = source('prose-angular/src/odrl-prose.component.ts');
+  const cls = /message\.className = '([^']+)'/.exec(component)[1];
+  const role = /setAttribute\('role', '([^']+)'\)/.exec(component)[1];
+  const body = `<ds-odrl-prose><p class="${cls}" role="${role}">The ODRL prose renderer could not be loaded.</p></ds-odrl-prose>`;
+  const probe = `out({ c: cs('.prose-error', 'color'), inside: !!document.querySelector('.prose-error').closest('.ds-prose') });`;
+  for (const [theme, tokens] of [['light', LIGHT], ['dark', DARK]]) {
+    const r = inChrome(`<!doctype html><html data-theme="${theme}"><head><meta charset="utf-8"><style>${PROSE}</style></head><body>${body}${reporter(probe)}</body></html>`);
+    assert.equal(r.inside, false);
+    assert.equal(r.c, rgb(tokens['--ds-deny']), `${theme}: the load error is in the deny colour`);
+  }
+});
