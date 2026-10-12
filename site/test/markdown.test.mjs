@@ -230,7 +230,7 @@ test('{{source path#region}} embeds the lines between the region markers, dedent
   });
   const html = md('{{source a/ex.rs#one}}\n', { repoDir: repo });
   assert.match(html, /<code class="language-rust">let a = 1;\n  let b = 2;\n<\/code>/);
-  assert.ok(!html.includes('region'));
+  assert.ok(!html.includes('// region') && !html.includes('endregion'));
   assert.ok(!html.includes('before'));
 });
 

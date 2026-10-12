@@ -6,6 +6,10 @@
 // code, strong, emphasis, links. Directives on a line of their own:
 //   {{file path}}      embed a file under contentDir as a code block
 //   {{include name}}   render contentDir/_partials/name.md in place
+//   {{source path#region}}   embed a marked region of a file under repoDir as
+//                      a code block ("// region: name" ... "// endregion: name")
+//   {{rendered path}}  embed renderer output (HTML) from contentDir, or from
+//                      repoDir with a "repo:" prefix; scripts are refused
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -102,11 +106,26 @@ function codeBlock(text, lang) {
 }
 
 function inside(contentDir, rel) {
-  if (!contentDir) throw new Error(`directive needs a contentDir (${rel})`);
+  if (!contentDir) throw new Error(`directive needs a base directory (${rel})`);
   const root = path.resolve(contentDir);
   const full = path.resolve(root, rel);
   if (full !== root && !full.startsWith(root + path.sep)) throw new Error(`path outside the content directory: ${rel}`);
   return full;
+}
+
+const LANG = { rs: 'rust', ts: 'typescript', mjs: 'javascript', js: 'javascript' };
+
+function region(text, name, rel) {
+  const lines = text.split('\n');
+  const open = new RegExp(`^\\s*(//|#)\\s*region:\\s*${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`);
+  const close = new RegExp(`^\\s*(//|#)\\s*endregion:\\s*${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`);
+  const from = lines.findIndex((l) => open.test(l));
+  if (from < 0) throw new Error(`{{source}}: no region "${name}" in ${rel}`);
+  const to = lines.findIndex((l, i) => i > from && close.test(l));
+  if (to < 0) throw new Error(`{{source}}: region "${name}" in ${rel} has no endregion`);
+  const body = lines.slice(from + 1, to);
+  const indent = Math.min(...body.filter((l) => l.trim()).map((l) => /^\s*/.exec(l)[0].length));
+  return body.map((l) => l.slice(Math.min(indent, /^\s*/.exec(l)[0].length))).join('\n') + '\n';
 }
 
 function render(src, ctx) {
@@ -146,6 +165,22 @@ function render(src, ctx) {
         const full = inside(ctx.contentDir, `_partials/${arg}.md`);
         if (!fs.existsSync(full)) throw new Error(`{{include}}: no such partial: ${arg}`);
         out += render(parseFrontMatter(fs.readFileSync(full, 'utf8')).body, ctx);
+      } else if (name === 'source') {
+        const [rel, reg] = arg.split('#');
+        if (!reg) throw new Error(`{{source}}: needs path#region, got "${arg}"`);
+        const full = inside(ctx.repoDir, rel);
+        if (!fs.existsSync(full)) throw new Error(`{{source}}: no such file: ${rel}`);
+        const ext = path.extname(rel).slice(1);
+        out += codeBlock(region(fs.readFileSync(full, 'utf8'), reg, rel), LANG[ext] ?? ext);
+        out += `<p class="source-note">From <code>${escapeHtml(rel)}</code>, region <code>${escapeHtml(reg)}</code>.</p>\n`;
+      } else if (name === 'rendered') {
+        const fromRepo = arg.startsWith('repo:');
+        const rel = fromRepo ? arg.slice(5) : arg;
+        const full = inside(fromRepo ? ctx.repoDir : ctx.contentDir, rel);
+        if (!fs.existsSync(full)) throw new Error(`{{rendered}}: no such file: ${rel}`);
+        const html = fs.readFileSync(full, 'utf8').replace(/<!--[\s\S]*?-->/g, '').trim();
+        if (/<script|<style|<iframe|<object|<embed|\son[a-z]+\s*=|javascript:/i.test(html)) throw new Error(`{{rendered}}: ${rel} is not renderer output (script, style or handler found)`);
+        out += `<div class="rendered" role="region" aria-label="Rendered output" tabindex="0">${html}</div>\n`;
       } else {
         throw new Error(`unknown directive: ${name}`);
       }
@@ -244,8 +279,8 @@ function render(src, ctx) {
   return out;
 }
 
-export function renderMarkdown(src, { contentDir } = {}) {
-  const ctx = { contentDir, ids: new Map(), headings: [] };
+export function renderMarkdown(src, { contentDir, repoDir } = {}) {
+  const ctx = { contentDir, repoDir, ids: new Map(), headings: [] };
   const html = render(src, ctx);
   return { html, headings: ctx.headings };
 }

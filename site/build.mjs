@@ -43,6 +43,7 @@ export function build({
   contentDir = path.join(SITE_DIR, 'content'),
   assetsDir = path.join(SITE_DIR, 'assets'),
   outDir = path.join(SITE_DIR, 'dist'),
+  repoDir = path.resolve(SITE_DIR, '..'),
   base = '/',
   demos = {},
 } = {}) {
@@ -57,7 +58,7 @@ export function build({
   const pages = sources.map((rel) => {
     const { data, body } = parseFrontMatter(fs.readFileSync(path.join(contentDir, rel), 'utf8'));
     for (const k of ['title', 'description', 'nav']) if (!data[k]) throw new Error(`${rel}: front matter needs ${k}`);
-    const { html } = renderMarkdown(body, { contentDir });
+    const { html } = renderMarkdown(body, { contentDir, repoDir });
     return { rel, data, html: prefixLinks(html, base), url: urlFor(base, rel) };
   });
 
@@ -80,6 +81,7 @@ export function build({
       base,
       body: p.html,
       subnav,
+      stylesheet: p.data.stylesheet ?? '',
     });
     const file = outFor(outDir, base, p.url);
     fs.mkdirSync(path.dirname(file), { recursive: true });

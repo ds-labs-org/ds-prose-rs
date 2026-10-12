@@ -1,7 +1,7 @@
 import { escapeHtml } from './markdown.mjs';
 import { headAssets, normaliseBase, renderHeader, REPO_URL } from './nav.mjs';
 
-export function renderPage({ title, description, active, exact = true, base, body, subnav = '' }) {
+export function renderPage({ title, description, active, exact = true, base, body, subnav = '', stylesheet = '' }) {
   const b = normaliseBase(base);
   const main = `<main id="main">\n${body}</main>`;
   const content = subnav ? `<div class="layout">\n${subnav}\n${main}\n</div>` : main;
@@ -12,7 +12,7 @@ export function renderPage({ title, description, active, exact = true, base, bod
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)} - ds-prose-rs</title>
 <meta name="description" content="${escapeHtml(description)}">
-${headAssets(b)}
+${headAssets(b)}${stylesheet ? `\n<link rel="stylesheet" href="${b}${escapeHtml(stylesheet)}">` : ''}
 </head>
 <body class="site">
 <a class="skip-link" href="#main">Skip to content</a>
