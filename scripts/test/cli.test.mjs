@@ -2,7 +2,11 @@
 // and exit codes, with a fake engine in place of the wasm module; the real one
 // is exercised on the packed tarball by scripts/test-cli-tarball.mjs.
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { spawnSync } from 'node:child_process';
+import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { after, test } from 'node:test';
 import { parseArgs, run } from '../ds-prose-validate.mjs';
 
 const report = (verdict, findings = []) => JSON.stringify({
@@ -251,4 +255,54 @@ test('ordinary non-ASCII text is printed as it is', async () => {
   const reports = { B: report('violations', [finding('profile.unknown-term', 'error', 'le terme été ✓ 日本')]) };
   const r = await cli(['--strict', 'b.json'], { files: { 'b.json': 'B' }, reports });
   assert.match(r.out, /le terme été ✓ 日本/);
+});
+
+// The command as a process, with a stub in place of the wasm module (a copy
+// of the script next to a prose_wasm.js that reads every policy as conforming
+// unless it contains "VIOLATION"), for what only a real process shows: how
+// bytes are decoded, what a closed pipe does, what an uncaught error exits with.
+const scratch = mkdtempSync(join(tmpdir(), 'ds-prose-cli-test-'));
+after(() => rmSync(scratch, { recursive: true, force: true }));
+copyFileSync(new URL('../ds-prose-validate.mjs', import.meta.url), join(scratch, 'ds-prose-validate.mjs'));
+writeFileSync(join(scratch, 'prose_wasm_bg.wasm'), '');
+writeFileSync(join(scratch, 'prose_wasm.js'), `
+export function initSync() {}
+export class ProseValidator {
+  validate(json) {
+    const bad = json.includes('VIOLATION');
+    return JSON.stringify({ verdict: bad ? 'violations' : 'conforms', counts: { error: 0, warning: 0, info: 0 }, findings: [], seen: json });
+  }
+  free() {}
+}
+`);
+const bin = join(scratch, 'ds-prose-validate.mjs');
+const file = (name, bytes) => {
+  const p = join(scratch, name);
+  writeFileSync(p, bytes);
+  return p;
+};
+const proc = (args, input) => {
+  const r = spawnSync(process.execPath, [bin, ...args], { input, encoding: 'utf8' });
+  return { code: r.status, out: r.stdout, err: r.stderr };
+};
+
+test('a policy that is not valid UTF-8 is unreadable input (exit 2), not validated with replacement characters', () => {
+  const bad = file('bad8.json', Buffer.concat([Buffer.from('{"uid":"urn:p'), Buffer.from([0xff, 0xfe]), Buffer.from('"}')]));
+  const r = proc(['--strict', '--format', 'json', bad]);
+  assert.equal(r.code, 2, r.out + r.err);
+  assert.match(r.err, /bad8\.json/);
+  assert.match(r.err, /utf-?8/i);
+  assert.equal(JSON.parse(r.out)[0].report, null);
+  const viaStdin = proc(['--strict', '-'], Buffer.from([0x7b, 0xc3, 0x28, 0x7d]));
+  assert.equal(viaStdin.code, 2);
+  assert.match(viaStdin.err, /<stdin>/);
+});
+
+test('a UTF-8 byte order mark is not part of the policy; a profile may carry one too', () => {
+  const bom = Buffer.from([0xef, 0xbb, 0xbf]);
+  const ok = file('bom.json', Buffer.concat([bom, Buffer.from('{"uid":"urn:p"}')]));
+  const prof = file('bom-profile.jsonld', Buffer.concat([bom, Buffer.from('{}')]));
+  const r = proc(['--strict', '--format', 'json', '--profile', prof, ok]);
+  assert.equal(r.code, 0, r.out + r.err);
+  assert.equal(JSON.parse(r.out)[0].report.seen, '{"uid":"urn:p"}');
 });
