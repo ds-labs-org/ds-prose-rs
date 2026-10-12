@@ -180,12 +180,12 @@ enum Closure {
 /// Whether, and how, strict validation closes `slot`: its terms are the
 /// vocabulary's and nothing else, so a combobox offers those and takes
 /// nothing more. Open while the vocabulary is incomplete (the validator
-/// would refuse nothing), in advisory mode, and without suggestions.
+/// would refuse nothing) and in advisory mode. A term slot is closed with or
+/// without suggestions (without, there is no list, but a term the validator
+/// refuses is still not sent); the values of an operand are listed, so they
+/// need the suggestions.
 fn closure(env: &Env, slot: &Slot) -> Option<Closure> {
     let v = strict(env)?;
-    if !env.cfg.suggestions {
-        return None;
-    }
     let cached = |key: &str| env.closed_cache.borrow().get(key).copied();
     match slot.kind {
         SlotKind::Action | SlotKind::LeftOperand | SlotKind::PolicyKind | SlotKind::Unit => {
@@ -207,11 +207,28 @@ fn closure(env: &Env, slot: &Slot) -> Option<Closure> {
             };
             closed.then_some(Closure::Terms)
         }
-        SlotKind::Literal if matches!(slot.path.field, Field::RightOperand(_)) => {
+        SlotKind::Literal
+            if env.cfg.suggestions && matches!(slot.path.field, Field::RightOperand(_)) =>
+        {
             let closed_values = left_operand_term(env, slot)
                 .is_some_and(|t| t.hints.closed && !t.hints.value_tree.is_empty());
             closed_values.then_some(Closure::Values)
         }
+        _ => None,
+    }
+}
+
+/// As [`closure`] for a term slot at the moment its text is committed: one
+/// ask, outside the render's budget. A slot rendered after the budget ran
+/// out is open for the markers, but a commit must still not send a term the
+/// validator refuses.
+fn closure_at_commit(env: &Env, slot: &Slot) -> Option<Closure> {
+    let v = strict(env)?;
+    match slot.kind {
+        SlotKind::Action | SlotKind::LeftOperand | SlotKind::PolicyKind | SlotKind::Unit => v
+            .admissible(&env.doc, &set_text(slot, PROBE))
+            .is_err()
+            .then_some(Closure::Terms),
         _ => None,
     }
 }
@@ -601,7 +618,21 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                 .unwrap_or_default();
             let mut value = clean_edit(&text, &raw);
             let mut as_iri = false;
-            if let (Some(closure), Some(options)) = (closed, &options)
+            let late: Vec<Suggestion>;
+            let guard = match (closed, &options) {
+                (Some(c), Some(o)) => Some((c, o)),
+                _ => match closure_at_commit(&env, &slot) {
+                    Some(c) => {
+                        late = match use_suggestions {
+                            true => options_for(&env, &slot).0,
+                            false => vec![],
+                        };
+                        Some((c, &late))
+                    }
+                    None => None,
+                },
+            };
+            if let Some((closure, options)) = guard
                 && value != raw
                 && !value.is_empty()
             {
@@ -638,7 +669,7 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                             )
                             .into(),
                         ));
-                        open.set(true);
+                        open.set(use_suggestions);
                         return;
                     }
                 }
