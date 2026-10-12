@@ -480,7 +480,11 @@ trapped by partial input. `StrictEdit::RefuseTerms` is opt-in: through
 `EditDoc::apply_gated(ev, rules, Some(&validator))` and
 `use_prose_editor_with`, the reducer refuses, as `EditError::OutsideProfile`,
 a term written into a vocabulary slot that a refusable rule reports as an
-error there. Refusal is slot-local (it looks at the written value only, never
+error there. The stock view itself never sends such a term: a vocabulary
+slot asks the validator before it commits, with suggestions on or off and
+however large the document, and keeps the draft with the reason. A refusal
+reaches only a host that bypasses the view, and it is dropped when the
+validator or the policy changes. Refusal is slot-local (it looks at the written value only, never
 at what depends on it), never applies to the empty string, to free text, to
 right operands, to structural events or to undo, and a document that already
 violates loads and stays editable. What certifies a policy is
