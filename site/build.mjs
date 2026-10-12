@@ -101,7 +101,8 @@ export function build({
   fs.writeFileSync(path.join(outDir, '.nojekyll'), '');
   fs.cpSync(assetsDir, path.join(outDir, 'assets'), { recursive: true });
   const examples = path.join(contentDir, 'examples');
-  if (fs.existsSync(examples)) fs.cpSync(examples, path.join(outDir, 'examples'), { recursive: true });
+  // Renderer-output fragments (.html) are embedded in pages; they are not pages themselves.
+  if (fs.existsSync(examples)) fs.cpSync(examples, path.join(outDir, 'examples'), { recursive: true, filter: (src) => !src.endsWith('.html') });
 
   for (const [name, src] of Object.entries(demos)) {
     const dest = path.join(outDir, name);

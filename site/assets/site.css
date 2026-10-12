@@ -492,3 +492,20 @@ code {
     transition: none !important;
   }
 }
+
+/* Renderer output embedded in a page (the home page, the validation page). */
+.rendered {
+  margin: 0 0 var(--space-4, 16px);
+  padding: 16px;
+  background: var(--ds-bg, var(--surface));
+  color: var(--ds-fg, var(--text));
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: auto;
+}
+.rendered:focus-visible { outline-offset: 2px; }
+.source-note {
+  margin: -8px 0 16px;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
