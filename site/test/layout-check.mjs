@@ -4,14 +4,19 @@
 //   node test/layout-check.mjs [dist] [base]
 //   CHROME=/path/to/chrome   browser to use (else google-chrome, chromium)
 //   SHOT_DIR=/some/dir       write one screenshot per page, width and theme
+//   LAYOUT_REQUIRE_CHROME=1  fail, rather than skip, when no browser is found
 //
-// With no dist it builds the site sources with stand-in demos.
+// With no dist it builds the site sources with stand-in demos. With a dist it
+// is a tree built from the real demos, and the demo checks run as well: boot,
+// the stamped navigation, the site theme, the example stylesheet, the switch,
+// and the Angular demo's validation controls.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { normaliseCss } from './css.mjs';
 
 export const VIEWPORTS = [
   { width: 1280, height: 900 },
@@ -99,6 +104,177 @@ async function launch(chrome) {
   return { cdp, close };
 }
 
+
+const EXAMPLES = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../content/examples');
+
+function cssFiles(dir) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const p = path.join(dir, e.name);
+    return e.isDirectory() ? cssFiles(p) : e.name.endsWith('.css') ? [p] : [];
+  });
+}
+
+// The demos apply the documented example stylesheets. A bundler may re-print a
+// sheet (comments, quotes in attribute selectors, whitespace), so the rules are
+// compared in a normal form. The Trunk demo ships both sheets, the Angular demo
+// the renderer sheet.
+export function exampleCssFailures(dist) {
+  const out = [];
+  const want = { demo: ['prose.css', 'prose-editor.css'], 'demo-angular': ['prose.css'] };
+  for (const [demo, sheets] of Object.entries(want)) {
+    const dir = path.join(dist, demo);
+    if (!fs.existsSync(dir)) {
+      out.push(`${demo}/ is not in the tree`);
+      continue;
+    }
+    const built = cssFiles(dir).map((f) => normaliseCss(fs.readFileSync(f, 'utf8')));
+    for (const sheet of sheets) {
+      const example = normaliseCss(fs.readFileSync(path.join(EXAMPLES, sheet), 'utf8'));
+      if (!built.some((b) => b.includes(example))) out.push(`${demo}/ ships no stylesheet holding examples/${sheet} rule for rule`);
+    }
+    const own = built.join('');
+    if (demo === 'demo-angular' && own.includes('.ds-prose.prose-edit')) out.push('demo-angular/ carries the editor sheet, which Angular does not expose');
+  }
+  return out;
+}
+
+// What a script in the page reads about a demo: layout, theme, stylesheet.
+const DEMO_PROBE = `(() => {
+  const r = (sel) => { const e = document.querySelector(sel); return e ? e.getBoundingClientRect() : null; };
+  const root = document.querySelector('#app, app-root');
+  const rule = document.querySelector('.prose-permission > .prose-rule-sentence');
+  const cs = (e, p) => getComputedStyle(e)[p];
+  const header = r('.site-header'), rr = root && root.getBoundingClientRect();
+  return {
+    headerWidth: header && header.width, headerLeft: header && header.left, innerWidth: window.innerWidth,
+    rootWidth: rr && rr.width, rootDisplay: root && cs(root, 'display'),
+    bodyBg: cs(document.body, 'backgroundColor'), bodyColor: cs(document.body, 'color'),
+    scheme: cs(document.documentElement, 'colorScheme'),
+    ruleBorder: rule ? cs(rule, 'borderLeftWidth') : null, ruleColor: rule ? cs(rule, 'borderLeftColor') : null,
+    switchRadios: [...document.querySelectorAll('.sheet-switch input[name=ds-sheet]')].map((i) => i.value),
+    switchVisible: !!document.querySelector('.sheet-switch') && document.querySelector('.sheet-switch').getBoundingClientRect().height > 0,
+    current: [...document.querySelectorAll('.topnav-list > li > a[aria-current]')].map((a) => a.textContent.trim() + ':' + a.getAttribute('aria-current')),
+    policies: document.querySelectorAll('.prose-policy').length,
+  };
+})()`;
+
+const rgb = (hex) => { const n = parseInt(hex.slice(1), 16); return `rgb(${n >> 16}, ${(n >> 8) & 255}, ${n & 255})`; };
+
+async function demoChecks({ send, evaluate, visit, waitFor, key, base, failures, errors, shotDir }) {
+  const metrics = (width, height = 900) => send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+  const shot = async (name) => {
+    if (!shotDir) return;
+    fs.mkdirSync(shotDir, { recursive: true });
+    const { data } = await send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(shotDir, name), Buffer.from(data, 'base64'));
+  };
+  const demos = [
+    { path: 'demo/', name: 'Yew', current: 'Demo (Yew):page' },
+    { path: 'demo-angular/', name: 'Angular', current: 'Demo (Angular):page' },
+  ];
+  // Site tokens, light and dark: the demo page follows them.
+  const SITE = { light: { bg: rgb('#f6f8fa'), fg: rgb('#16202b'), allow: rgb('#15803d') }, dark: { bg: rgb('#0f1720'), fg: rgb('#e6edf3'), allow: rgb('#3fb950') } };
+
+  for (const demo of demos) {
+    const url = base + demo.path;
+    for (const width of [1280, 400]) {
+      await metrics(width);
+      await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
+      errors.length = 0;
+      await visit(url);
+      const tag = `${demo.name} demo @${width}`;
+      const p = await evaluate(DEMO_PROBE);
+      if (!p.policies) failures.push(`${tag}: no policy rendered`);
+      if (errors.length) failures.push(`${tag}: uncaught errors ${errors.join('; ')}`);
+      if (JSON.stringify(p.current) !== JSON.stringify([demo.current])) failures.push(`${tag}: current entries ${JSON.stringify(p.current)}`);
+      if (Math.abs(p.headerWidth - p.innerWidth) > 1 || p.headerLeft !== 0) failures.push(`${tag}: the navigation does not span the page (${p.headerLeft}, ${p.headerWidth} of ${p.innerWidth})`);
+      if (p.rootDisplay !== 'block') failures.push(`${tag}: app root is display ${p.rootDisplay}`);
+      if (width === 1280 && !(p.rootWidth > 600 && p.rootWidth <= 1153)) failures.push(`${tag}: app root is ${p.rootWidth}px wide, want 600 to 1152`);
+      if (JSON.stringify(p.switchRadios) !== JSON.stringify(['unstyled', 'themed']) || !p.switchVisible) failures.push(`${tag}: the stylesheet switch is missing or hidden (${JSON.stringify(p.switchRadios)})`);
+      if (p.ruleBorder !== '4px') failures.push(`${tag}: the example stylesheet is not applied (permission border ${p.ruleBorder})`);
+      await shot(`demo-${demo.name.toLowerCase()}-${width}-themed.png`);
+    }
+
+    // Follows the site theme, in both directions, and its own layout holds.
+    await metrics(1280);
+    await visit(url);
+    for (const theme of ['dark', 'light']) {
+      await evaluate(`document.documentElement.setAttribute('data-theme', '${theme}')`);
+      const p = await evaluate(DEMO_PROBE);
+      if (p.bodyBg !== SITE[theme].bg) failures.push(`${demo.name} demo ${theme}: page background ${p.bodyBg}, want ${SITE[theme].bg}`);
+      if (p.bodyColor !== SITE[theme].fg) failures.push(`${demo.name} demo ${theme}: text colour ${p.bodyColor}, want ${SITE[theme].fg}`);
+      if (p.ruleColor !== SITE[theme].allow) failures.push(`${demo.name} demo ${theme}: permission mark ${p.ruleColor}, want ${SITE[theme].allow}`);
+      if (p.scheme !== theme) failures.push(`${demo.name} demo ${theme}: color-scheme ${p.scheme}`);
+    }
+    await evaluate(`document.documentElement.setAttribute('data-theme', 'dark')`);
+    await shot(`demo-${demo.name.toLowerCase()}-1280-dark.png`);
+
+    // The switch: unstyled drops the example stylesheet, themed brings it back.
+    await visit(url);
+    await evaluate(`document.querySelector('.sheet-switch input[value=unstyled]').click()`);
+    let p = await evaluate(DEMO_PROBE);
+    if (p.ruleBorder !== '0px') failures.push(`${demo.name} demo: unstyled still shows the permission mark (${p.ruleBorder})`);
+    if (p.rootDisplay !== 'block' || p.headerWidth < 1270) failures.push(`${demo.name} demo: unstyled breaks the demo's own layout`);
+    await shot(`demo-${demo.name.toLowerCase()}-1280-unstyled.png`);
+    await evaluate(`document.querySelector('.sheet-switch input[value=themed]').click()`);
+    p = await evaluate(DEMO_PROBE);
+    if (p.ruleBorder !== '4px') failures.push(`${demo.name} demo: themed does not bring the example stylesheet back (${p.ruleBorder})`);
+  }
+
+  // Angular demo: strict, profile and validationChange, through the page.
+  await metrics(1280);
+  const ng = base + 'demo-angular/';
+  await visit(ng);
+  const read = () => evaluate(`({
+    verdict: (document.getElementById('verdict') || {}).textContent || null,
+    status: (document.querySelector('.prose-violations-status') || {}).textContent || null,
+    glossary: !!document.querySelector('.prose-glossary'),
+    strict: !!document.getElementById('strict') && document.getElementById('strict').checked,
+    live: document.getElementById('verdict') && document.getElementById('verdict').getAttribute('role'),
+  })`);
+  let v = await read();
+  if (v.live !== 'status') failures.push(`Angular demo: #verdict is not a status region (${v.live})`);
+  if (!/off/i.test(v.verdict ?? '') || v.status) failures.push(`Angular demo: validation should start off (${JSON.stringify(v)})`);
+  await evaluate(`document.getElementById('strict').click()`);
+  const verdictIs = (re) => waitFor(`/${re}/i.test((document.getElementById('verdict') || {}).textContent || '')`, 8000);
+  if (!(await verdictIs('incomplete|conforms|violations'))) failures.push(`Angular demo: strict on, but validationChange never reached the page (${JSON.stringify(await read())})`);
+  await evaluate(`document.getElementById('findings').click()`);
+  await waitFor(`document.querySelector('.prose-violations-status')`, 5000);
+  v = await read();
+  const word = /conforms|violations|incomplete/i.exec(v.verdict ?? '')?.[0]?.toLowerCase();
+  if (!v.status || !word || !v.status.toLowerCase().includes(word === 'violations' ? 'violation' : word)) failures.push(`Angular demo: the readout and the findings under the prose disagree (${JSON.stringify(v)})`);
+  await shot('demo-angular-1280-strict.png');
+
+  // The research policy declares a profile; loading it through [profile] changes the verdict and adds the glossary.
+  await evaluate(`[...document.querySelectorAll('.presets button')].find((b) => /Research/.test(b.textContent)).click()`);
+  await waitFor(`/research/i.test(document.getElementById('policy').value)`, 3000);
+  const before = (await read()).verdict;
+  await evaluate(`(() => { const s = document.getElementById('profile'); s.value = 'research'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await waitFor(`document.querySelector('.prose-glossary')`, 8000);
+  await new Promise((r) => setTimeout(r, 300));
+  v = await read();
+  if (!v.glossary) failures.push(`Angular demo: [profile] did not reach the component (no glossary): ${JSON.stringify(v)}`);
+  if (v.verdict === before) failures.push(`Angular demo: loading the profile left the verdict as it was (${before})`);
+  if (!/conforms|violations|incomplete/i.test(v.verdict ?? '')) failures.push(`Angular demo: no verdict with the profile loaded (${JSON.stringify(v)})`);
+  await shot('demo-angular-1280-profile.png');
+
+  // Strict off: the readout says so and the findings go.
+  await evaluate(`document.getElementById('strict').click()`);
+  await waitFor(`/off/i.test(document.getElementById('verdict').textContent)`, 3000);
+  v = await read();
+  if (!/off/i.test(v.verdict ?? '') || v.status) failures.push(`Angular demo: strict off should clear the verdict and the findings (${JSON.stringify(v)})`);
+
+  // Narrow screen: the validation controls fit.
+  await metrics(400, 800);
+  await visit(ng);
+  await evaluate(`document.getElementById('strict').click()`);
+  await verdictIs('incomplete|conforms|violations');
+  const narrow = await evaluate(`({ sw: document.documentElement.scrollWidth, iw: window.innerWidth })`);
+  if (narrow.sw > narrow.iw) failures.push(`Angular demo @400 with validation on: horizontal overflow (${narrow.sw})`);
+  await shot('demo-angular-400-strict.png');
+  void key;
+}
+
 // Runs inside the page. Returns plain data; the Node side decides pass or fail.
 const PROBE = `(() => {
   const parse = (c) => { const m = /rgba?\\(([^)]+)\\)/.exec(c); if (!m) return null; const p = m[1].split(/[ ,\\/]+/).filter(Boolean).map(Number); return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 }; };
@@ -128,9 +304,10 @@ const PROBE = `(() => {
   };
 })()`;
 
+const DEMO_PATH = /\/demo(-angular)?\/$/;
 const EXPECTED_LABELS = ['Home', 'Demo (Yew)', 'Demo (Angular)', 'Yew docs', 'Angular docs'];
 
-export async function runLayoutCheck({ dist, base, chrome = findChrome(), shotDir }) {
+export async function runLayoutCheck({ dist, base, chrome = findChrome(), shotDir, demos = false }) {
   if (!chrome) throw new Error('no Chrome found; set CHROME');
   dist = path.resolve(dist);
   const files = [];
@@ -141,6 +318,7 @@ export async function runLayoutCheck({ dist, base, chrome = findChrome(), shotDi
   const { server, port } = await serve(dist, base);
   const { cdp, close } = await launch(chrome);
   const failures = [];
+  if (demos) failures.push(...exampleCssFailures(dist));
   let checked = 0;
   try {
     const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank' });
@@ -162,6 +340,15 @@ export async function runLayoutCheck({ dist, base, chrome = findChrome(), shotDi
       await send('Page.navigate', { url: `http://127.0.0.1:${port}${urlPath}` });
       await loaded;
       await new Promise((r) => setTimeout(r, 150));
+      if (demos && DEMO_PATH.test(urlPath)) await waitFor(`!!document.querySelector('.prose-policy')`, 20000);
+    };
+    const waitFor = async (expr, ms = 5000) => {
+      const until = Date.now() + ms;
+      while (Date.now() < until) {
+        if (await evaluate(`!!(${expr})`)) return true;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return false;
     };
     const key = (k, code, vk, text) =>
       send('Input.dispatchKeyEvent', { type: text ? 'keyDown' : 'rawKeyDown', key: k, code, windowsVirtualKeyCode: vk, ...(text ? { text } : {}) }).then(() => send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code, windowsVirtualKeyCode: vk }));
@@ -277,6 +464,8 @@ export async function runLayoutCheck({ dist, base, chrome = findChrome(), shotDi
     if (t !== 'light') failures.push(`theme toggle fails when storage throws (data-theme=${t})`);
     if (errors.length) failures.push(`uncaught errors with storage blocked: ${errors.join('; ')}`);
     await send('Page.removeScriptToEvaluateOnNewDocument', { identifier });
+
+    if (demos) await demoChecks({ send, evaluate, visit, waitFor, key, base, failures, errors, shotDir });
   } finally {
     close();
     server.close();
@@ -287,17 +476,19 @@ export async function runLayoutCheck({ dist, base, chrome = findChrome(), shotDi
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const chrome = findChrome();
   if (!chrome) {
-    console.log('layout check skipped: no Chrome or Chromium found (set CHROME=/path/to/chrome)');
-    process.exit(0);
+    const required = process.env.LAYOUT_REQUIRE_CHROME === '1';
+    console[required ? 'error' : 'log'](`layout check ${required ? 'FAILED' : 'skipped'}: no Chrome or Chromium found (set CHROME=/path/to/chrome)`);
+    process.exit(required ? 2 : 0);
   }
   let [dist, base] = process.argv.slice(2);
+  const real = Boolean(dist);
   if (!dist) {
     const { buildSite } = await import('./helpers.mjs');
     const s = buildSite({ kitchenSink: true });
     dist = s.out;
     base = s.base;
   }
-  const { failures, checked } = await runLayoutCheck({ dist, base: base ?? '/', chrome, shotDir: process.env.SHOT_DIR });
+  const { failures, checked } = await runLayoutCheck({ dist, base: base ?? '/', chrome, shotDir: process.env.SHOT_DIR, demos: real });
   console.log(`layout check: ${checked} page views, ${failures.length} failures`);
   failures.forEach((f) => console.error('  ' + f));
   process.exit(failures.length ? 1 : 0);
