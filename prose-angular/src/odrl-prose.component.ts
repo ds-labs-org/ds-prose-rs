@@ -12,7 +12,7 @@ import {
 } from '@angular/core';
 import { ProseHandle, ProseValidator, type ValidateOptions, type ValidationReport } from '@ds-labs/prose-wasm';
 import { ProfileSummary, parseSummary } from './profile-sync';
-import { createChangeTracker, parseReport, profileTexts, reportChanged, validationOptions } from './validation-sync';
+import { StandaloneReporter, createChangeTracker, parseReport, profileTexts, reportChanged, validationOptions } from './validation-sync';
 import { PROSE_WASM_URL, loadWasm } from './wasm-runtime';
 
 export { PROSE_WASM_URL };
@@ -88,7 +88,7 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
   // The profiles the handle holds now, and the validator built from them for
   // a report the handle is not asked for.
   private appliedProfiles: string[] = [];
-  private validator?: { key: string; value: ProseValidator };
+  private readonly standalone = new StandaloneReporter((profiles, options) => new ProseValidator(profiles, options));
   // Whether the handle validates (it was given options, with the findings shown).
   private handleValidates = false;
   private destroyed = false;
@@ -102,8 +102,7 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
     this.handle?.destroy();
     this.handle?.free();
     this.handle = undefined;
-    this.validator?.value.free();
-    this.validator = undefined;
+    this.standalone.free();
   }
 
   private async sync(): Promise<void> {
@@ -154,12 +153,20 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
       }
       if (mounted) handle.update(json, cls);
       if (options) {
-        try {
-          out.report = this.handleValidates ? handle.report() : this.standaloneValidator(options).validate(json);
-        } catch (error) {
-          out.validationError ??= error;
+        if (this.handleValidates) {
+          try {
+            out.report = handle.report();
+          } catch (error) {
+            out.validationError ??= error;
+          }
+        } else {
+          // Unreadable options keep the previous ones; see StandaloneReporter.
+          const standalone = this.standalone.report(this.appliedProfiles, options, json);
+          out.report = standalone.report;
+          if (standalone.error !== undefined) out.validationError ??= standalone.error;
         }
       } else {
+        this.standalone.clear();
         out.report = null;
       }
       return out;
@@ -168,17 +175,6 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
     for (const summary of outcome.summaries ?? []) this.profileLoaded.emit(summary);
     if (outcome.validationError !== undefined) this.validationError.emit(outcome.validationError);
     if (outcome.report !== undefined) this.publish(parseReport<ValidationReport>(outcome.report));
-  }
-
-  /** A validator for the profiles the handle holds, rebuilt when they or the options change. */
-  private standaloneValidator(options: ValidateOptions): ProseValidator {
-    const key = JSON.stringify([this.appliedProfiles, options]);
-    if (this.validator?.key !== key) {
-      const value = new ProseValidator(this.appliedProfiles, options);
-      this.validator?.value.free();
-      this.validator = { key, value };
-    }
-    return this.validator.value;
   }
 
   private publish(next: ValidationReport | null): void {

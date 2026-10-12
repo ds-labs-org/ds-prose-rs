@@ -65,3 +65,66 @@ export function createChangeTracker<T>(): (value: T | null | undefined) => boole
 export function parseReport<R = unknown>(text: string | null | undefined): R | null {
   return text == null ? null : (JSON.parse(text) as R);
 }
+
+/** What `StandaloneReporter` needs of a `ProseValidator`. */
+export interface ValidatorLike {
+  validate(json: string): string;
+  free(): void;
+}
+
+/**
+ * The report for a policy when the handle is not validating: a validator
+ * rebuilt when the profiles or the options change. When the options cannot be
+ * read, the previous options stay, as the `validationError` output promises:
+ * the report is computed with the last options that worked (or is `null`
+ * when none did), so it follows the policy and is never a stale one.
+ */
+export class StandaloneReporter<V extends ValidatorLike = ValidatorLike> {
+  private cached?: { key: string; value: V };
+  private good: ValidateOptions | null = null;
+
+  private readonly build: (profiles: string[], options: ValidateOptions) => V;
+
+  // No parameter property: the tests run this file with types stripped only.
+  constructor(build: (profiles: string[], options: ValidateOptions) => V) {
+    this.build = build;
+  }
+
+  /** The report text for `json`, and the error when `options` were unreadable. */
+  report(profiles: string[], options: ValidateOptions, json: string): { report: string | null; error?: unknown } {
+    try {
+      const report = this.validator(profiles, options).validate(json);
+      this.good = options;
+      return { report };
+    } catch (error) {
+      if (this.good) {
+        try {
+          return { report: this.validator(profiles, this.good).validate(json), error };
+        } catch {
+          // Not even the previous options work (the profiles changed under them).
+        }
+      }
+      return { report: null, error };
+    }
+  }
+
+  /** Validation is off: no options are "previous" any more. */
+  clear(): void {
+    this.good = null;
+  }
+
+  free(): void {
+    this.cached?.value.free();
+    this.cached = undefined;
+  }
+
+  private validator(profiles: string[], options: ValidateOptions): V {
+    const key = JSON.stringify([profiles, options]);
+    if (this.cached?.key !== key) {
+      const value = this.build(profiles, options);
+      this.cached?.value.free();
+      this.cached = { key, value };
+    }
+    return this.cached.value;
+  }
+}
