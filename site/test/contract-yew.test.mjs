@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { SITE_DIR } from './helpers.mjs';
 import {
-  content, defaultExprs, enumVariants, fnSignature, frontMatterless, macroIdents, sections, source, squash, structFields, tableRows, tick, ticks,
+  content, defaultExprs, emptyTexts, enumVariants, fnSignature, frontMatterless, macroIdents, sections, source, squash, structFields, tableRows, textStruct, tick, ticks,
 } from './contract.mjs';
 
 const interfaceMd = frontMatterless(content('yew/interface.md'));
@@ -26,6 +26,8 @@ const PROBLEMS = source('prose-yew/src/edit/problems.rs');
 const HOOK = source('prose-yew/src/edit/hook.rs');
 const CONFIG = source('prose-yew/src/edit/config.rs');
 const MOD = source('prose-yew/src/edit/mod.rs');
+// text_struct! writes `pub struct Name { pub f: AttrValue }`; the macro body is the source of truth here.
+const structNames = (text, name) => textStruct(text, name).map((f) => f.name);
 
 /** Props tables: | Property | Type | Default | Meaning |. */
 function checkProps(heading, text, struct) {
@@ -79,7 +81,7 @@ test('EditMode, StrictEdit, Reveal and ButtonContent: every variant is named, an
     ['EditMode', MOD, 'Read'], ['StrictEdit', core, 'Flag'], ['Reveal', CONFIG, 'Always'], ['ButtonContent', CONFIG, 'SymbolAndText'],
   ];
   for (const [name, text, def] of cases) {
-    const body = sections(interfaceMd).get(`\`${name}\``) ?? [...SEC.values()].find((v) => v.includes(`\`${name}::`)) ?? '';
+    const body = interfaceMd;
     for (const v of enumVariants(text, name)) assert.ok(body.includes(`\`${name}::${v}\``), `${name}::${v} is not documented`);
     const attr = new RegExp(`#\\[default\\]\\s*${def}\\b`);
     assert.match(text.replace(/\/\/\/[^\n]*/g, ''), attr, `${name}: the code's default is no longer ${def}`);
@@ -113,7 +115,7 @@ test('Labels: every field is listed; a plain-text default equals the code', () =
   const rows = tableRows(sec('Labels'));
   const documented = new Map(rows.map((r) => [tick(col(r, 0)), r]));
   assert.deepEqual([...documented.keys()].sort(), fields.map((f) => f.name).sort(), 'Labels fields');
-  const unescape = (s) => s.replace(/\\u\{([0-9a-f]+)\}/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)));
+  const unescape = (s) => s.replace(/\\"/g, '"').replace(/\\u\{([0-9a-f]+)\}/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)));
   let checked = 0;
   for (const f of fields) {
     const m = /^a\("((?:\\.|[^"\\])*)"\)$/.exec(defaults[f.name] ?? '');
@@ -126,11 +128,16 @@ test('Labels: every field is listed; a plain-text default equals the code', () =
   assert.ok(checked > 60, `only ${checked} defaults checked`);
 });
 
-test('Labels: the nested structs list their fields', () => {
-  const s = sec('Labels');
-  for (const struct of ['Nouns', 'FieldNames', 'Placeholders', 'EmptyTexts']) {
-    for (const f of structFields(CONFIG, struct)) assert.ok(s.includes(`\`${f.name}\``), `${struct}.${f.name} is not listed`);
-  }
+test('Labels: the nested wording table lists every field of Nouns, FieldNames, Placeholders and EmptyTexts with its default', () => {
+  const rows = tableRows(sec('Nested wording'));
+  const want = [];
+  for (const struct of ['Nouns', 'FieldNames', 'Placeholders']) for (const f of textStruct(CONFIG, struct)) want.push([`${struct}.${f.name}`, f.default]);
+  for (const f of emptyTexts(CONFIG, source('prose-core/src/edit/segments.rs'))) want.push([`EmptyTexts.${f.name}`, f.default]);
+  assert.ok(want.length > 40);
+  assert.deepEqual(rows.map((r) => tick(col(r, 0))).sort(), want.map((w) => w[0]).sort());
+  for (const [name, def] of want) assert.equal(tick(col(rows.find((r) => tick(col(r, 0)) === name), 1)), def, name);
+  // Every field is a real pub field of the struct it is listed under.
+  for (const struct of ['Nouns', 'FieldNames', 'Placeholders']) assert.deepEqual(textStruct(CONFIG, struct).map((f) => f.name), structNames(CONFIG, struct));
 });
 
 test('ProseClasses and ProseStyles: the docs list the 46 field names of class_fields!', () => {
@@ -182,4 +189,56 @@ test('BASE_CSS and the default-features claim: the page says the read-only compo
   assert.match(css, /pub const BASE_CSS/);
   const styling = frontMatterless(content('yew/styling.md'));
   assert.match(styling, /OdrlProse` .*emits no `<style>`|emit no `<style>`|emits no `<style>`/);
+});
+
+test('the strict-editor behaviour the validation page describes is the README\'s', () => {
+  const readme = source('README.md');
+  const page = frontMatterless(content('yew/validation.md'));
+  for (const phrase of ['keeps the draft', 'Escape reverts it', 'the draft is given up', 'polite live region']) {
+    assert.ok(readme.replace(/\s+/g, ' ').includes(phrase), `README lacks "${phrase}"`);
+    assert.ok(page.replace(/\s+/g, ' ').includes(phrase), `page lacks "${phrase}"`);
+  }
+});
+
+test('the verdict table is the status() function', () => {
+  const fn = /pub\(crate\) fn status[\s\S]*?\n\}/.exec(source('prose-yew/src/edit/problems.rs'))[0];
+  const arms = [...fn.matchAll(/(Verdict::\w+|_) => \("(prose-[a-z-]+)", l\.(\w+)\.clone\(\)\)/g)].map((m) => [m[1], m[2], m[3]]);
+  assert.equal(arms.length, 3);
+  const rows = tableRows(sections(frontMatterless(content('yew/validation.md'))).get('Findings under the sentences'));
+  for (const [verdict, cls, label] of arms) {
+    const row = rows.find((r) => (verdict === '_' ? r[0] === 'any other verdict' : tick(r[0]) === verdict));
+    assert.ok(row, verdict);
+    assert.equal(tick(row[1]), cls);
+    assert.equal(tick(row[2]), label);
+  }
+});
+
+test('the validation page\'s API sentences match prose-core', () => {
+  const core = source('prose-core/src/validate/mod.rs');
+  for (const sig of ['pub fn advisory() -> Options', 'pub fn strict() -> Options', 'pub fn new(wording: Arc<Wording>, options: Options) -> Validator', 'pub fn validate(&self, doc: &EditDoc) -> Report', 'pub fn validate_json(&self, json: &str) -> Report', 'pub fn structural(mut self, on: bool) -> Options'])
+    assert.ok(squash(core).includes(squash(sig)), sig);
+  assert.match(core, /impl Default for Options \{\s*fn default\(\) -> Options \{\s*Options::advisory\(\)/);
+  assert.match(source('prose-core/Cargo.toml'), /^turtle = /m);
+  const md = frontMatterless(content('yew/validation.md'));
+  for (const v of enumVariants(core, 'Verdict')) assert.ok(md.includes(`\`${v}\``) || md.includes(`Verdict::${v}`), v);
+});
+
+test('the read-only component writes the violations section only for a validator with violations on', () => {
+  const lib = source('prose-yew/src/lib.rs');
+  assert.match(lib, /props\.violations/);
+  assert.match(lib, /use_memo/);
+  const test = source('prose-yew/tests/site_examples.rs');
+  assert.match(test, /violations_need_a_validator_and_the_flag/);
+});
+
+test('the rule kind classes are built at run time from the list name, as the hooks page says', () => {
+  assert.match(source('prose-yew/src/edit/view.rs'), /format!\("prose-\{\}"/);
+  for (const list of ['permission', 'prohibition', 'obligation', 'duty', 'remedy', 'consequence']) assert.match(source('prose-core/src/edit/path.rs'), new RegExp(`"${list}"`));
+});
+
+test('the shadow DOM page claim: the document lookups are in the sources', () => {
+  assert.match(source('prose-yew/src/edit/slot.rs'), /get_element_by_id/);
+  const p = source('prose-yew/src/edit/problems.rs');
+  assert.match(p, /active_element\(\)/);
+  assert.match(p, /closest\(".prose-problems"\)/);
 });

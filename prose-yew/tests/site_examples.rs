@@ -180,6 +180,29 @@ async fn strict_renders_the_view_and_the_problems_panel() {
     assert!(h.contains("prose-edit") && h.contains(r#"<section class="prose-problems"#), "{h}");
 }
 
+async fn read_with(validator: bool, violations: bool) -> String {
+    let wording = Rc::new(Wording::new());
+    let validator = validator.then(|| Validator::new(Arc::new((*wording).clone()), Options::strict()));
+    let props = yew::props!(prose_yew::OdrlProseProps {
+        json: AttrValue::from(POLICY),
+        validator,
+        violations
+    });
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(yew::LocalServerRenderer::<OdrlProse>::with_props(props).render())
+        .await
+}
+
+#[tokio::test]
+async fn violations_need_a_validator_and_the_flag() {
+    let plain = read_with(false, false).await;
+    assert!(!plain.contains("prose-violations"));
+    assert_eq!(read_with(true, false).await, plain, "a validator alone changes nothing");
+    assert_eq!(read_with(false, true).await, plain, "the flag alone changes nothing");
+    assert!(read_with(true, true).await.contains(r#"<section class="prose-violations">"#));
+}
+
 #[test]
 fn base_css_is_scoped_to_the_editor_root() {
     assert!(prose_yew::BASE_CSS.contains(".ds-prose.prose-edit"));

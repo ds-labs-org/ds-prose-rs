@@ -86,7 +86,7 @@ export function defaultExprs(text, name) {
   const clean = stripRustComments(text);
   const at = clean.indexOf(`impl Default for ${name}`);
   if (at < 0) throw new Error(`no Default for ${name}`);
-  const lit = clean.indexOf(`${name} {`, at);
+  const lit = clean.indexOf(`${name} {`, clean.indexOf('fn default', at));
   const body = braced(clean, clean.indexOf('{', lit));
   const out = {};
   for (const part of topLevel(body)) {
@@ -94,6 +94,22 @@ export function defaultExprs(text, name) {
     if (m) out[m[1]] = squash(m[2]);
   }
   return out;
+}
+
+/** Fields and string defaults of `text_struct!( Name { field: "default", ... } )`. */
+export function textStruct(text, name) {
+  const clean = stripRustComments(text);
+  const at = clean.search(new RegExp(`\\n\\s+${name} \\{`));
+  if (at < 0) throw new Error(`no text_struct ${name}`);
+  const body = braced(clean, clean.indexOf('{', at));
+  return topLevel(body).map((p) => /^(\w+)\s*:\s*"((?:\\.|[^"\\])*)"$/.exec(p)).map((m) => ({ name: m[1], default: m[2] }));
+}
+
+/** EmptyTexts field -> its default text, through prose-core's EmptyText::default_text. */
+export function emptyTexts(config, segments) {
+  const lit = defaultExprs(config, 'EmptyTexts');
+  const texts = Object.fromEntries([...stripRustComments(segments).matchAll(/EmptyText::(\w+) => "((?:\\.|[^"\\])*)"/g)].map((m) => [m[1], m[2]]));
+  return Object.entries(lit).map(([name, expr]) => ({ name, default: texts[/EmptyText::(\w+)/.exec(expr)[1]] }));
 }
 
 /** Idents listed in `macro_name!( a, b, ... )`. */
@@ -107,9 +123,17 @@ export function macroIdents(text, macro) {
 /** The signature `pub fn name(...) -> T` as compact text. */
 export function fnSignature(text, name) {
   const clean = stripRustComments(text);
-  const m = new RegExp(`pub fn ${name}\\s*(?:<[^>]*>)?\\(([\\s\\S]*?)\\)\\s*->\\s*([\\w<>:, ]+?)\\s*\\{`).exec(clean);
-  if (!m) throw new Error(`no fn ${name}`);
-  return squash(`pub fn ${name}(${m[1]}) -> ${m[2]}`);
+  const at = clean.search(new RegExp(`pub fn ${name}\\b`));
+  if (at < 0) throw new Error(`no fn ${name}`);
+  let i = clean.indexOf('(', at);
+  const open = i;
+  for (let depth = 0; i < clean.length; i++) {
+    if (clean[i] === '(') depth++;
+    else if (clean[i] === ')' && --depth === 0) break;
+  }
+  const args = clean.slice(open + 1, i);
+  const ret = /^\s*->\s*([^{]+?)\s*\{/.exec(clean.slice(i + 1))[1];
+  return squash(`pub fn ${name}(${args}) -> ${ret}`);
 }
 
 /** Every string literal in a Rust file, as raw text. */
