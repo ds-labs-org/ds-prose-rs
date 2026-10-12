@@ -539,6 +539,10 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
     *last_raw.borrow_mut() = slot.raw.clone();
     let query = use_state(String::new);
     let open = use_state(|| false);
+    // The list was asked for (Alt+ArrowDown) or kept after a rejection, not
+    // narrowed by typing: a closed slot then lists what it takes even when
+    // the text matches none of it.
+    let browse = use_state(|| false);
     let active = use_state(|| 0usize);
     // A closed slot: why the text typed into it was not taken (it is still
     // there, to correct), and what a polite live region says about a draft
@@ -579,10 +583,11 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         _ => (&options, cfg.max_suggestions),
     };
     let shown: Vec<Suggestion> = if *open {
-        filter_suggestions(source, &query, most)
-            .into_iter()
-            .cloned()
-            .collect()
+        let mut found = filter_suggestions(source, &query, most);
+        if found.is_empty() && *browse && closed.is_some() {
+            found = filter_suggestions(source, "", most);
+        }
+        found.into_iter().cloned().collect()
     } else {
         vec![]
     };
@@ -615,6 +620,7 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         let invalid = invalid.clone();
         let announce = announce.clone();
         let open = open.clone();
+        let browse = browse.clone();
         Callback::from(move |how: How| {
             if !*dirty.borrow() {
                 return;
@@ -676,6 +682,7 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                             )
                             .into(),
                         ));
+                        browse.set(true);
                         open.set(use_suggestions);
                         return;
                     }
@@ -745,8 +752,12 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         let open = open.clone();
         let active = active.clone();
         let invalid = invalid.clone();
+        let browse = browse.clone();
         Callback::from(move |e: InputEvent| {
             *dirty.borrow_mut() = true;
+            if *browse {
+                browse.set(false);
+            }
             *navigated.borrow_mut() = false;
             if invalid.is_some() {
                 invalid.set(None);
@@ -777,6 +788,7 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         let shown = shown.clone();
         let navigated = navigated.clone();
         let invalid = invalid.clone();
+        let browse = browse.clone();
         let rejected = invalid.is_some();
         Callback::from(move |e: KeyboardEvent| {
             // keyCode 229: Safari sends the Enter that confirms an IME
@@ -838,6 +850,7 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                     query.set(clean_text(&text));
                     active.set(0);
                     *navigated.borrow_mut() = false;
+                    browse.set(true);
                     open.set(true);
                 }
                 _ => {}
@@ -885,6 +898,7 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         let open = open.clone();
         let active = active.clone();
         let node_ref = node_ref.clone();
+        let browse = browse.clone();
         Callback::from(move |e: Event| {
             e.prevent_default();
             let Some(text) = e
@@ -904,6 +918,7 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                 // the suggestions from what the slot now holds, or the next
                 // Enter would act on a list for the old text.
                 if use_suggestions {
+                    browse.set(false);
                     query.set(clean_text(&el.text_content().unwrap_or_default()));
                     active.set(0);
                     *RefCell::borrow_mut(&navigated) = false;
