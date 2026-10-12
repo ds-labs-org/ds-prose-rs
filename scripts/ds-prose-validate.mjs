@@ -207,9 +207,21 @@ async function loadEngine() {
   };
 }
 
+// Strict UTF-8, as JSON requires: bytes that are not UTF-8 are an error, not
+// U+FFFD in a policy that is then certified. A leading byte order mark is
+// dropped (the decoder's default), as JSON parsers are allowed to.
+const utf8 = new TextDecoder('utf-8', { fatal: true });
+const decode = (bytes) => {
+  try {
+    return utf8.decode(bytes);
+  } catch {
+    throw new Error('not valid UTF-8');
+  }
+};
+
 const defaultIo = () => ({
-  readFile: (p) => readFileSync(p, 'utf8'),
-  readStdin: () => readFileSync(0, 'utf8'),
+  readFile: (p) => decode(readFileSync(p)),
+  readStdin: () => decode(readFileSync(0)),
   stdout: (s) => process.stdout.write(s),
   stderr: (s) => process.stderr.write(s),
   engine: loadEngine,
