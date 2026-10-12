@@ -1190,3 +1190,20 @@ fn admissible_values_agrees_with_admissible_per_value() {
     let all = advisory.admissible_values(&base(), &sp(ACTION), &["foo:bar", "use"]);
     assert!(all.iter().all(Result::is_ok));
 }
+
+/// R2: the finding a document already has on the slot is not an answer for
+/// the values asked about, and one value's finding is not another's.
+#[test]
+fn admissible_values_ignores_what_the_slot_already_violates() {
+    let v = strict_gate(closed());
+    let base = base();
+    let doc = plain(&base, &text(&base, ACTION, "foo:bar")).unwrap();
+    assert_eq!(v.validate(&doc).verdict, Verdict::Violations);
+    let got = v.admissible_values(&doc, &sp(ACTION), &["use", "foo:bar", "ex:train", "use"]);
+    let ok: Vec<bool> = got.iter().map(Result::is_ok).collect();
+    assert_eq!(ok, [true, false, true, true]);
+    for (value, got) in ["use", "foo:bar", "ex:train", "use"].iter().zip(&got) {
+        let one = v.admissible(&doc, &text(&doc, ACTION, value));
+        assert_eq!(got.is_ok(), one.is_ok(), "{value}");
+    }
+}

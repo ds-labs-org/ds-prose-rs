@@ -2372,6 +2372,35 @@ async fn ux3_a_render_of_the_panel_does_not_steal_the_focus() {
     );
 }
 
+/// UX-3: the heading takes the focus only when it fell to the page. A focus
+/// that went to another control while the fix was applied stays there.
+#[wasm_bindgen_test]
+async fn ux3_a_focus_that_moved_elsewhere_is_left_alone_after_a_fix() {
+    let log = Log::default();
+    let (c, _h) = mount_strict(strict_props(
+        &undeclared_policy(),
+        &log,
+        true,
+        StrictEdit::Flag,
+    ))
+    .await;
+    let fix = q(&c, ".prose-problems .prose-problem-fix")
+        .dyn_into::<HtmlElement>()
+        .unwrap();
+    fix.focus().unwrap();
+    fix.click();
+    let el = slot(&c, ACTION);
+    el.focus().unwrap();
+    settle().await;
+    assert_eq!(state_attr(&c, "data-verdict"), "Conforms");
+    assert!(
+        document()
+            .active_element()
+            .is_some_and(|a| a == *el.as_ref()),
+        "the panel took a focus that was not its own"
+    );
+}
+
 /// UX-4: a closed list is taller than its box; moving the highlight with the
 /// arrow keys keeps the active option in view, in both directions.
 #[wasm_bindgen_test]
