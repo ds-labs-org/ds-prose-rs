@@ -119,3 +119,13 @@ test('the footer keeps the full column width inside the flex body', () => {
 test('the last table column (descriptions) keeps a readable width before the table scrolls', () => {
   assert.match(CSS, /\.table-scroll td:last-child\s*\{[^}]*min-width:\s*16rem/);
 });
+
+test('focused elements are not hidden under the sticky header', () => {
+  assert.match(CSS, /html\s*\{[^}]*scroll-padding-top:\s*calc\(var\(--nav-h\)/);
+});
+
+test('every interactive control has a visible keyboard focus state of its own or the shared one', () => {
+  // The shared :focus-visible rule must not be overridden per control.
+  assert.doesNotMatch(CSS, /:focus(?!-visible)[^{]*\{[^}]*outline/);
+  assert.doesNotMatch(CSS, /outline-color:\s*transparent/);
+});
