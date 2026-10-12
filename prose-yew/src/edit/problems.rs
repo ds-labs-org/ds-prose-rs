@@ -66,9 +66,47 @@ pub fn prose_problems(props: &ProseProblemsProps) -> Html {
     }
     let counts = report.counts();
     let status = status(report, labels);
+    // A fix removes the finding, and with it the button that has the focus:
+    // the browser would send the focus to the page. The button that was
+    // pressed is kept until the panel has rendered the new report; if it is
+    // gone and the focus fell, the heading takes it.
+    let heading = use_node_ref();
+    let pressed = use_mut_ref(|| None::<web_sys::Element>);
+    {
+        let heading = heading.clone();
+        let pressed = pressed.clone();
+        use_effect(move || {
+            let gone = pressed
+                .borrow()
+                .as_ref()
+                .is_some_and(|button| !button.is_connected());
+            if gone {
+                pressed.borrow_mut().take();
+                let fell = web_sys::window()
+                    .and_then(|w| w.document())
+                    .and_then(|d| d.active_element())
+                    .is_none_or(|a| a.tag_name() == "BODY");
+                if fell && let Some(h) = heading.cast::<web_sys::HtmlElement>() {
+                    let _ = h.set_attribute("tabindex", "-1");
+                    let _ = h.focus();
+                }
+            }
+            || ()
+        });
+    }
+    let onfix = {
+        let onfix = onfix.clone();
+        let pressed = pressed.clone();
+        Callback::from(
+            move |(events, button): (Vec<EditEvent>, Option<web_sys::Element>)| {
+                *pressed.borrow_mut() = button;
+                onfix.emit(events);
+            },
+        )
+    };
     html! {
         <section class={classes!("prose-problems", class.clone())}>
-            <h3 class="prose-problems-heading">{ labels.problems_heading.clone() }</h3>
+            <h3 class="prose-problems-heading" ref={heading}>{ labels.problems_heading.clone() }</h3>
             if let Some((kind, text)) = status {
                 <p class={classes!("prose-problems-status", kind)} role="status">{ text }</p>
             }
@@ -85,7 +123,7 @@ pub fn prose_problems(props: &ProseProblemsProps) -> Html {
                         <li class="prose-problem-group">
                             <h4><code>{ rule.as_str() }</code>{ " " }{ rule.info().title }</h4>
                             <ol class="prose-problem-list">
-                                { for list.iter().map(|f| problem(f, labels, onjump, onfix)) }
+                                { for list.iter().map(|f| problem(f, labels, onjump, &onfix)) }
                             </ol>
                         </li>
                     }) }
@@ -99,7 +137,7 @@ fn problem(
     f: &Finding,
     labels: &Labels,
     onjump: &Callback<IssueTarget>,
-    onfix: &Callback<Vec<EditEvent>>,
+    onfix: &Callback<(Vec<EditEvent>, Option<web_sys::Element>)>,
 ) -> Html {
     let go = {
         let target = f.target.clone();
@@ -120,7 +158,15 @@ fn problem(
             { for f.fixes.iter().map(|fix| {
                 let events = fix.events.clone();
                 let onfix = onfix.clone();
-                let click = Callback::from(move |_: MouseEvent| onfix.emit(events.clone()));
+                let click = Callback::from(move |_: MouseEvent| {
+                    // The button that has the focus, if it is in a panel: it is
+                    // the one to go.
+                    let button = web_sys::window()
+                        .and_then(|w| w.document())
+                        .and_then(|d| d.active_element())
+                        .filter(|a| a.closest(".prose-problems").ok().flatten().is_some());
+                    onfix.emit((events.clone(), button));
+                });
                 html! {
                     <>
                         { " " }
