@@ -467,3 +467,33 @@ fn each_inheritance_reading_rule_honours_inheritance_when_on_alone() {
         assert_eq!(r.verdict, Verdict::Incomplete, "{rule}: {:?}", r.findings);
     }
 }
+
+/// ODRL22.ttl defines hasPart, isA and isPartOf as "a set-based operator", and
+/// IM 2.5.1 allows a list of right operands for set-based operators.
+#[test]
+fn the_vocabulary_set_operators_take_several_values() {
+    for op in ["isA", "hasPart", "isPartOf", "isAllOf"] {
+        let text = policy(json!({
+            "@type": "Set", "uid": "urn:policy:s",
+            "permission": [{"target": "urn:asset:1", "action": "use",
+                "constraint": [{"leftOperand": "spatial", "operator": op,
+                                "rightOperand": [{"@id": "urn:region:eu"}, {"@id": "urn:region:ch"}]}]}]
+        }));
+        let r = validate_json(&text, &Wording::new(), &structural());
+        assert!(r.conforms(), "{op}: {:?}", r.findings);
+    }
+}
+
+#[test]
+fn the_comparison_operators_still_take_one_value() {
+    for op in ["eq", "neq", "gt", "gteq", "lt", "lteq"] {
+        let text = policy(json!({
+            "@type": "Set", "uid": "urn:policy:s",
+            "permission": [{"target": "urn:asset:1", "action": "use",
+                "constraint": [{"leftOperand": "spatial", "operator": op,
+                                "rightOperand": ["a", "b"]}]}]
+        }));
+        let r = validate_json(&text, &Wording::new(), &structural());
+        assert!(!r.conforms(), "{op}");
+    }
+}
