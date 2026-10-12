@@ -103,3 +103,7 @@ test('site.js wires the three behaviours the shell promises', () => {
   assert.match(JS, /Escape/);
   assert.match(JS, /ds-prose-theme/);
 });
+
+test('code in table cells is not broken mid-identifier; the table scrolls instead', () => {
+  assert.match(CSS, /\.table-scroll code\s*\{[^}]*white-space:\s*nowrap/);
+});
