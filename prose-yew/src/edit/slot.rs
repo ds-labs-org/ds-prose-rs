@@ -931,6 +931,20 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         });
     }
 
+    // The highlight moves with the arrow keys through a list taller than its
+    // box: keep it where it can be seen.
+    {
+        let list_id = list_id.clone();
+        use_effect_with(
+            (list_open, active_idx, shown.len()),
+            move |(open, idx, _)| {
+                if *open {
+                    keep_in_view(&list_id, *idx);
+                }
+            },
+        );
+    }
+
     let mut class = cls!(cfg, slot, "prose-slot");
     // Inline styles are layered in the same order as the classes, so a
     // host's state style comes after (and beats) its plain `slot` style.
@@ -1134,6 +1148,29 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                 </ul>
             }
         </span>
+    }
+}
+
+/// Scroll the list `list_id` so that its option `index` is inside it. Only
+/// the list scrolls, never the page.
+fn keep_in_view(list_id: &str, index: usize) {
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let (Some(list), Some(option)) = (
+        document.get_element_by_id(list_id),
+        document.get_element_by_id(&format!("{list_id}-{index}")),
+    ) else {
+        return;
+    };
+    let (l, o) = (
+        list.get_bounding_client_rect(),
+        option.get_bounding_client_rect(),
+    );
+    if o.top() < l.top() {
+        list.set_scroll_top(list.scroll_top() - (l.top() - o.top()).ceil() as i32);
+    } else if o.bottom() > l.bottom() {
+        list.set_scroll_top(list.scroll_top() + (o.bottom() - l.bottom()).ceil() as i32);
     }
 }
 
