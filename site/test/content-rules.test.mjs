@@ -115,3 +115,7 @@ test('a narrow screen scrolls a wide table instead of squeezing its columns', ()
 test('the footer keeps the full column width inside the flex body', () => {
   assert.match(CSS, /\.site-footer\s*\{[^}]*width:\s*100%/);
 });
+
+test('the last table column (descriptions) keeps a readable width before the table scrolls', () => {
+  assert.match(CSS, /\.table-scroll td:last-child\s*\{[^}]*min-width:\s*16rem/);
+});
