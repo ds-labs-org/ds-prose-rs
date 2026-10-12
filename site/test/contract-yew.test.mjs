@@ -246,7 +246,7 @@ test('the shadow DOM page claim: the document lookups are in the sources', () =>
 test('server rendering: the docs say BASE_CSS arrives intact, as the pinned Yew does, and no text still says it is escaped', () => {
   const rust = source('prose-yew/tests/site_examples.rs');
   assert.match(rust, /async fn the_server_renderer_keeps_the_text_of_the_style_element/);
-  assert.match(rust, /assert_eq!\(style, prose_yew::BASE_CSS/);
+  assert.match(rust, /assert_eq!\(\s*style,\s*prose_yew::BASE_CSS/);
   assert.match(source('prose-yew/Cargo.toml'), /^yew = \{ version = "0\.23"/m);
   const styling = frontMatterless(content('yew/styling.md'));
   assert.match(styling, /server renderer writes the text of `<style>` unescaped/);
