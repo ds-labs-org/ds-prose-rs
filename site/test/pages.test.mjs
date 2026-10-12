@@ -43,9 +43,8 @@ for (const p of pages) {
 
   test(`landmarks are labelled and the theme script runs before the stylesheet: ${p.url}`, () => {
     assert.match(p.html, /<nav class="topnav" aria-label="Primary">/);
-    const init = p.html.indexOf('data-theme');
     const css = p.html.indexOf('assets/site.css');
-    assert.ok(init > 0 && css > 0 && init < css || p.html.indexOf('<script>') < css, 'theme init precedes the stylesheet');
+    assert.ok(css > 0 && p.html.indexOf("setAttribute('data-theme'") > 0);
     assert.ok(p.html.indexOf('<script>') < css, 'inline theme script precedes the stylesheet link');
   });
 
