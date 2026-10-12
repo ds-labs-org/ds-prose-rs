@@ -223,7 +223,8 @@ jobs:
       # The generator, the contract tests that tie the docs to the sources, and
       # the browser tests of the stylesheet switch and the smoke script.
       - name: Site tests
-        run: node --test "site/test/*.test.mjs"
+        timeout-minutes: 10
+        run: node --test --test-reporter=spec --test-timeout=240000 "site/test/*.test.mjs"
 
       - name: Assemble the site
         run: node site/build.mjs
