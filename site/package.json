@@ -1,0 +1,12 @@
+{
+  "name": "ds-prose-rs-site",
+  "private": true,
+  "type": "module",
+  "description": "Static site generator and tests for the ds-prose-rs Pages site. No dependencies.",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test \"test/*.test.mjs\"",
+    "layout": "node test/layout-check.mjs"
+  }
+}
