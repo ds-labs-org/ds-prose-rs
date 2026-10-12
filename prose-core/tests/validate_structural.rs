@@ -497,3 +497,72 @@ fn the_comparison_operators_still_take_one_value() {
         assert!(!r.conforms(), "{op}");
     }
 }
+
+/// The audit repro for S6, verbatim, and the same constraint with the
+/// operator written as a compact `odrl:` IRI and as a full IRI.
+#[test]
+fn is_part_of_a_list_of_regions_conforms_however_the_operator_is_written() {
+    for op in [
+        "isPartOf",
+        "odrl:isPartOf",
+        "http://www.w3.org/ns/odrl/2/isPartOf",
+    ] {
+        let text = json!({
+            "@context": "http://www.w3.org/ns/odrl.jsonld",
+            "@type": "Set", "uid": "urn:p",
+            "permission": [{"target": "urn:a", "action": "use",
+                "constraint": [{"leftOperand": "spatial", "operator": op,
+                                "rightOperand": [{"@id": "http://example.com/EU"},
+                                                 {"@id": "http://example.com/EFTA"}]}]}]
+        })
+        .to_string();
+        let r = validate_json(&text, &Wording::new(), &structural());
+        assert!(r.conforms(), "{op}: {:?}", r.findings);
+    }
+}
+
+/// Each comparison operator is refused a list by this rule itself, not by
+/// some other finding that happens to make the policy fail.
+#[test]
+fn each_comparison_operator_with_a_list_is_a_set_operator_cardinality_error() {
+    for op in ["eq", "neq", "gt", "gteq", "lt", "lteq", "odrl:lteq"] {
+        let text = policy(json!({
+            "@type": "Set", "uid": "urn:policy:s",
+            "permission": [{"target": "urn:asset:1", "action": "use",
+                "constraint": [{"leftOperand": "dateTime", "operator": op,
+                                "rightOperand": ["2026-01-01", "2027-01-01"]}]}]
+        }));
+        let r = validate_json(&text, &Wording::new(), &structural());
+        assert_eq!(
+            odrl_findings(&r),
+            pairs(&[(
+                "odrl.set-operator-cardinality",
+                "policy[0].permission[0].constraint[0]"
+            )]),
+            "{op}"
+        );
+    }
+}
+
+/// An operator outside the ODRL vocabulary is not judged by this rule, even
+/// when its local name matches an ODRL comparison: whether a profile's
+/// operator is set-based is the profile's to say.
+#[test]
+fn a_profile_operator_with_a_list_is_not_a_set_operator_cardinality_error() {
+    let text = policy(json!({
+        "@context": ["http://www.w3.org/ns/odrl.jsonld",
+                     {"ex": "https://example.org/odrl/profile/ops#"}],
+        "@type": "Set", "uid": "urn:policy:s",
+        "permission": [{"target": "urn:asset:1", "action": "use",
+            "constraint": [{"leftOperand": "spatial", "operator": "ex:lt",
+                            "rightOperand": [{"@id": "urn:region:eu"}, {"@id": "urn:region:ch"}]}]}]
+    }));
+    let r = validate_json(&text, &Wording::new(), &structural());
+    assert!(
+        !r.findings
+            .iter()
+            .any(|f| f.rule == RuleId::OdrlSetOperatorCardinality),
+        "{:?}",
+        r.findings
+    );
+}
