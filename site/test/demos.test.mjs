@@ -65,13 +65,35 @@ test('Angular demo: the research profile is an asset, copied from the test profi
   assert.ok(fs.existsSync(path.join(REPO, 'prose-core/tests/profiles/research.jsonld')));
 });
 
+// A demo rule restyles the library's output when the thing it styles (its last
+// class) is a library class the example sheets also style, and nothing in the
+// selector says it is the demo's own element (a class that is not prose-*, or an id).
+const isLibraryClass = (c) => /^(ds-)?prose(-|$)/.test(c);
+const classesIn = (sel) => [...sel.matchAll(/\.([\w-]+)/g)].map((m) => m[1]);
+export function restyled(selectors, exampleSelectors) {
+  const taken = new Set(exampleSelectors.flatMap(classesIn).filter(isLibraryClass));
+  return selectors.filter((sel) => {
+    const classes = classesIn(sel);
+    const last = classes.at(-1);
+    const ownElement = /#[\w-]/.test(sel.replace(/\[[^\]]*\]/g, '')) || classes.some((c) => !isLibraryClass(c));
+    return last !== undefined && taken.has(last) && !ownElement;
+  });
+}
+
+test('restyled: finds a repeated library rule, leaves the demo\'s own elements and unknown library classes', () => {
+  const ex = ['.ds-prose .prose-rule-sentence', '.ds-prose .prose-glossary dt', ':root .ds-prose.prose-edit .prose-slot'];
+  assert.deepEqual(restyled(['.prose-rule-sentence', '.prose-glossary dt', '.ds-prose.prose-edit .prose-slot'], ex), ['.prose-rule-sentence', '.prose-glossary dt', '.ds-prose.prose-edit .prose-slot']);
+  assert.deepEqual(restyled(['.conformance.prose-rule-sentence', '#problems .prose-rule-sentence', '.ds-prose.prose-edit .prose-toolbar', '.columns', 'body'], ex), []);
+});
+
 test('the demos do not restyle what the example stylesheets style', () => {
-  const taken = new Set([...selectorsOf(content('examples/prose.css')), ...selectorsOf(content('examples/prose-editor.css'))]);
-  assert.ok(taken.size > 40, 'the example selectors were not read');
+  const exampleSelectors = [...selectorsOf(content('examples/prose.css')), ...selectorsOf(content('examples/prose-editor.css'))];
+  assert.ok(exampleSelectors.length > 40, 'the example selectors were not read');
   for (const f of ['demo/styles.css', 'demo-angular/src/styles.css']) {
     const own = selectorsOf(source(f));
     assert.ok(own.length > 3, `${f}: no selectors read`);
-    assert.deepEqual(own.filter((s) => taken.has(s)), [], `${f} repeats rules of the example stylesheets`);
+    assert.deepEqual(restyled(own, exampleSelectors), [], `${f} repeats rules of the example stylesheets`);
+    assert.ok(!own.includes(':root'), `${f}: the page scheme is the example sheet's and the site's`);
   }
 });
 
