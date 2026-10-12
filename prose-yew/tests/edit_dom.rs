@@ -2108,3 +2108,36 @@ async fn giving_up_a_rejected_draft_on_blur_takes_the_message_away() {
     assert_eq!(slot(&c, ACTION).get_attribute("aria-invalid"), None);
     assert_eq!(slot(&c, ACTION).text_content().as_deref(), Some("use"));
 }
+
+/// UX-6: a refusal belongs to the gate that made it. Turning strict off
+/// drops it, with the mark on the slot.
+#[wasm_bindgen_test]
+async fn a_refusal_does_not_outlive_a_change_of_strictness() {
+    let log = Log::default();
+    let mut props = strict_props(STRICT_POLICY, &log, true, StrictEdit::RefuseTerms);
+    props.inject = vec![text_event(
+        STRICT_POLICY,
+        "policy[0].permission[0].action[0]",
+        "name",
+        "foo:bar",
+    )];
+    let (c, _h) = mount_strict(props).await;
+    (q(&c, "#inject-0").dyn_into::<HtmlElement>().unwrap()).click();
+    settle().await;
+    assert_eq!(state_attr(&c, "data-refused"), "true");
+    assert_eq!(
+        slot(&c, ACTION).get_attribute("aria-invalid").as_deref(),
+        Some("true")
+    );
+    (q(&c, "#toggle").dyn_into::<HtmlElement>().unwrap()).click();
+    settle().await;
+    assert_eq!(state_attr(&c, "data-refused"), "false");
+    assert_eq!(slot(&c, ACTION).get_attribute("aria-invalid"), None);
+    // And a refusal made now is kept as before (the effect does not eat it
+    // while nothing about the gate changes).
+    (q(&c, "#toggle").dyn_into::<HtmlElement>().unwrap()).click();
+    settle().await;
+    (q(&c, "#inject-0").dyn_into::<HtmlElement>().unwrap()).click();
+    settle().await;
+    assert_eq!(state_attr(&c, "data-refused"), "true");
+}
