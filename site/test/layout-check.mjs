@@ -99,7 +99,10 @@ async function launch(chrome) {
   const close = () => {
     try { ws.close(); } catch { /* already closed */ }
     proc.kill('SIGKILL');
-    fs.rmSync(profile, { recursive: true, force: true });
+    proc.unref();
+    // Chrome's helper processes may still be writing into the profile for a
+    // moment; a profile that cannot be removed is not a failed check.
+    try { fs.rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* temp dir, cleaned by the OS */ }
   };
   return { cdp, close };
 }
