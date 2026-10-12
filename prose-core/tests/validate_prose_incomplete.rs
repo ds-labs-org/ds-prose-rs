@@ -154,3 +154,80 @@ fn advisory_is_unchanged_by_an_unread_context() {
         rules(&r)
     );
 }
+
+fn findings_of(r: &Report, rule: &str) -> Vec<Severity> {
+    r.findings
+        .iter()
+        .filter(|f| f.rule.to_string() == rule)
+        .map(|f| f.severity)
+        .collect()
+}
+
+#[test]
+fn a_string_naming_an_allowed_value_is_still_iri_expected() {
+    // Whatever the missing profile adds, an allowed value written as a
+    // plain string is not that IRI.
+    let text = local(
+        json!([RESEARCH, EXT]),
+        json!({"leftOperand": "ex:researchPurpose", "operator": "eq",
+               "rightOperand": "ex:academic"}),
+    );
+    let r = run(&text);
+    assert_eq!(prose_errors(&r), ["prose.iri-expected"], "{:?}", rules(&r));
+    assert_eq!(r.verdict, Verdict::Violations);
+}
+
+#[test]
+fn an_open_operand_keeps_its_suggestions_under_an_unread_context() {
+    // Only a closed operand's hints wait for the context; an open one's
+    // are suggestions, never errors, and are still made.
+    let text = policy(
+        json!(["http://www.w3.org/ns/odrl.jsonld", REMOTE]),
+        json!(RESEARCH),
+        json!({"leftOperand": "ex:retentionPeriod", "operator": "gt",
+               "rightOperand": {"@value": "P1Y", "@type": "xsd:duration"}}),
+    );
+    let r = run(&text);
+    assert_eq!(
+        findings_of(&r, "prose.operator-not-allowed"),
+        [Severity::Info],
+        "{:?}",
+        rules(&r)
+    );
+    assert_eq!(r.verdict, Verdict::Incomplete);
+}
+
+#[test]
+fn an_open_operand_keeps_its_value_suggestion_under_a_missing_profile() {
+    // research.jsonld leaves ex:researchPurpose open.
+    let text = local(
+        json!([RESEARCH, EXT]),
+        json!({"leftOperand": "ex:researchPurpose", "operator": "eq",
+               "rightOperand": {"@id": "ex:whatever"}}),
+    );
+    let r = validate_json(&text, &wording_of(&["research.jsonld"]), &Options::strict());
+    assert_eq!(
+        findings_of(&r, "prose.value-not-allowed"),
+        [Severity::Info],
+        "{:?}",
+        rules(&r)
+    );
+}
+
+#[test]
+fn advisory_levels_set_by_hand_are_unchanged_by_a_missing_profile() {
+    // The wait is strict mode's; advisory reports what it was asked to.
+    let text = local(
+        json!([RESEARCH, EXT]),
+        json!({"leftOperand": "ex:researchPurpose", "operator": "eq",
+               "rightOperand": {"@id": "b:clinicalTrial"}}),
+    );
+    let o = Options::advisory().level(RuleId::ProseValueNotAllowed, Level::Error);
+    let r = validate_json(&text, &closed(), &o);
+    assert_eq!(
+        findings_of(&r, "prose.value-not-allowed"),
+        [Severity::Error],
+        "{:?}",
+        rules(&r)
+    );
+}
