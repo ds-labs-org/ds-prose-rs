@@ -66,10 +66,11 @@ function inline(src) {
 }
 
 function plainText(src) {
+  // Emphasis marks go; the text of inline code stays as written.
   return src
-    .replace(/`+([^`]+)`+/g, '$1')
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    .replace(/[*_]/g, '')
+    .split(/(`+[^`]+`+)/)
+    .map((part, i) => (i % 2 ? part.replace(/^`+|`+$/g, '') : part.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/[*_]/g, '')))
+    .join('')
     .trim();
 }
 
