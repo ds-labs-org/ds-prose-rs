@@ -17,7 +17,7 @@ use prose_core::edit::{
     Severity, Slot, SlotKind, SlotPath, left_operand_at,
 };
 use prose_core::profile::{Term, TermKind};
-use prose_core::validate::{Mode, Validator};
+use prose_core::validate::{Level, Mode, RuleId, Validator};
 use prose_core::wording;
 
 use super::closed;
@@ -210,8 +210,15 @@ fn closure(env: &Env, slot: &Slot) -> Option<Closure> {
         SlotKind::Literal
             if env.cfg.suggestions && matches!(slot.path.field, Field::RightOperand(_)) =>
         {
-            let closed_values = left_operand_term(env, slot)
-                .is_some_and(|t| t.hints.closed && !t.hints.value_tree.is_empty());
+            // Closed as far as the validator makes a value outside the list
+            // an error: switched off, pinned out or lowered, it takes it.
+            let binding = matches!(
+                v.options().level_of(RuleId::ProseValueNotAllowed, true),
+                Level::Error
+            );
+            let closed_values = binding
+                && left_operand_term(env, slot)
+                    .is_some_and(|t| t.hints.closed && !t.hints.value_tree.is_empty());
             closed_values.then_some(Closure::Values)
         }
         _ => None,
