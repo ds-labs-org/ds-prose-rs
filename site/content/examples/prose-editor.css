@@ -1,0 +1,123 @@
+/* ds-prose-rs: example overrides for the editor (Yew only), light and dark.
+   Load it after prose.css, which defines the --ds-* tokens used here.
+   Keep EditConfig::base_css on: this file only recolours.
+   BASE_CSS is a <style> inside the article, after every stylesheet in <head>,
+   and all of its selectors start with .ds-prose.prose-edit. The :root prefix
+   below adds one point of specificity so these rules win. */
+
+:root .ds-prose.prose-edit .prose-slot {
+  border-bottom-color: var(--ds-muted);
+  background: color-mix(in srgb, var(--ds-accent) 8%, transparent);
+  border-radius: 3px;
+}
+:root .ds-prose.prose-edit .prose-slot:focus,
+:root .ds-prose.prose-edit .prose-select:focus,
+:root .ds-prose.prose-edit button:focus-visible {
+  outline-color: var(--ds-focus);
+}
+:root .ds-prose.prose-edit .prose-slot-invalid,
+:root .ds-prose.prose-edit .prose-slot[aria-invalid="true"] {
+  border-bottom-color: var(--prose-error);
+}
+:root .ds-prose.prose-edit .prose-slot-warning {
+  border-bottom-color: var(--prose-warning);
+}
+:root .ds-prose.prose-edit .prose-select,
+:root .ds-prose.prose-edit .prose-add,
+:root .ds-prose.prose-edit .prose-remove,
+:root .ds-prose.prose-edit .prose-reorder,
+:root .ds-prose.prose-edit .prose-wrap {
+  color: var(--ds-fg);
+  background: var(--ds-surface);
+  border: 1px solid var(--ds-border);
+  border-radius: 4px;
+}
+:root .ds-prose.prose-edit .prose-locked {
+  border-color: var(--ds-border);
+  background: var(--ds-surface);
+}
+:root .ds-prose.prose-edit .prose-slot-note {
+  color: var(--ds-warn);
+}
+:root .ds-prose.prose-edit .prose-slot-message {
+  background: var(--ds-bg);
+  color: var(--prose-error);
+  border-color: var(--prose-error);
+}
+
+/* Suggestion listbox */
+:root .ds-prose.prose-edit .prose-suggestions {
+  background: var(--ds-bg);
+  color: var(--ds-fg);
+  border-color: var(--ds-border);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.2);
+}
+:root .ds-prose.prose-edit .prose-suggestion-active,
+:root .ds-prose.prose-edit .prose-suggestion:hover {
+  background: var(--ds-selected-bg);
+  color: var(--ds-selected-fg);
+}
+:root .ds-prose.prose-edit .prose-suggestion-group-label {
+  color: var(--ds-muted);
+}
+
+/* Issues shown at their slot */
+:root .ds-prose.prose-edit .prose-issue-error {
+  color: var(--prose-error);
+}
+:root .ds-prose.prose-edit .prose-issue-warning {
+  color: var(--prose-warning);
+}
+:root .ds-prose.prose-edit .prose-issue-info {
+  color: var(--ds-muted);
+}
+
+/* Problems panel. It is usually placed next to the view, outside .ds-prose,
+   so these rules are not scoped under .ds-prose. */
+.prose-problems {
+  color: var(--ds-fg);
+  font-size: 0.9rem;
+}
+.prose-problems-counts {
+  color: var(--ds-muted);
+}
+.prose-problem-groups,
+.prose-problem-list {
+  padding-left: 1.25rem;
+}
+.prose-problem {
+  margin: 0 0 0.4rem;
+}
+.prose-problem-error .prose-problem-message {
+  color: var(--ds-deny);
+}
+.prose-problem-warning .prose-problem-message {
+  color: var(--ds-warn);
+}
+.prose-problem-info .prose-problem-message {
+  color: var(--ds-muted);
+}
+.prose-problem-gap .prose-problem-message {
+  font-style: italic;
+}
+.prose-problem-go,
+.prose-problem-fix {
+  margin-left: 0.25rem;
+  padding: 0.1rem 0.45rem;
+  color: var(--ds-fg);
+  background: var(--ds-surface);
+  border: 1px solid var(--ds-border);
+  border-radius: 4px;
+}
+.prose-problem-fix[data-safe="false"] {
+  border-color: var(--ds-warn);
+}
+.prose-problems-status.prose-conforms {
+  color: var(--ds-allow);
+}
+.prose-problems-status.prose-incomplete {
+  color: var(--ds-warn);
+}
+.prose-problems-status.prose-violations-found {
+  color: var(--ds-deny);
+}

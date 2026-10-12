@@ -1,0 +1,5 @@
+{
+  "glob": "prose_wasm_bg.wasm",
+  "input": "node_modules/@ds-labs/prose-wasm",
+  "output": "/"
+}
