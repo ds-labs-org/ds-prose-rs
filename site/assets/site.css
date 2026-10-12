@@ -428,6 +428,7 @@ code {
 }
 .table-scroll table {
   width: 100%;
+  min-width: 40rem;
   border-collapse: collapse;
   font-family: var(--font-ui);
   font-size: 0.9375rem;
@@ -458,6 +459,7 @@ code {
 }
 
 .site-footer {
+  width: 100%;
   max-width: 80rem;
   margin-inline: auto;
   padding: var(--s5) max(var(--s4), env(safe-area-inset-left));
