@@ -1,33 +1,18 @@
-:root { color-scheme: light dark; }
-body { font-family: system-ui, sans-serif; margin: 0 auto; max-width: 72rem; padding: 1.5rem; }
+body { font-family: system-ui, sans-serif; margin: 0; background: var(--bg, Canvas); color: var(--text, CanvasText); }
+#app { display: block; max-width: 72rem; margin: 0 auto; padding: 1.5rem max(1rem, env(safe-area-inset-left)); }
 h1 { font-size: 1.4rem; }
 .presets { display: flex; gap: 0.5rem; margin: 1rem 0; flex-wrap: wrap; }
 .presets button { padding: 0.4rem 0.75rem; }
 .columns { display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: flex-start; }
 .columns section { flex: 1 1 22rem; min-width: 20rem; }
 textarea { width: 100%; font-family: ui-monospace, monospace; font-size: 0.85rem; box-sizing: border-box; }
-.prose-policy { margin-bottom: 2rem; }
-.prose-rules { padding-left: 1.25rem; }
-.prose-rule { margin-bottom: 1rem; }
-.prose-rule-sentence { margin: 0 0 0.25rem; font-weight: 600; }
-.prose-permission > .prose-rule-sentence { border-left: 4px solid #15803d; padding-left: 0.5rem; }
-.prose-prohibition > .prose-rule-sentence { border-left: 4px solid #b91c1c; padding-left: 0.5rem; }
-.prose-obligation > .prose-rule-sentence { border-left: 4px solid #1d4ed8; padding-left: 0.5rem; }
-.prose-label { margin: 0.4rem 0 0.1rem; font-size: 0.9rem; opacity: 0.8; }
-.prose-notes, .prose-warnings { font-size: 0.85rem; }
-.prose-warnings { border: 1px solid #b45309; border-radius: 6px; padding: 0.4rem 0.8rem; }
-.prose-error { color: #b91c1c; }
 .tabs { display: flex; gap: 0.25rem; margin-bottom: 1rem; }
 .tabs button { padding: 0.4rem 1rem; }
 .tabs button[aria-selected="true"] { font-weight: 700; border-bottom: 3px solid currentColor; }
 .hint { font-size: 0.85rem; opacity: 0.8; }
-.ds-prose.prose-edit .prose-slot { background: color-mix(in srgb, Highlight 10%, transparent); border-radius: 3px; }
-.ds-prose.prose-edit .prose-rule { margin-bottom: 1.25rem; }
 .ds-prose.prose-edit .prose-conditions ul, .ds-prose.prose-edit .prose-follow-up ul { margin: 0.2rem 0; }
 .ds-prose.prose-edit .prose-add-bar { margin: 0.25rem 0; }
-.ds-prose.prose-edit .prose-heading { font-size: 1.1rem; }
 .ds-prose.prose-edit .prose-toolbar { white-space: nowrap; }
-.ds-prose.prose-edit .prose-issue-error { color: #b91c1c; }
 .profile { border: 1px solid color-mix(in srgb, currentColor 25%, transparent); border-radius: 6px; padding: 0.6rem 0.9rem; margin: 0 0 1rem; }
 .profile > label { font-weight: 600; }
 .profile .hint { margin: 0.2rem 0 0.4rem; }
@@ -36,11 +21,6 @@ textarea { width: 100%; font-family: ui-monospace, monospace; font-size: 0.85rem
 .profile-actions .file { font-size: 0.9rem; }
 #profile-status { margin: 0.25rem 0; font-size: 0.9rem; }
 .profile-warnings { font-size: 0.85rem; }
-.prose-glossary { margin-top: 0.75rem; font-size: 0.9rem; }
-.prose-glossary dt { font-weight: 600; margin-top: 0.4rem; }
-.prose-glossary dt code { font-weight: 400; opacity: 0.75; }
-.prose-glossary dd { margin-left: 1rem; }
-.prose-glossary .prose-note, .prose-glossary .prose-kind-of, .prose-glossary .prose-implies, .prose-glossary .prose-from { opacity: 0.8; }
 .profile-url { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin: 0.5rem 0 0; }
 .profile-url input[type="url"] { flex: 1 1 18rem; min-width: 0; padding: 0.3rem 0.4rem; }
 .profile-url button { padding: 0.3rem 0.65rem; }
@@ -50,14 +30,11 @@ textarea { width: 100%; font-family: ui-monospace, monospace; font-size: 0.85rem
 .strict-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .strict-actions button { padding: 0.3rem 0.65rem; }
 .conformance { display: inline-block; margin: 0 0 0.5rem; padding: 0.3rem 0.7rem; border-radius: 6px; border: 1px solid currentColor; font-weight: 600; }
-.conformance.prose-conforms { color: #15803d; }
-.conformance.prose-violations-found { color: #b91c1c; }
-.conformance.prose-incomplete { color: #b45309; }
+.conformance.prose-conforms { color: var(--ds-allow, #15803d); }
+.conformance.prose-violations-found { color: var(--ds-deny, #b91c1c); }
+.conformance.prose-incomplete { color: var(--ds-warn, #b45309); }
 #problems .prose-problem-groups { padding-left: 1.25rem; }
 #problems .prose-problem { margin-bottom: 0.4rem; }
 #problems .prose-problem button { padding: 0.1rem 0.45rem; margin-left: 0.25rem; }
-#problems .prose-problem-error .prose-problem-message { color: #b91c1c; }
-#problems .prose-problem-warning .prose-problem-message { color: #b45309; }
-.prose-violations-list { font-size: 0.9rem; }
-.prose-violation-error { color: #b91c1c; }
-.prose-violation-warning { color: #b45309; }
+#problems .prose-problem-error .prose-problem-message { color: var(--ds-deny, #b91c1c); }
+#problems .prose-problem-warning .prose-problem-message { color: var(--ds-warn, #b45309); }
