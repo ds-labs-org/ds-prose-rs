@@ -52,9 +52,18 @@
                 "glob": "prose_wasm_bg.wasm",
                 "input": "node_modules/@ds-labs/prose-wasm",
                 "output": "/"
+              },
+              {
+                "glob": "research.jsonld",
+                "input": "../prose-core/tests/profiles",
+                "output": "/profiles"
               }
             ],
             "styles": [
+              {
+                "input": "../site/content/examples/prose.css",
+                "bundleName": "example"
+              },
               "src/styles.css"
             ]
           },
@@ -72,7 +81,15 @@
                   "maximumError": "8kB"
                 }
               ],
-              "outputHashing": "all"
+              "outputHashing": "all",
+              "optimization": {
+                "scripts": true,
+                "styles": {
+                  "minify": false,
+                  "inlineCritical": false
+                },
+                "fonts": true
+              }
             },
             "development": {
               "optimization": false,
