@@ -207,6 +207,7 @@ async function demoChecks({ send, evaluate, visit, waitFor, key, base, failures,
       if (p.scheme !== theme) failures.push(`${demo.name} demo ${theme}: color-scheme ${p.scheme}`);
     }
     await evaluate(`document.documentElement.setAttribute('data-theme', 'dark')`);
+    await new Promise((r) => setTimeout(r, 250)); // links fade their colour over 120 ms
     await shot(`demo-${demo.name.toLowerCase()}-1280-dark.png`);
 
     // The switch: unstyled drops the example stylesheet, themed brings it back.
