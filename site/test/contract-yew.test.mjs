@@ -242,3 +242,16 @@ test('the shadow DOM page claim: the document lookups are in the sources', () =>
   assert.match(p, /active_element\(\)/);
   assert.match(p, /closest\(".prose-problems"\)/);
 });
+
+test('server rendering: the docs say BASE_CSS arrives intact, as the pinned Yew does, and no text still says it is escaped', () => {
+  const rust = source('prose-yew/tests/site_examples.rs');
+  assert.match(rust, /async fn the_server_renderer_keeps_the_text_of_the_style_element/);
+  assert.match(rust, /assert_eq!\(style, prose_yew::BASE_CSS/);
+  assert.match(source('prose-yew/Cargo.toml'), /^yew = \{ version = "0\.23"/m);
+  const styling = frontMatterless(content('yew/styling.md'));
+  assert.match(styling, /server renderer writes the text of `<style>` unescaped/);
+  assert.match(styling, /site_examples\.rs/);
+  const claim = /escap\w+[^.\n]{0,40}(?:style|`<style>`)|(?:style|`<style>`)[^.\n]{0,40}escap/i;
+  for (const [name, text] of [['styling.md', styling], ['README.md', source('README.md').replace(/\s+/g, ' ')], ['edit/mod.rs', source('prose-yew/src/edit/mod.rs').replace(/\s+/g, ' ')], ['edit/config.rs', source('prose-yew/src/edit/config.rs').replace(/\s+/g, ' ')]])
+    assert.doesNotMatch(text, claim, `${name} says the style text is escaped`);
+});

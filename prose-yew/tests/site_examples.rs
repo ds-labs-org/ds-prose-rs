@@ -160,9 +160,23 @@ async fn read_view_has_no_edit_class_and_no_style() {
 async fn editor_puts_base_css_first_in_the_root() {
     let h = ssr::<Editor>().await;
     assert!(h.contains("prose-edit"), "{h}");
-    // Yew's server renderer escapes the text of <style>; the element is there.
     assert!(h.contains("<style>"), "base_css is on by default");
     assert!(h.contains(r#"contenteditable="plaintext-only""#));
+}
+
+#[tokio::test]
+async fn the_server_renderer_keeps_the_text_of_the_style_element() {
+    // Yew 0.23 writes the text of <style> with html_escape::encode_style, which
+    // changes only a closing </style tag. BASE_CSS therefore arrives as CSS.
+    let h = ssr::<Editor>().await;
+    let from = h.find("<style>").expect("a style element") + "<style>".len();
+    let style = &h[from..h.find("</style>").expect("a closed style element")];
+    assert_eq!(style, prose_yew::BASE_CSS, "the server writes BASE_CSS byte for byte");
+    assert!(style.contains("> .prose-heading") && style.contains("[aria-invalid=\"true\"]"));
+    assert!(!style.contains("&gt;") && !style.contains("&quot;"));
+    let root = h.find("<article").expect("the root");
+    let open_end = root + h[root..].find('>').expect("the end of the root tag") + 1;
+    assert!(h[open_end..].starts_with("<style>"), "the style element is the first child of the root: {h}");
 }
 
 #[tokio::test]
