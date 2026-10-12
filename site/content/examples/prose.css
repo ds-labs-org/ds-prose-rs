@@ -1,0 +1,189 @@
+/* ds-prose-rs: example stylesheet for the rendered policy (light and dark).
+   The library ships no CSS for the read-only renderer. This file is a complete
+   starting point: copy it, rename the --ds-* tokens to yours, keep the selectors.
+   Editor overrides live in prose-editor.css and read the tokens defined here. */
+
+/* Tokens: light first, then dark by system preference, then an explicit
+   data-theme on <html> that wins over the system in both directions. */
+:root {
+  color-scheme: light dark;
+  --ds-fg: #1f2328;
+  --ds-bg: #ffffff;
+  --ds-muted: #57606a;
+  --ds-border: #d0d7de;
+  --ds-accent: #0969da;
+  --ds-allow: #15803d;
+  --ds-deny: #b91c1c;
+  --ds-duty: #1d4ed8;
+  --ds-warn: #b45309;
+  --ds-focus: #0969da;
+  --ds-surface: #f6f8fa;
+  --ds-selected-bg: #0969da;
+  --ds-selected-fg: #ffffff;
+  /* The two custom properties the library reads (editor only). */
+  --prose-error: var(--ds-deny);
+  --prose-warning: var(--ds-warn);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ds-fg: #e6edf3;
+    --ds-bg: #0d1117;
+    --ds-muted: #9198a1;
+    --ds-border: #3d444d;
+    --ds-accent: #4493f8;
+    --ds-allow: #3fb950;
+    --ds-deny: #f85149;
+    --ds-duty: #58a6ff;
+    --ds-warn: #d29922;
+    --ds-focus: #4493f8;
+    --ds-surface: #151b23;
+    --ds-selected-bg: #1f6feb;
+    --ds-selected-fg: #ffffff;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ds-fg: #e6edf3;
+  --ds-bg: #0d1117;
+  --ds-muted: #9198a1;
+  --ds-border: #3d444d;
+  --ds-accent: #4493f8;
+  --ds-allow: #3fb950;
+  --ds-deny: #f85149;
+  --ds-duty: #58a6ff;
+  --ds-warn: #d29922;
+  --ds-focus: #4493f8;
+  --ds-surface: #151b23;
+  --ds-selected-bg: #1f6feb;
+  --ds-selected-fg: #ffffff;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+/* Angular only: an unknown element is display: inline. */
+ds-odrl-prose {
+  display: block;
+}
+
+/* The policy */
+.ds-prose {
+  color: var(--ds-fg);
+  line-height: 1.5;
+}
+.ds-prose .prose-policy {
+  margin: 0 0 2rem;
+}
+.ds-prose .prose-policy > h3,
+.ds-prose .prose-heading {
+  margin: 0 0 0.25rem;
+  font-size: 1.1rem;
+}
+.ds-prose .prose-rules {
+  padding-left: 1.25rem;
+}
+.ds-prose .prose-rule {
+  margin: 0 0 1rem;
+}
+.ds-prose .prose-rule-sentence {
+  margin: 0 0 0.25rem;
+  padding-left: 0.5rem;
+  font-weight: 600;
+  border-left: 4px solid var(--ds-border);
+}
+.ds-prose .prose-permission > .prose-rule-sentence {
+  border-left-color: var(--ds-allow);
+}
+.ds-prose .prose-prohibition > .prose-rule-sentence {
+  border-left-color: var(--ds-deny);
+}
+.ds-prose .prose-obligation > .prose-rule-sentence {
+  border-left-color: var(--ds-duty);
+}
+.ds-prose .prose-label {
+  margin: 0.4rem 0 0.1rem;
+  font-size: 0.9rem;
+  color: var(--ds-muted);
+}
+.ds-prose .prose-notes {
+  font-size: 0.85rem;
+  color: var(--ds-muted);
+}
+.ds-prose .prose-term {
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.ds-prose .prose-inherited,
+.ds-prose .prose-empty {
+  color: var(--ds-muted);
+  font-style: italic;
+}
+.ds-prose .prose-warnings {
+  font-size: 0.85rem;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid var(--ds-warn);
+  border-radius: 6px;
+}
+.ds-prose .prose-error {
+  color: var(--ds-deny);
+}
+
+/* Glossary of profile terms */
+.ds-prose .prose-glossary {
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+}
+.ds-prose .prose-glossary dt {
+  margin-top: 0.4rem;
+  font-weight: 600;
+}
+.ds-prose .prose-glossary dt code {
+  font-weight: 400;
+  color: var(--ds-muted);
+}
+.ds-prose .prose-glossary dd {
+  margin-left: 1rem;
+}
+.ds-prose .prose-note,
+.ds-prose .prose-kind-of,
+.ds-prose .prose-implies,
+.ds-prose .prose-from {
+  color: var(--ds-muted);
+}
+.ds-prose .prose-deprecated {
+  color: var(--ds-warn);
+}
+
+/* Validation findings and the verdict */
+.ds-prose .prose-violations-status {
+  display: inline-block;
+  margin: 0 0 0.5rem;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  font-weight: 600;
+}
+.ds-prose .prose-conforms {
+  color: var(--ds-allow);
+}
+.ds-prose .prose-incomplete {
+  color: var(--ds-warn);
+}
+.ds-prose .prose-violations-found {
+  color: var(--ds-deny);
+}
+.ds-prose .prose-violations-list {
+  font-size: 0.9rem;
+}
+.ds-prose .prose-violation-error {
+  color: var(--ds-deny);
+}
+.ds-prose .prose-violation-warning {
+  color: var(--ds-warn);
+}
+.ds-prose .prose-violation-info {
+  color: var(--ds-muted);
+}
+.ds-prose .prose-rule-id {
+  color: var(--ds-muted);
+}
