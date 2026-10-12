@@ -86,3 +86,34 @@ fn the_readme_table_states_each_rules_levels_basis_and_refusal() {
         assert_eq!(row[1].contains("a gap"), info.gap, "{id}: gap ({})", row[1]);
     }
 }
+
+/// The CLI options that the script refuses without `--strict`
+/// (scripts/ds-prose-validate.mjs, "needs --strict"): the README must say so,
+/// or a reader's first CI run exits 2.
+#[test]
+fn the_readme_says_which_cli_options_need_strict() {
+    let script = include_str!("../../scripts/ds-prose-validate.mjs");
+    let readme = readme();
+    let at = readme
+        .find("Options: `--profile`")
+        .expect("the options paragraph");
+    let para = &readme[at..readme[at..].find("\n\n").map_or(readme.len(), |e| at + e)];
+    let flat = para.split_whitespace().collect::<Vec<_>>().join(" ");
+    for flag in [
+        "--structural",
+        "--fail-closed",
+        "--deny-deprecated",
+        "--odrl",
+    ] {
+        assert!(
+            script.contains(&format!("['{flag}',")),
+            "{flag} no longer needs --strict"
+        );
+    }
+    assert!(
+        flat.contains(
+            "`--structural`, `--fail-closed`, `--deny-deprecated` and `--odrl` need `--strict`"
+        ),
+        "README does not say which options need --strict: {flat}"
+    );
+}
