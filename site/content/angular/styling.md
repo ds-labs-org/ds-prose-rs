@@ -68,6 +68,14 @@ Custom properties inherit through the output, so a variable defined on `ds-odrl-
 
 The renderer itself reads no custom property. For dark mode, the example stylesheet uses `color-scheme: light dark`, a `prefers-color-scheme: dark` block, and `data-theme` on `<html>` to force either side. The library takes no part in it.
 
+## See it in the demo
+
+The [Angular demo](/demo-angular/) loads the example stylesheet of this page as an entry of its own in the `styles` array of `angular.json`: `site/content/examples/prose.css`, with `bundleName` set to `example`. The file is the one printed here, so the page and the demo cannot differ.
+
+Under the navigation, the switch "Example stylesheet" has two settings. Unstyled disables that file and shows the markup as the component emits it. Themed turns it back on.
+
+The demo's own layout sheet, `src/styles.css`, stays on in both settings. It holds the columns and the validation controls, and none of the rules of the example stylesheet.
+
 ## Shadow DOM
 
 Shadow DOM is not supported and not tested. `ProseHandle` mounts into an `Element`. Mounting inside a shadow root is possible for the read-only output, and global styles would then not apply there. Nothing in the repository mounts the component in a shadow root, so this page makes no promise about it.
