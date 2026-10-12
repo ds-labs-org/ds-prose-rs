@@ -2,7 +2,7 @@
 // and exit codes, with a fake engine in place of the wasm module; the real one
 // is exercised on the packed tarball by scripts/test-cli-tarball.mjs.
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -270,7 +270,9 @@ export function initSync() {}
 export class ProseValidator {
   validate(json) {
     const bad = json.includes('VIOLATION');
-    return JSON.stringify({ verdict: bad ? 'violations' : 'conforms', counts: { error: 0, warning: 0, info: 0 }, findings: [], seen: json });
+    // Findings that are not a list: a report the CLI cannot print, a fault of the engine.
+    const findings = json.includes('MALFORMED') ? 5 : [];
+    return JSON.stringify({ verdict: bad ? 'violations' : 'conforms', counts: { error: 0, warning: 0, info: 0 }, findings, seen: json });
   }
   free() {}
 }
@@ -305,4 +307,24 @@ test('a UTF-8 byte order mark is not part of the policy; a profile may carry one
   const r = proc(['--strict', '--format', 'json', '--profile', prof, ok]);
   assert.equal(r.code, 0, r.out + r.err);
   assert.equal(JSON.parse(r.out)[0].report.seen, '{"uid":"urn:p"}');
+});
+
+test('a closed output pipe does not turn a pass into the violations exit code', async () => {
+  const ok = file('ok.json', '{"uid":"urn:ok"}');
+  const child = spawn(process.execPath, [bin, '--strict', ...Array(5000).fill(ok)], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let err = '';
+  child.stderr.on('data', (d) => { err += d; });
+  child.stdout.once('data', () => child.stdout.destroy());
+  const code = await new Promise((resolve) => child.on('close', resolve));
+  assert.notEqual(code, 1, `exit 1 means violations: ${err}`);
+  assert.equal(code, 0, err);
+  assert.doesNotMatch(err, /EPIPE|Unhandled/);
+});
+
+test('an uncaught error is exit 2 with a message, never the violations code', () => {
+  const odd = file('odd.json', '{"uid":"MALFORMED"}');
+  const r = spawnSync(process.execPath, [bin, '--strict', odd], { encoding: 'utf8' });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /^ds-prose-validate: .*iterable/m);
+  assert.doesNotMatch(r.stderr, /node:internal|at .*\.mjs/, 'a message, not a stack trace');
 });
