@@ -198,3 +198,80 @@ fn inheritance_links_read_each_policy_with_its_own_scope() {
         0
     );
 }
+
+#[test]
+fn the_same_policy_under_two_wrappers_reads_each_wrapper_context() {
+    let mut p = policy("urn:p", RESEARCH_NS, true);
+    p.as_object_mut().unwrap().remove("@context");
+    let got = run(json!([
+        {"@context": [ODRL, {"ex": OTHER_NS}], "@graph": [p.clone()]},
+        {"@context": [ODRL, {"ex": RESEARCH_NS}], "@graph": [p]}
+    ]));
+    assert_eq!(
+        got.iter().map(|g| g.1.as_str()).collect::<Vec<_>>(),
+        ["policy[0].permission[0].action[0]#name"]
+    );
+}
+
+#[test]
+fn a_policy_added_to_a_graph_is_read_with_every_context_merged() {
+    let mut doc = read_model_value(&json!({"@graph": [
+        policy("urn:p1", RESEARCH_NS, true),
+        policy("urn:p2", OTHER_NS, false),
+    ]}))
+    .unwrap();
+    let rules = EditRules::default();
+    doc.apply(
+        &add_ev(&doc, ListPath::policies(), 2, NewItem::Default),
+        &rules,
+    )
+    .unwrap();
+    doc.apply(
+        &add_ev(&doc, lp("policy[2]@permission"), 0, NewItem::Default),
+        &rules,
+    )
+    .unwrap();
+    doc.policies[2].profile = vec![RESEARCH.to_string()];
+    set_text(
+        &mut doc,
+        "policy[2].permission[0].action[0]#name",
+        "ex:train",
+    )
+    .unwrap();
+    let terms: Vec<_> = strict_of(&doc)
+        .into_iter()
+        .filter(|f| f.0.starts_with("profile."))
+        .map(|f| f.1)
+        .collect();
+    assert_eq!(terms, ["policy[1].permission[0].action[0]#name"]);
+}
+
+#[test]
+fn a_node_already_matched_is_not_matched_again() {
+    let mut p = policy("urn:p", RESEARCH_NS, true);
+    p.as_object_mut().unwrap().remove("@context");
+    let mut doc = read_model_value(&json!([
+        {"@context": [ODRL, {"ex": OTHER_NS}], "@graph": [p.clone()]},
+        {"@context": [ODRL, {"ex": RESEARCH_NS}], "@graph": [p]},
+        policy("urn:q", RESEARCH_NS, true)
+    ]))
+    .unwrap();
+    let expect = doc.policies[2].id;
+    doc.apply(
+        &EditEvent::Move {
+            list: ListPath::policies(),
+            from: 2,
+            to: 1,
+            expect,
+        },
+        &EditRules::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        strict_of(&doc)
+            .iter()
+            .map(|g| g.1.as_str())
+            .collect::<Vec<_>>(),
+        ["policy[0].permission[0].action[0]#name"]
+    );
+}

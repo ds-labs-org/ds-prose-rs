@@ -8,10 +8,11 @@ use crate::profile::{
     OdrlVocab, OperandHints, Prefixes, ProfileVocab, Term, TermKind, Wording, is_odrl_context,
     odrl_spelling, odrl_term,
 };
-use crate::read::{join_with, node_prefixes};
+use crate::read::{join_with, node_prefixes, policy_nodes};
 use crate::words::local_name;
 use crate::words_ctx::{namespace, profile_name};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 const ODRL: &str = "http://www.w3.org/ns/odrl/2/";
 
@@ -211,8 +212,7 @@ struct Checker<'a> {
     options: &'a Options,
     /// The prefixes in effect for the policy being checked.
     prefixes: Prefixes,
-    /// Each policy's own prefix scope, by index; empty when the document
-    /// has none to tell them apart (then `prefixes` is every context merged).
+    /// Each policy's prefix scope, by index; see [`policy_scopes`].
     scopes: Vec<Prefixes>,
     /// The policy being checked.
     cur: Option<PolicyCtx>,
@@ -464,38 +464,56 @@ fn unread_contexts(doc: &EditDoc) -> Vec<Unread> {
     out
 }
 
-/// The prefixes each policy of `doc` is read with, by index: its own
-/// `@context`, then those of the objects whose `@graph` holds it, as the
-/// reader scopes them. A hand-built document, or one whose policies were
-/// added or removed since it was read, has no such scopes: empty, and the
-/// checker reads every policy with all the contexts merged.
+/// The prefixes each policy of `doc` is read with, by index: those of the
+/// node it was read from (its own `@context`, then those of the objects
+/// whose `@graph` holds it, as the reader scopes them). The node is found
+/// by the policy's origin, as the writer finds it, so a moved policy keeps
+/// its scope. A policy not read from the document (added since, or a
+/// hand-built document's) is read with every context merged, as before.
 fn policy_scopes(doc: &EditDoc) -> Vec<Prefixes> {
-    let scoped = |v: &serde_json::Value| -> Vec<Prefixes> {
-        node_prefixes(v)
-            .into_iter()
-            .map(|s| Prefixes::default().inside(s))
-            .collect()
-    };
-    let n = doc.policies.len();
-    if let Some(o) = &doc.origin {
-        let s = scoped(o.value());
-        if s.len() == n {
-            return s;
-        }
-    } else {
-        let s: Vec<Prefixes> = doc
+    let own = |s: Arc<Prefixes>| Prefixes::default().inside(s);
+    let mut merged: Option<Prefixes> = None;
+    let mut merged = || merged.get_or_insert_with(|| prefixes(doc)).clone();
+    let Some(o) = &doc.origin else {
+        return doc
             .policies
             .iter()
-            .map(|p| match &p.origin {
-                Some(o) => scoped(o.value()).into_iter().next().unwrap_or_default(),
-                None => Prefixes::default(),
+            .map(|p| {
+                match p
+                    .origin
+                    .as_ref()
+                    .and_then(|o| node_prefixes(o.value()).pop())
+                {
+                    Some(s) => own(s),
+                    None => merged(),
+                }
             })
             .collect();
-        if s.len() == n {
-            return s;
-        }
-    }
-    Vec::new()
+    };
+    let leaves = policy_nodes(o.value());
+    let mut scopes: Vec<Option<Arc<Prefixes>>> =
+        node_prefixes(o.value()).into_iter().map(Some).collect();
+    // Searching on from the last match keeps the usual, in-order case linear.
+    let mut cursor = 0;
+    doc.policies
+        .iter()
+        .map(|p| {
+            let n = leaves.len().min(scopes.len());
+            let found = p.origin.as_ref().and_then(|o| {
+                let v = o.value();
+                (cursor..n)
+                    .chain(0..cursor.min(n))
+                    .find(|k| scopes[*k].is_some() && leaves[*k] == v)
+            });
+            match found.and_then(|k| {
+                cursor = k + 1;
+                scopes[k].take()
+            }) {
+                Some(s) => own(s),
+                None => merged(),
+            }
+        })
+        .collect()
 }
 
 fn slot(node: &NodePath, field: Field) -> IssueTarget {
@@ -513,10 +531,7 @@ impl<'a> Checker<'a> {
             profiles: w.profiles().collect(),
             index,
             options: o,
-            prefixes: match scopes.is_empty() {
-                true => prefixes(doc),
-                false => Prefixes::default(),
-            },
+            prefixes: Prefixes::default(),
             scopes,
             cur: None,
             unsure: false,
