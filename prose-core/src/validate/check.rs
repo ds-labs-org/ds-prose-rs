@@ -69,6 +69,7 @@ pub(crate) fn run(doc: &EditDoc, w: &Wording, index: &Index, o: &Options) -> Vec
     }
     c.imports();
     c.contexts(doc);
+    c.unread_keys(doc);
     for note in &doc.warnings {
         c.emit(
             RuleId::InputReaderNote,
@@ -856,6 +857,29 @@ impl<'a> Checker<'a> {
             let msg = format!(
                 "{} more @contexts are not read, so the prefixes and terms they may define could not be checked",
                 found.len() - MAX_NAMED
+            );
+            self.emit(RuleId::InputUnchecked, false, IssueTarget::Doc, msg);
+        }
+    }
+
+    /// ODRL property keys the reader skipped (compact or full IRIs, @context
+    /// aliases): nothing under them was read, so none of it was checked.
+    fn unread_keys(&mut self, doc: &EditDoc) {
+        for k in doc.unread.iter().take(MAX_NAMED) {
+            let msg = format!(
+                "the ODRL property \"{k}\" is not read (only bare property keys are), so what it holds could not be checked"
+            );
+            if let Some(f) = self.emit(RuleId::InputUnchecked, false, IssueTarget::Doc, msg) {
+                f.term = Some(TermRef {
+                    written: k.clone(),
+                    iri: k.clone(),
+                });
+            }
+        }
+        if doc.unread.len() > MAX_NAMED {
+            let msg = format!(
+                "{} more ODRL properties are not read, so what they hold could not be checked",
+                doc.unread.len() - MAX_NAMED
             );
             self.emit(RuleId::InputUnchecked, false, IssueTarget::Doc, msg);
         }

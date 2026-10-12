@@ -49,6 +49,11 @@ pub struct EditDoc {
     pub policies: Vec<PolicyNode>,
     /// Reader notes (unknown keys, skipped nodes).
     pub warnings: Vec<String>,
+    /// The property keys the reader skipped that are ODRL's: compact IRIs
+    /// (`odrl:permission`), full IRIs and @context aliases of an ODRL
+    /// property, in document order. The reader takes bare keys only, so
+    /// nothing under them was read, and a validator must not certify them.
+    pub unread: Vec<String>,
     next_id: u32,
 }
 
@@ -99,6 +104,7 @@ impl EditDoc {
         let mut d = self.clone();
         d.origin = None;
         d.warnings.clear();
+        d.unread.clear();
         d.next_id = 0;
         for p in &mut d.policies {
             p.normalize();

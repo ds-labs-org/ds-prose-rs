@@ -54,7 +54,7 @@ pub(crate) const QUIET_PREFIXES: &[&str] =
     &["dc:", "dct:", "dcterms:", "rdfs:", "skos:", "schema:"];
 
 /// The ODRL namespace.
-const ODRL_NS: &str = "http://www.w3.org/ns/odrl/2/";
+pub(crate) const ODRL_NS: &str = "http://www.w3.org/ns/odrl/2/";
 /// The ODRL properties the reader looks up by their bare name.
 const ODRL_PROPERTIES: &[&str] = &[
     "uid",
@@ -97,7 +97,7 @@ const MAX_GLOSSARY: usize = 30;
 /// stops a parsed document at 128 levels, so nothing parsed from text comes
 /// near this; a value built in code can be deeper, and cutting it with a note
 /// is better than overflowing the stack (a panic in wasm takes the page).
-const MAX_DEPTH: usize = 256;
+pub(crate) const MAX_DEPTH: usize = 256;
 
 /// The reading of `value`, worded with `wording`. With no profile loaded it
 /// is the v0.1 reading and every glossary is empty.

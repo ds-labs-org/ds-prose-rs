@@ -89,7 +89,10 @@ fn skipped_odrl_keys_are_a_gap_not_a_pass() {
         assert_eq!(r.verdict, Verdict::Incomplete, "{name}: {:?}", r.findings);
         let u = unchecked(&r);
         assert!(!u.is_empty(), "{name}");
-        assert!(u.iter().all(|f| f.gap && f.severity == Severity::Warning), "{name}");
+        assert!(
+            u.iter().all(|f| f.gap && f.severity == Severity::Warning),
+            "{name}"
+        );
     }
 }
 
@@ -114,7 +117,10 @@ fn skipped_odrl_keys_fail_closed_when_asked() {
 fn the_message_names_the_skipped_key() {
     let r = run(&prefixed(), &Options::strict());
     let msgs: Vec<&str> = unchecked(&r).iter().map(|f| f.message.as_str()).collect();
-    assert!(msgs.iter().any(|m| m.contains("odrl:permission")), "{msgs:?}");
+    assert!(
+        msgs.iter().any(|m| m.contains("odrl:permission")),
+        "{msgs:?}"
+    );
     let r = run(&alias(), &Options::strict());
     let msgs: Vec<&str> = unchecked(&r).iter().map(|f| f.message.as_str()).collect();
     assert!(msgs.iter().any(|m| m.contains("\"when\"")), "{msgs:?}");
@@ -150,7 +156,13 @@ fn advisory_says_nothing_new() {
 
 #[test]
 fn reading_stays_lossless() {
-    for v in [prefixed(), full_iri(), alias(), prefix_alias(), nested_prefixed()] {
+    for v in [
+        prefixed(),
+        full_iri(),
+        alias(),
+        prefix_alias(),
+        nested_prefixed(),
+    ] {
         let doc = read_model(&v.to_string()).unwrap();
         assert_eq!(write_jsonld(&doc), v);
     }

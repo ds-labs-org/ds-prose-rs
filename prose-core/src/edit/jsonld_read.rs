@@ -5,8 +5,8 @@ use serde_json::{Map, Value};
 use super::model::*;
 use crate::ProseError;
 use crate::read::{
-    POLICY_KEYS, QUIET_PREFIXES, RULE_KEYS, bare_reference, get, ident, items, looks_like_policy,
-    policy_nodes, types,
+    MAX_DEPTH, ODRL_NS, POLICY_KEYS, QUIET_PREFIXES, RULE_KEYS, bare_reference, get, ident, items,
+    looks_like_policy, policy_nodes, types,
 };
 use crate::words::local_name;
 
@@ -59,6 +59,7 @@ pub fn read_model_value(value: &Value) -> Result<EditDoc, ProseError> {
     doc.shape = shape;
     doc.origin = origin;
     doc.warnings = r.warnings;
+    doc.unread = unread_odrl_keys(value);
     Ok(doc)
 }
 
@@ -362,4 +363,95 @@ pub(crate) fn literal(v: &Value) -> Option<Literal> {
         }
         _ => None,
     }
+}
+
+/// The property keys in `v` that are ODRL's but are not bare, and so were
+/// not read: `odrl:`-prefixed, a full ODRL IRI, `p:` for a prefix `p` the
+/// document's @context binds to the ODRL namespace, or a term its @context
+/// defines as an ODRL property. Over-reports rather than guesses: a rebound
+/// `odrl` prefix is not tracked, so its keys are listed too. Skips `@context`
+/// and `@value`; iterative and depth-bounded, so a hostile value cannot
+/// overflow the stack.
+fn unread_odrl_keys(v: &Value) -> Vec<String> {
+    // Pass 1: the ODRL prefixes and aliases every @context declares.
+    let mut prefixes: Vec<String> = vec!["odrl".into()];
+    let mut aliases: Vec<(String, String)> = Vec::new();
+    let mut defs: Vec<(String, String)> = Vec::new();
+    let mut stack = vec![(v, 0usize, false)];
+    while let Some((x, depth, in_ctx)) = stack.pop() {
+        if depth > MAX_DEPTH {
+            continue;
+        }
+        match x {
+            Value::Array(a) => stack.extend(a.iter().map(|y| (y, depth + 1, in_ctx))),
+            Value::Object(o) => {
+                for (k, y) in o {
+                    if k == "@context" {
+                        stack.push((y, depth + 1, true));
+                    } else if in_ctx && !k.starts_with('@') {
+                        let iri = match y {
+                            Value::String(s) => Some(s.as_str()),
+                            Value::Object(d) => d.get("@id").and_then(Value::as_str),
+                            _ => None,
+                        };
+                        if let Some(iri) = iri {
+                            defs.push((k.clone(), iri.to_string()));
+                        }
+                        // A term definition may carry a scoped context.
+                        stack.push((y, depth + 1, true));
+                    } else {
+                        stack.push((y, depth + 1, in_ctx));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    for (k, iri) in &defs {
+        if iri == ODRL_NS {
+            prefixes.push(k.clone());
+        }
+    }
+    for (k, iri) in &defs {
+        let term = iri.strip_prefix(ODRL_NS).or_else(|| {
+            prefixes
+                .iter()
+                .find_map(|p| iri.strip_prefix(p.as_str())?.strip_prefix(':'))
+        });
+        // A term that spells its own ODRL property is a bare key: read.
+        if let Some(t) = term.filter(|t| !t.is_empty() && *t != k.as_str()) {
+            aliases.push((k.clone(), t.to_string()));
+        }
+    }
+    // Pass 2: the keys.
+    let mut out: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut stack = vec![(v, 0usize)];
+    while let Some((x, depth)) = stack.pop() {
+        if depth > MAX_DEPTH {
+            continue;
+        }
+        match x {
+            Value::Array(a) => stack.extend(a.iter().rev().map(|y| (y, depth + 1))),
+            Value::Object(o) => {
+                for (k, y) in o.iter().rev() {
+                    if k == "@context" || k == "@value" {
+                        continue;
+                    }
+                    let odrl = k.starts_with(ODRL_NS)
+                        || prefixes.iter().any(|p| {
+                            k.strip_prefix(p.as_str())
+                                .is_some_and(|r| r.starts_with(':') && r.len() > 1)
+                        })
+                        || aliases.iter().any(|(a, _)| a == k);
+                    if odrl && seen.insert(k.clone()) {
+                        out.push(k.clone());
+                    }
+                    stack.push((y, depth + 1));
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }
