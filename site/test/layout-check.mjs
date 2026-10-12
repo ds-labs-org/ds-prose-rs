@@ -218,6 +218,36 @@ export async function runLayoutCheck({ dist, base, chrome = findChrome(), shotDi
     s = await state();
     if (s.expanded !== 'false' || s.open || !s.focusOnButton) failures.push(`menu: Escape did not close it and return focus (${JSON.stringify(s)})`);
 
+    // Copy button: copies exactly the code text, reports the outcome in a live
+    // region, falls back when the async clipboard is missing or refuses, never
+    // throws, and leaves keyboard focus on the button.
+    await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+    await visit(base + 'kitchen-sink/');
+    const copyState = () => evaluate(`(() => { const b = document.querySelector('[data-copy]'); const st = document.querySelector('[role=status]'); return { label: b.textContent, status: st ? st.textContent : null, focusOnButton: document.activeElement === b, expected: b.parentElement.querySelector('code').textContent, copied: window.__copied ?? null, copiedBy: window.__copiedBy ?? null }; })()`);
+    const clickCopy = async (setup) => {
+      await visit(base + 'kitchen-sink/');
+      errors.length = 0;
+      await evaluate(setup + `; document.querySelector('[data-copy]').focus(); document.querySelector('[data-copy]').click();`);
+      await new Promise((r) => setTimeout(r, 120));
+      return copyState();
+    };
+    let c = await clickCopy(`Object.defineProperty(navigator, 'clipboard', { value: { writeText: (t) => { window.__copied = t; window.__copiedBy = 'clipboard'; return Promise.resolve(); } }, configurable: true })`);
+    if (c.copied !== c.expected || c.label !== 'Copied' || c.status !== 'Copied' || !c.focusOnButton) failures.push(`copy (async clipboard): ${JSON.stringify(c)}`);
+    c = await clickCopy(`Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true }); document.execCommand = (cmd) => { const ta = document.querySelector('textarea'); window.__copied = ta && ta.value; window.__copiedBy = cmd; return true; }`);
+    if (c.copied !== c.expected || c.copiedBy !== 'copy' || c.label !== 'Copied' || !c.focusOnButton) failures.push(`copy (no async clipboard, execCommand fallback): ${JSON.stringify(c)}`);
+    c = await clickCopy(`Object.defineProperty(navigator, 'clipboard', { value: { writeText: () => Promise.reject(new Error('denied')) }, configurable: true }); document.execCommand = () => false`);
+    if (c.label !== 'Copy failed' || c.status !== 'Copy failed' || !c.focusOnButton) failures.push(`copy (refused everywhere): ${JSON.stringify(c)}`);
+    if (errors.length) failures.push(`copy: uncaught errors ${errors.join('; ')}`);
+    c = await clickCopy(`Object.defineProperty(navigator, 'clipboard', { value: { writeText: () => { throw new Error('sync throw'); } }, configurable: true }); document.execCommand = () => false`);
+    if (c.label !== 'Copy failed') failures.push(`copy (writeText throws synchronously): ${JSON.stringify(c)}`);
+
+    // Focus is not hidden under the sticky header (WCAG 2.2, 2.4.11).
+    await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 400, deviceScaleFactor: 1, mobile: false });
+    await visit(base + 'kitchen-sink/');
+    const obscured = await evaluate(`(async () => { window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }); const el = document.querySelector('main pre[tabindex], main a'); el.focus(); await new Promise((r) => setTimeout(r, 700)); const h = document.querySelector('.site-header').getBoundingClientRect().bottom; return { top: el.getBoundingClientRect().top, header: h, scrolled: window.scrollY }; })()`);
+    if (obscured.scrolled === 0) failures.push('focus check: page is too short to scroll');
+    else if (obscured.top < obscured.header) failures.push(`focused element sits under the sticky header: ${JSON.stringify(obscured)}`);
+
     // Theme toggle: flips, persists across reload, survives throwing storage.
     await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
     await visit(base);

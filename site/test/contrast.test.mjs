@@ -11,7 +11,7 @@ const TEXT_PAIRS = [
   ['--accent', '--surface'],
   ['--permission', '--surface'], ['--prohibition', '--surface'], ['--obligation', '--surface'], ['--warning', '--surface'],
 ];
-const UI_PAIRS = [['--focus', '--bg'], ['--focus', '--surface'], ['--border', '--bg']];
+const UI_PAIRS = [['--focus', '--bg'], ['--focus', '--surface'], ['--focus', '--surface-2'], ['--border', '--bg']];
 
 for (const [name, pal] of [['light', light], ['dark', darkAuto], ['dark (forced)', darkForced]]) {
   test(`${name} palette defines every token as a 6-digit hex`, () => {
