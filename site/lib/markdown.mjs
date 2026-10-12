@@ -43,7 +43,8 @@ const SAFE_URL = /^(?:https?:|mailto:|\/|#|\.\.?\/|[A-Za-z0-9_-][^:]*$)/;
 
 function inline(src) {
   const codes = [];
-  let s = src.replace(/(`+)([\s\S]*?[^`])\1(?!`)/g, (_, _t, body) => {
+  // NUL marks a code slot below; a NUL in the source must not forge one.
+  let s = src.replace(/\u0000/g, '').replace(/(`+)([\s\S]*?[^`])\1(?!`)/g, (_, _t, body) => {
     if (body.length > 2 && body.startsWith(' ') && body.endsWith(' ')) body = body.slice(1, -1);
     codes.push(`<code>${escapeHtml(body)}</code>`);
     return `\u0000${codes.length - 1}\u0000`;
@@ -51,7 +52,8 @@ function inline(src) {
   s = escapeHtml(s);
   s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (all, text, url) => {
     const raw = url.replace(/&amp;/g, '&');
-    return SAFE_URL.test(raw) ? `<a href="${url}">${text}</a>` : text;
+    // A target holding a code slot would be filled with markup; keep it as text.
+    return !raw.includes('\u0000') && SAFE_URL.test(raw) ? `<a href="${url}">${text}</a>` : text;
   });
   s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   s = s.replace(/(^|[^*\w])\*([^*\s][^*]*)\*(?![*\w])/g, '$1<em>$2</em>');
