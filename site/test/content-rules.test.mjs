@@ -107,3 +107,11 @@ test('site.js wires the three behaviours the shell promises', () => {
 test('code in table cells is not broken mid-identifier; the table scrolls instead', () => {
   assert.match(CSS, /\.table-scroll code\s*\{[^}]*white-space:\s*nowrap/);
 });
+
+test('a narrow screen scrolls a wide table instead of squeezing its columns', () => {
+  assert.match(CSS, /\.table-scroll table\s*\{[^}]*min-width:\s*40rem/);
+});
+
+test('the footer keeps the full column width inside the flex body', () => {
+  assert.match(CSS, /\.site-footer\s*\{[^}]*width:\s*100%/);
+});
