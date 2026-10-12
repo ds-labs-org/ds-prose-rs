@@ -8,6 +8,7 @@
 //! an [`Origin`], the JSON it came from) and writes back by merging into
 //! those origins; see [`set_property`].
 mod apply;
+mod check;
 mod issue;
 mod jsonld_read;
 mod jsonld_write;
@@ -16,7 +17,8 @@ mod path;
 mod rules;
 mod segments;
 
-pub use apply::{EditError, EditEvent, FocusTarget, NewItem, focus_after};
+pub use apply::{EditError, EditEvent, FocusTarget, NewItem, StrictEdit, focus_after};
+pub use check::check_profile;
 pub use issue::{Issue, IssueTarget, Severity};
 pub use jsonld_read::{read_model, read_model_value};
 pub use jsonld_write::{set_property, write_jsonld};
@@ -31,5 +33,34 @@ pub use rules::{EditRules, Limit, NewNodeDefaults, odrl_position};
 pub use segments::{
     ChoiceKind, ChoiceSlot, ConditionList, ConditionProse, Conj, EmptyText, FollowUpProse,
     ListItem, Locked, PolicyProse, RefinementGroup, RuleKindSlot, RuleProse, Segment, Sentence,
-    Slot, SlotKind, SlotList, sentences,
+    Slot, SlotKind, SlotList, sentences, sentences_with,
 };
+
+/// The prefixes `doc`'s JSON-LD binds: those of [`EditDoc::origin`], then of
+/// each policy's origin; the first binding of a prefix wins.
+pub fn prefixes(doc: &EditDoc) -> crate::profile::Prefixes {
+    let mut out = crate::profile::Prefixes::default();
+    let origins = doc
+        .origin
+        .iter()
+        .chain(doc.policies.iter().filter_map(|p| p.origin.as_ref()));
+    for o in origins {
+        out.merge(crate::profile::Prefixes::of_document(o.value()));
+    }
+    out
+}
+
+/// The left operand of the constraint whose right operand, unit or operand
+/// reference `slot` addresses, as written; `None` for any other slot.
+pub fn left_operand_at<'d>(doc: &'d EditDoc, slot: &SlotPath) -> Option<&'d str> {
+    if !matches!(
+        slot.field,
+        Field::RightOperand(_) | Field::Unit | Field::OperandReference
+    ) {
+        return None;
+    }
+    match doc.node(&slot.node)? {
+        NodeRef::Constraint(ConstraintNode::Atomic(a)) if !a.left.is_empty() => Some(&a.left),
+        _ => None,
+    }
+}

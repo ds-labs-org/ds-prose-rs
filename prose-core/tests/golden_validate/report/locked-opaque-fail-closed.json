@@ -1,0 +1,135 @@
+{
+  "schema": "ds-prose/validation-report@1",
+  "tool": {
+    "name": "ds-prose-rs",
+    "version": "<version>"
+  },
+  "mode": "strict",
+  "tiers": [
+    "profile",
+    "prose",
+    "input"
+  ],
+  "ruleset": 1,
+  "verdict": "violations",
+  "vocabulary": {
+    "odrl": "common",
+    "profiles": [
+      {
+        "iri": "https://example.org/odrl/profile/research",
+        "title": "Research Data Profile",
+        "version": "0.1.0"
+      }
+    ]
+  },
+  "gaps": [],
+  "counts": {
+    "error": 4,
+    "warning": 0,
+    "info": 2
+  },
+  "findings": [
+    {
+      "rule": "input.reader-note",
+      "tier": "input",
+      "basis": "input",
+      "severity": "info",
+      "message": "a constraint has several logical operators",
+      "target": {
+        "kind": "doc",
+        "path": ""
+      },
+      "pointer": null,
+      "term": null,
+      "profile": null,
+      "expected": null,
+      "fixes": [],
+      "fingerprint": "bc0195e99db47ef7"
+    },
+    {
+      "rule": "input.reader-note",
+      "tier": "input",
+      "basis": "input",
+      "severity": "info",
+      "message": "skipped an unreadable action",
+      "target": {
+        "kind": "doc",
+        "path": ""
+      },
+      "pointer": null,
+      "term": null,
+      "profile": null,
+      "expected": null,
+      "fixes": [],
+      "fingerprint": "09b5445dcb5d2977"
+    },
+    {
+      "rule": "input.unchecked",
+      "tier": "input",
+      "basis": "input",
+      "severity": "error",
+      "message": "this constraint could not be checked: several logical operators",
+      "target": {
+        "kind": "node",
+        "path": "policy[0].permission[0].constraint[0]"
+      },
+      "pointer": null,
+      "term": null,
+      "profile": null,
+      "expected": null,
+      "fixes": [],
+      "fingerprint": "24440c7a78efb1f6"
+    },
+    {
+      "rule": "input.unchecked",
+      "tier": "input",
+      "basis": "input",
+      "severity": "error",
+      "message": "the constraint <urn:constraint:shared> is only referenced, so it could not be checked",
+      "target": {
+        "kind": "node",
+        "path": "policy[0].permission[0].constraint[1]"
+      },
+      "pointer": null,
+      "term": null,
+      "profile": null,
+      "expected": null,
+      "fixes": [],
+      "fingerprint": "92d1ce6248745773"
+    },
+    {
+      "rule": "input.unchecked",
+      "tier": "input",
+      "basis": "input",
+      "severity": "error",
+      "message": "the rule <urn:rule:shared> is only referenced, so it could not be checked",
+      "target": {
+        "kind": "node",
+        "path": "policy[0].permission[1]"
+      },
+      "pointer": null,
+      "term": null,
+      "profile": null,
+      "expected": null,
+      "fixes": [],
+      "fingerprint": "e4ad00470bbe01d2"
+    },
+    {
+      "rule": "input.unchecked",
+      "tier": "input",
+      "basis": "input",
+      "severity": "error",
+      "message": "this action could not be checked: not an action",
+      "target": {
+        "kind": "node",
+        "path": "policy[0].permission[2].action[0]"
+      },
+      "pointer": null,
+      "term": null,
+      "profile": null,
+      "expected": null,
+      "fixes": [],
+      "fingerprint": "112c406dc3518c7e"
+    }
+  ]
+}

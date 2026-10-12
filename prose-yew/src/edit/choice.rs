@@ -7,12 +7,78 @@ use prose_core::edit::{
 };
 use prose_core::wording;
 
-use super::config::{Choice, cls, fill};
+use prose_core::edit::EditDoc;
+use prose_core::validate::{Mode, Validator};
+
+use super::config::{Choice, cls, fill, written_form};
 use super::{Env, EnvRef, FocusKind, SlotFocus};
 
 struct Opt {
     value: String,
     label: String,
+    /// Among the operators the profile suggests for the left operand.
+    suggested: bool,
+    /// The current value, which no list offers.
+    extra: bool,
+    /// Strict validation: the validator would not let this be written.
+    blocked: bool,
+}
+
+impl Opt {
+    fn new(value: String, label: String) -> Opt {
+        Opt {
+            value,
+            label,
+            suggested: false,
+            extra: false,
+            blocked: false,
+        }
+    }
+}
+
+/// The operators the loaded profiles suggest for `left` (`prose:operator`),
+/// as expanded IRIs; empty without a profile or a hint.
+fn hinted_operators(env: &Env, left: &str) -> Vec<String> {
+    let w = &env.cfg.wording;
+    if w.is_empty() || left.is_empty() {
+        return Vec::new();
+    }
+    w.lookup_written(&env.prefixes, left)
+        .map(|(t, _)| t.hints.operators.clone())
+        .unwrap_or_default()
+}
+
+/// The validator of a strict configuration.
+fn strict(env: &Env) -> Option<&Validator> {
+    env.cfg
+        .validator
+        .as_ref()
+        .filter(|v| v.options().mode() == Mode::Strict)
+}
+
+/// Whether the left operand is closed by its profile to certain operators:
+/// the profile's operators are the only ones strict validation takes.
+fn closes_operators(env: &Env, left: &str) -> bool {
+    let w = &env.cfg.wording;
+    if left.is_empty() || w.is_empty() {
+        return false;
+    }
+    w.lookup_written(&env.prefixes, left)
+        .is_some_and(|(t, _)| t.hints.closed && !t.hints.operators.is_empty())
+}
+
+/// Whether strict validation would refuse `value` written into the select.
+fn is_blocked(v: &Validator, doc: &EditDoc, c: &ChoiceSlot, value: &str) -> bool {
+    !value.is_empty()
+        && v.admissible(
+            doc,
+            &EditEvent::SetChoice {
+                slot: c.path.clone(),
+                expect: c.owner,
+                value: value.to_string(),
+            },
+        )
+        .is_err()
 }
 
 /// The options of a choice, with the current raw value among them: a raw
@@ -20,35 +86,49 @@ struct Opt {
 fn options(env: &Env, c: &ChoiceSlot, severity: Option<Severity>) -> (Vec<Opt>, String) {
     let labels = &env.cfg.labels;
     let vocab = &env.cfg.vocab;
+    let w = &env.cfg.wording;
     let mut opts: Vec<Opt> = match c.kind {
-        ChoiceKind::Operator => vocab
-            .operators
-            .iter()
-            .map(|op| {
-                let phrase = wording::operator_for(&c.left_operand, op);
-                Opt {
-                    value: op.to_string(),
-                    label: if env.cfg.show_raw_terms {
-                        fill(&labels.operator_option, &[("phrase", &phrase), ("raw", op)])
+        ChoiceKind::Operator => {
+            let hinted = hinted_operators(env, &c.left_operand);
+            vocab
+                .operators
+                .iter()
+                .map(|op| {
+                    let op = written_form(op, &env.prefixes).to_string();
+                    let phrase = if w.is_empty() {
+                        wording::operator_for(&c.left_operand, &op)
+                    } else {
+                        wording::operator_with(w, &env.prefixes, &c.left_operand, &op)
+                    };
+                    let label = if env.cfg.show_raw_terms {
+                        fill(
+                            &labels.operator_option,
+                            &[("phrase", &phrase), ("raw", &op)],
+                        )
                     } else {
                         phrase
-                    },
-                }
-            })
-            .collect(),
+                    };
+                    let suggested =
+                        !hinted.is_empty() && hinted.contains(&w.expand(&env.prefixes, &op));
+                    Opt {
+                        suggested,
+                        ..Opt::new(op, label)
+                    }
+                })
+                .collect()
+        }
         ChoiceKind::LogicalOp => LogicalOp::ALL
             .iter()
-            .map(|o| Opt {
-                value: o.as_str().to_string(),
-                label: o.phrase().to_string(),
-            })
+            .map(|o| Opt::new(o.as_str().to_string(), o.phrase().to_string()))
             .collect(),
         ChoiceKind::Conflict => vocab
             .conflicts
             .iter()
-            .map(|Choice { value, label }| Opt {
-                value: value.to_string(),
-                label: label.to_string(),
+            .map(|Choice { value, label }| {
+                Opt::new(
+                    written_form(value, &env.prefixes).to_string(),
+                    label.to_string(),
+                )
             })
             .collect(),
         // A choice this version has no vocabulary for offers only its value.
@@ -57,18 +137,40 @@ fn options(env: &Env, c: &ChoiceSlot, severity: Option<Severity>) -> (Vec<Opt>, 
     // A compact IRI or full term for a listed one selects that option, unless
     // the host flagged the value as an error: then it is shown as it is, so
     // that choosing the listed option is a real change the browser reports.
+    // The same IRI written another way (in full, or as a CURIE the policy or
+    // the profile resolves) is that option; else a value with the option's
+    // local name is.
+    let expand = |v: &str| match w.is_empty() {
+        true => env.prefixes.expand(v),
+        false => w.expand(&env.prefixes, v),
+    };
     let selected = opts
         .iter()
         .find(|o| o.value == c.raw)
         .or_else(|| {
             (!c.raw.is_empty() && severity != Some(Severity::Error))
                 .then(|| {
+                    let raw = expand(&c.raw);
                     opts.iter()
-                        .find(|o| !o.value.is_empty() && o.value == wording::local_name(&c.raw))
+                        .find(|o| !o.value.is_empty() && expand(&o.value) == raw)
+                        .or_else(|| {
+                            opts.iter().find(|o| {
+                                !o.value.is_empty() && o.value == wording::local_name(&c.raw)
+                            })
+                        })
                 })
                 .flatten()
         })
         .map(|o| o.value.clone());
+    // Under strict validation, what the validator would refuse is listed but
+    // cannot be picked.
+    if let Some(v) = strict(env)
+        && matches!(c.kind, ChoiceKind::Operator | ChoiceKind::Conflict)
+    {
+        for o in opts.iter_mut().filter(|o| !o.value.is_empty()) {
+            o.blocked = env.spend() && is_blocked(v, &env.doc, c, &o.value);
+        }
+    }
     // An operator the reducer would refuse is not offered, unless the host
     // translates the switch itself.
     if c.kind == ChoiceKind::Operator && !env.cfg.host_plans_operator_switches {
@@ -94,13 +196,20 @@ fn options(env: &Env, c: &ChoiceSlot, severity: Option<Severity>) -> (Vec<Opt>, 
             opts.insert(
                 0,
                 Opt {
-                    value: c.raw.clone(),
-                    label,
+                    extra: true,
+                    ..Opt::new(c.raw.clone(), label)
                 },
             );
             c.raw.clone()
         }
     };
+    // The current value stays selected, and says it is not allowed.
+    for o in opts
+        .iter_mut()
+        .filter(|o| o.blocked && !o.extra && o.value == selected)
+    {
+        o.label = fill(&labels.not_allowed_option, &[("label", &o.label)]);
+    }
     (opts, selected)
 }
 
@@ -156,14 +265,20 @@ pub(crate) fn choice_select(props: &ChoiceSelectProps) -> Html {
         let owner = c.owner;
         let raw = c.raw.clone();
         let rev = rev.dispatcher();
+        let env = env.clone();
+        let c = c.clone();
         Callback::from(move |e: Event| {
             use wasm_bindgen::JsCast;
             let value = e
                 .target()
                 .and_then(|t| t.dyn_into::<web_sys::HtmlSelectElement>().ok())
                 .map(|s| s.value());
+            // The select does not offer what the validator would refuse, but
+            // a script or an assistive technology can still choose it: the
+            // same check, before anything is sent.
             if let Some(value) = value
                 && value != raw
+                && !strict(&env).is_some_and(|v| is_blocked(v, &env.doc, &c, &value))
             {
                 onedit.emit(EditEvent::SetChoice {
                     slot: slot.clone(),
@@ -188,6 +303,9 @@ pub(crate) fn choice_select(props: &ChoiceSelectProps) -> Html {
         Callback::from(move |_: FocusEvent| on_focus.emit(None))
     };
     let invalid = matches!(props.severity, Some(Severity::Error)).then_some("true");
+    let closed = c.kind == ChoiceKind::Operator
+        && strict(&env).is_some()
+        && closes_operators(&env, &c.left_operand);
     html! {
         <select
             key={format!("{}:{:?}", c.owner.0, c.path.field)}
@@ -203,10 +321,45 @@ pub(crate) fn choice_select(props: &ChoiceSelectProps) -> Html {
             onfocusin={onfocusin}
             onfocusout={onfocusout}
         >
-            { for opts.iter().map(|o| html! {
-                <option value={o.value.clone()} selected={o.value == selected}>{ o.label.clone() }</option>
-            }) }
+            if closed {
+                // The profile closes the operand: what it allows, and, still
+                // listed, what it does not.
+                { for opts.iter().filter(|o| o.extra).map(|o| option(o, &selected)) }
+                <optgroup label={cfg.labels.allowed_group.clone()}>
+                    { for opts.iter().filter(|o| !o.extra && !o.blocked).map(|o| option(o, &selected)) }
+                </optgroup>
+                if opts.iter().any(|o| !o.extra && o.blocked) {
+                    <optgroup label={cfg.labels.not_allowed_group.clone()} disabled=true>
+                        { for opts.iter().filter(|o| !o.extra && o.blocked).map(|o| option(o, &selected)) }
+                    </optgroup>
+                }
+            } else if opts.iter().any(|o| o.suggested) {
+                // The profile's suggestions first, never hiding the rest.
+                { for opts.iter().filter(|o| o.extra).map(|o| option(o, &selected)) }
+                <optgroup label={cfg.labels.suggested_operators.clone()}>
+                    { for opts.iter().filter(|o| o.suggested).map(|o| option(o, &selected)) }
+                </optgroup>
+                // Only when something is left for it: an empty group is
+                // announced as one.
+                if opts.iter().any(|o| !o.suggested && !o.extra) {
+                    <optgroup label={cfg.labels.other_operators.clone()}>
+                        { for opts.iter().filter(|o| !o.suggested && !o.extra).map(|o| option(o, &selected)) }
+                    </optgroup>
+                }
+            } else {
+                { for opts.iter().map(|o| option(o, &selected)) }
+            }
         </select>
+    }
+}
+
+fn option(o: &Opt, selected: &str) -> Html {
+    // A blocked option is disabled, unless it is the current value: a
+    // disabled option that is selected still shows as the select's value.
+    html! {
+        <option value={o.value.clone()} selected={o.value == selected} disabled={o.blocked && o.value != selected}>
+            { o.label.clone() }
+        </option>
     }
 }
 

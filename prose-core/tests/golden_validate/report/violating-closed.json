@@ -1,0 +1,137 @@
+{
+  "schema": "ds-prose/validation-report@1",
+  "tool": {
+    "name": "ds-prose-rs",
+    "version": "<version>"
+  },
+  "mode": "strict",
+  "tiers": [
+    "profile",
+    "prose",
+    "input"
+  ],
+  "ruleset": 1,
+  "verdict": "violations",
+  "vocabulary": {
+    "odrl": "common",
+    "profiles": [
+      {
+        "iri": "https://example.org/odrl/profile/research",
+        "title": "Research Data Profile",
+        "version": "0.1.0"
+      }
+    ]
+  },
+  "gaps": [],
+  "counts": {
+    "error": 4,
+    "warning": 0,
+    "info": 0
+  },
+  "findings": [
+    {
+      "rule": "prose.datatype-lexical",
+      "tier": "prose",
+      "basis": "convention",
+      "severity": "error",
+      "message": "\"ten\" is not an integer, which the profile expects for \"ex:dataSubjectCount\"",
+      "target": {
+        "kind": "slot",
+        "path": "policy[0].permission[0].action[0].refinement[0]#rightOperand[0]"
+      },
+      "pointer": null,
+      "term": null,
+      "profile": null,
+      "expected": {
+        "kinds": [],
+        "operators": [],
+        "values": [],
+        "units": [],
+        "datatype": "http://www.w3.org/2001/XMLSchema#integer",
+        "closed": true
+      },
+      "fixes": [],
+      "fingerprint": "89a78ac0e7f5a6bc"
+    },
+    {
+      "rule": "prose.operator-not-allowed",
+      "tier": "prose",
+      "basis": "convention",
+      "severity": "error",
+      "message": "the profile allows only the operators eq, isAnyOf or isNoneOf for \"ex:researchPurpose\"",
+      "target": {
+        "kind": "slot",
+        "path": "policy[0].permission[0].constraint[0]#operator"
+      },
+      "pointer": null,
+      "term": {
+        "written": "lteq",
+        "iri": "http://www.w3.org/ns/odrl/2/lteq"
+      },
+      "profile": null,
+      "expected": {
+        "kinds": [],
+        "operators": [
+          "http://www.w3.org/ns/odrl/2/eq",
+          "http://www.w3.org/ns/odrl/2/isAnyOf",
+          "http://www.w3.org/ns/odrl/2/isNoneOf"
+        ],
+        "values": [],
+        "units": [],
+        "datatype": null,
+        "closed": true
+      },
+      "fixes": [],
+      "fingerprint": "de76ff791bce9306"
+    },
+    {
+      "rule": "profile.undeclared-in-namespace",
+      "tier": "profile",
+      "basis": "standard-derived",
+      "severity": "error",
+      "message": "the action \"ex:distil\" is not declared by the loaded profile <https://example.org/odrl/profile/research>",
+      "target": {
+        "kind": "slot",
+        "path": "policy[0].permission[1].action[0]#name"
+      },
+      "pointer": null,
+      "term": {
+        "written": "ex:distil",
+        "iri": "https://example.org/odrl/profile/research/distil"
+      },
+      "profile": "https://example.org/odrl/profile/research",
+      "expected": null,
+      "fixes": [],
+      "fingerprint": "5c8ec92979ba4a83"
+    },
+    {
+      "rule": "profile.unknown-term",
+      "tier": "profile",
+      "basis": "standard-derived",
+      "severity": "error",
+      "message": "the action \"foo:bar\" is not defined by ODRL or by a loaded profile",
+      "target": {
+        "kind": "slot",
+        "path": "policy[0].permission[2].action[0]#name"
+      },
+      "pointer": null,
+      "term": {
+        "written": "foo:bar",
+        "iri": "https://example.net/foo/bar"
+      },
+      "profile": null,
+      "expected": {
+        "kinds": [
+          "action"
+        ],
+        "operators": [],
+        "values": [],
+        "units": [],
+        "datatype": null,
+        "closed": false
+      },
+      "fixes": [],
+      "fingerprint": "66093bb9f4ffd213"
+    }
+  ]
+}

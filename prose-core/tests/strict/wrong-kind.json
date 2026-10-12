@@ -1,0 +1,14 @@
+{
+  "@context": [
+    "http://www.w3.org/ns/odrl.jsonld",
+    { "ex": "https://example.org/odrl/profile/research/" }
+  ],
+  "@type": "ex:train",
+  "uid": "urn:policy:wrong-kind",
+  "profile": "https://example.org/odrl/profile/research",
+  "permission": [{
+    "target": "urn:asset:1",
+    "action": "ex:researchPurpose",
+    "constraint": [{ "leftOperand": "ex:train", "operator": "use", "rightOperand": 1 }]
+  }]
+}

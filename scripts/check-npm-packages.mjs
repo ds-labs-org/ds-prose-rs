@@ -50,11 +50,40 @@ for (const file of files) {
     const wasmBytes = Number(execFileSync('sh', ['-c', `tar -xzOf '${join(dir, file)}' package/prose_wasm_bg.wasm 2>/dev/null | wc -c`], { encoding: 'utf8' }));
     need(wasmBytes > 100_000, `${tag}: wasm is only ${wasmBytes} bytes`);
     need(pkg.dsProse?.['prose-yew'], `${tag}: dsProse.prose-yew not recorded`);
+    // The public API a host relies on is in the types, not just the wasm.
+    const dts = tar(file, ['-xzO', 'package/prose_wasm.d.ts']);
+    need(/\bsetProfile\(text\?: string \| null\): string;/.test(dts), `${tag}: prose_wasm.d.ts has no setProfile(text?: string | null): string`);
+    // Validation: the functions, the class, the handle's methods and the
+    // declared types (RuleId is the union of the rule catalogue).
+    need(/export function validate\(/.test(dts), `${tag}: prose_wasm.d.ts has no validate()`);
+    need(/export function rules\(\)/.test(dts), `${tag}: prose_wasm.d.ts has no rules()`);
+    need(/export class ProseValidator\b/.test(dts), `${tag}: prose_wasm.d.ts has no ProseValidator`);
+    for (const method of ['setProfiles(', 'setValidation(', 'report()']) {
+      need(dts.includes(method), `${tag}: prose_wasm.d.ts has no ProseHandle.${method}`);
+    }
+    for (const type of ['ValidationReport', 'ValidateOptions', 'RuleId', 'Verdict', 'Finding']) {
+      need(new RegExp(`export (interface|type) ${type}\\b`).test(dts), `${tag}: prose_wasm.d.ts does not declare ${type}`);
+    }
+    need(/"profile\.unknown-term"/.test(dts) && /"input\.unreadable"/.test(dts), `${tag}: the RuleId union is missing rules`);
+    // The ds-prose-validate command: declared, shipped, and executable.
+    need(pkg.bin?.['ds-prose-validate'] === 'ds-prose-validate.mjs', `${tag}: no bin entry ds-prose-validate -> ds-prose-validate.mjs`);
+    need(has('ds-prose-validate.mjs'), `${tag}: ds-prose-validate.mjs is not in the tarball`);
+    need(/^-rwx/m.test(tar(file, ['-tvz']).split('\n').find((l) => l.endsWith(' package/ds-prose-validate.mjs')) ?? ''), `${tag}: ds-prose-validate.mjs is not executable`);
+    need((pkg.files ?? []).includes('ds-prose-validate.mjs'), `${tag}: package.json files does not list ds-prose-validate.mjs`);
   } else if (pkg.name === '@ds-labs/prose-angular') {
     need(pkg.dependencies?.['@ds-labs/prose-wasm'], `${tag}: does not depend on @ds-labs/prose-wasm`);
     need(pkg.peerDependencies?.['@angular/core'], `${tag}: no @angular/core peer dependency`);
     need(listed.some((p) => p.startsWith('fesm2022/') && p.endsWith('.mjs')), `${tag}: no FESM bundle`);
     need(has('index.d.ts'), `${tag}: no type declarations`);
+    const dts = has('odrl-prose.component.d.ts') ? tar(file, ['-xzO', 'package/odrl-prose.component.d.ts']) : '';
+    for (const member of ['profile', 'profileLoaded', 'profileError', 'profiles', 'strict', 'validation', 'showViolations', 'validationChange', 'report']) {
+      need(new RegExp(`\\breadonly ${member}:`).test(dts), `${tag}: the component has no ${member} member in its types`);
+    }
+    const index = tar(file, ['-xzO', 'package/index.d.ts']);
+    need(/ProfileSummary/.test(index), `${tag}: ProfileSummary is not exported`);
+    for (const type of ['ValidationReport', 'ValidateOptions', 'RuleId']) {
+      need(new RegExp(`\\b${type}\\b`).test(index), `${tag}: ${type} is not exported`);
+    }
     need(!listed.some((p) => p.includes('prose_wasm')), `${tag}: carries its own wasm (it belongs to @ds-labs/prose-wasm)`);
   } else {
     problems.push(`unexpected package ${pkg.name}`);

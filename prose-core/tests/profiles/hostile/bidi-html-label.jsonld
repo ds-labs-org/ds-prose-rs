@@ -1,0 +1,18 @@
+{
+  "@context": {
+    "odrl": "http://www.w3.org/ns/odrl/2/",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "skos": "http://www.w3.org/2004/02/skos/core#",
+    "ex": "https://example.org/hostile/"
+  },
+  "@id": "ex:fineTune",
+  "@type": "odrl:Action",
+  "rdfs:label": {
+    "@value": "\u202eexe.gnp\u202c <script>alert(1)</script> Fine&#x200B;-tune &amp; <b>train</b> pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad",
+    "@language": "en"
+  },
+  "skos:definition": {
+    "@value": "To adapt\u2066 a model\u2069 <img src=x onerror=alert(1)>using the Asset.\u0000",
+    "@language": "en"
+  }
+}

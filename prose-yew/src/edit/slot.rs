@@ -10,9 +10,18 @@ use std::rc::Rc;
 use wasm_bindgen::JsCast;
 use yew::prelude::*;
 
-use prose_core::edit::{EditEvent, IssueTarget, Severity, Slot, SlotKind};
+use std::collections::{HashMap, HashSet};
 
-use super::config::{Suggestion, cls, merge_styles};
+use prose_core::edit::{
+    ConstraintNode, EditDoc, EditEvent, Field, IssueTarget, Literal, NodeRef, RightOperand,
+    Severity, Slot, SlotKind, SlotPath, left_operand_at,
+};
+use prose_core::profile::{Term, TermKind};
+use prose_core::validate::{Mode, Validator};
+use prose_core::wording;
+
+use super::closed;
+use super::config::{Suggestion, cls, merge_styles, written_form};
 use super::suggest::filter_suggestions;
 use super::{Env, EnvRef, FocusKind, SlotFocus};
 
@@ -139,29 +148,306 @@ pub(crate) struct SlotEditorProps {
     pub described_by: Option<AttrValue>,
 }
 
-fn options_for(env: &Env, slot: &Slot) -> Vec<Suggestion> {
-    let v = &env.cfg.vocab;
-    match slot.kind {
-        SlotKind::Action => v.actions.clone(),
-        SlotKind::LeftOperand => v.left_operands.clone(),
-        SlotKind::PolicyKind => v.policy_kinds.clone(),
-        SlotKind::Party => v.parties.clone(),
-        SlotKind::Asset => v.assets.clone(),
-        SlotKind::PolicyRef => env
-            .policy_uids
-            .iter()
-            .filter(|(i, _)| *i != slot.path.node.policy)
-            .map(|(_, uid)| Suggestion {
-                value: uid.clone(),
-                label: uid.clone(),
-                hint: None,
-            })
-            .collect(),
-        _ => vec![],
+/// A text no profile defines, to ask the validator whether a slot takes
+/// anything: if it would refuse this, the slot is closed.
+const PROBE: &str = "https://ds-prose.invalid/not-a-term";
+
+/// The validator of a strict configuration.
+fn strict(env: &Env) -> Option<&Validator> {
+    env.cfg
+        .validator
+        .as_ref()
+        .filter(|v| v.options().mode() == Mode::Strict)
+}
+
+fn set_text(slot: &Slot, value: &str) -> EditEvent {
+    EditEvent::SetText {
+        slot: slot.path.clone(),
+        expect: slot.owner,
+        value: value.to_string(),
     }
 }
 
-fn placeholder(env: &Env, kind: SlotKind) -> AttrValue {
+/// How strict validation closes a slot.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Closure {
+    /// The validator refuses a term outside the vocabulary.
+    Terms,
+    /// The left operand is closed to the values the profile lists.
+    Values,
+}
+
+/// Whether, and how, strict validation closes `slot`: its terms are the
+/// vocabulary's and nothing else, so a combobox offers those and takes
+/// nothing more. Open while the vocabulary is incomplete (the validator
+/// would refuse nothing), in advisory mode, and without suggestions.
+fn closure(env: &Env, slot: &Slot) -> Option<Closure> {
+    let v = strict(env)?;
+    if !env.cfg.suggestions {
+        return None;
+    }
+    let cached = |key: &str| env.closed_cache.borrow().get(key).copied();
+    match slot.kind {
+        SlotKind::Action | SlotKind::LeftOperand | SlotKind::PolicyKind | SlotKind::Unit => {
+            // What a policy's terms are read against is the policy's; a
+            // unit's depends on its constraint's left operand.
+            let key = match slot.kind {
+                SlotKind::Unit => slot.path.to_string(),
+                kind => format!("{}:{:?}", slot.path.node.policy, kind),
+            };
+            let closed = match cached(&key) {
+                Some(c) => c,
+                // Past the render's checks the slot is left open.
+                None if !env.spend() => false,
+                None => {
+                    let closed = v.admissible(&env.doc, &set_text(slot, PROBE)).is_err();
+                    env.closed_cache.borrow_mut().insert(key, closed);
+                    closed
+                }
+            };
+            closed.then_some(Closure::Terms)
+        }
+        SlotKind::Literal if matches!(slot.path.field, Field::RightOperand(_)) => {
+            let closed_values = left_operand_term(env, slot)
+                .is_some_and(|t| t.hints.closed && !t.hints.value_tree.is_empty());
+            closed_values.then_some(Closure::Values)
+        }
+        _ => None,
+    }
+}
+
+/// What a closed slot offers: the entries the validator would take. Asks
+/// it once per entry.
+fn allowed_options(
+    env: &Env,
+    slot: &Slot,
+    closure: Closure,
+    options: &[Suggestion],
+) -> Vec<Suggestion> {
+    match (closure, strict(env)) {
+        (Closure::Terms, Some(v)) => options
+            .iter()
+            .filter(|o| v.admissible(&env.doc, &set_text(slot, &o.value)).is_ok())
+            .cloned()
+            .collect(),
+        _ => options.to_vec(),
+    }
+}
+
+/// What typed text means in a closed slot: the written form of the entry it
+/// names, a term the vocabulary has that the list does not offer, or, on
+/// Enter, the only entry the text leaves. `None`: it names nothing.
+fn resolve(
+    env: &Env,
+    slot: &Slot,
+    closure: Closure,
+    allowed: &[Suggestion],
+    typed: &str,
+    enter: bool,
+) -> Option<String> {
+    let w = &env.cfg.wording;
+    let expand = |t: &str| match w.is_empty() {
+        true => env.prefixes.expand(t),
+        false => w.expand(&env.prefixes, t),
+    };
+    let same = |a: &str, b: &str| expand(a) == expand(b);
+    if let Some(o) = closed::exact(allowed, typed, &same) {
+        return Some(o.value.to_string());
+    }
+    if closure == Closure::Terms
+        && strict(env).is_some_and(|v| v.admissible(&env.doc, &set_text(slot, typed)).is_ok())
+    {
+        return Some(typed.to_string());
+    }
+    if enter {
+        return closed::only(allowed, typed).map(|o| o.value.to_string());
+    }
+    None
+}
+
+/// What commits a slot's text.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum How {
+    Enter,
+    Blur,
+    /// An entry of the list was picked.
+    Pick,
+}
+
+/// Whether the text now in a closed slot is one it does not take: the
+/// validator refuses it, or it is not one of the values the profile lists.
+fn outside(env: &Env, slot: &Slot, closure: Closure, options: &[Suggestion]) -> bool {
+    if slot.raw.is_empty() {
+        return false;
+    }
+    match closure {
+        // Each ask reads the document: past the render's checks no note.
+        Closure::Terms => strict(env).is_some_and(|v| {
+            env.spend() && v.admissible(&env.doc, &set_text(slot, &slot.raw)).is_err()
+        }),
+        Closure::Values => {
+            let w = &env.cfg.wording;
+            let same = |a: &str, b: &str| w.expand(&env.prefixes, a) == w.expand(&env.prefixes, b);
+            !options.iter().any(|o| same(&o.value, &slot.raw))
+        }
+    }
+}
+
+/// The suggestions for a slot, and the depth of each nested one (a value
+/// under a broader suggested value), by value.
+fn options_for(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<AttrValue, usize>) {
+    let v = &env.cfg.vocab;
+    // A profile term is listed by its full IRI and written as the policy's
+    // prefixes allow.
+    let written = |list: &[Suggestion]| -> Vec<Suggestion> {
+        list.iter()
+            .map(|s| Suggestion {
+                value: written_form(&s.value, &env.prefixes),
+                ..s.clone()
+            })
+            .collect()
+    };
+    let flat = |list: Vec<Suggestion>| (list, HashMap::new());
+    match slot.kind {
+        SlotKind::Action => flat(written(&v.actions)),
+        SlotKind::LeftOperand => flat(written(&v.left_operands)),
+        SlotKind::PolicyKind => flat(written(&v.policy_kinds)),
+        SlotKind::Party => flat(v.parties.clone()),
+        SlotKind::Asset => flat(v.assets.clone()),
+        SlotKind::PolicyRef => flat(
+            env.policy_uids
+                .iter()
+                .filter(|(i, _)| *i != slot.path.node.policy)
+                .map(|(_, uid)| Suggestion {
+                    value: uid.clone(),
+                    label: uid.clone(),
+                    hint: None,
+                    group: None,
+                })
+                .collect(),
+        ),
+        SlotKind::Literal if matches!(slot.path.field, Field::RightOperand(_)) => {
+            profile_values(env, slot)
+        }
+        SlotKind::Unit => flat(
+            left_operand_term(env, slot)
+                .map(|t| {
+                    t.hints
+                        .units
+                        .iter()
+                        .map(|u| profile_suggestion(env, u, None))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        ),
+        _ => flat(vec![]),
+    }
+}
+
+/// The loaded term the slot's constraint names as its left operand.
+fn left_operand_term<'e>(env: &'e Env, slot: &Slot) -> Option<&'e Term> {
+    let w = &env.cfg.wording;
+    if w.is_empty() {
+        return None;
+    }
+    let left = left_operand_at(&env.doc, &slot.path)?;
+    w.lookup_written(&env.prefixes, left).map(|(t, _)| t)
+}
+
+/// A suggestion for the IRI `iri`: the loaded term's label and definition
+/// when a profile declares it.
+fn profile_suggestion(env: &Env, iri: &str, group: Option<&AttrValue>) -> Suggestion {
+    let w = &env.cfg.wording;
+    let term = w.lookup(iri).map(|(t, _)| t);
+    let label = match term {
+        Some(t) => t.display_label(w.languages()),
+        None => wording::humanise(wording::local_name(iri)),
+    };
+    Suggestion {
+        value: written_form(iri, &env.prefixes),
+        label: label.into(),
+        hint: term
+            .and_then(|t| t.definition.pick(w.languages()))
+            .map(|d| AttrValue::from(d.to_string())),
+        group: group.cloned(),
+    }
+}
+
+/// A right operand's suggestions: the values the profile suggests for the
+/// left operand with their narrower values nested under them; else every
+/// value the loaded profiles declare, under a heading that says so, unless
+/// the left operand expects a literal datatype those IRIs cannot fit.
+fn profile_values(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<AttrValue, usize>) {
+    const ANY_URI: &str = "http://www.w3.org/2001/XMLSchema#anyURI";
+    let w = &env.cfg.wording;
+    if w.is_empty() {
+        return (vec![], HashMap::new());
+    }
+    let left = left_operand_term(env, slot);
+    if let Some(t) = left
+        && !t.hints.value_tree.is_empty()
+    {
+        let mut depth = HashMap::new();
+        let list = t
+            .hints
+            .value_tree
+            .iter()
+            .map(|(iri, d)| {
+                let s = profile_suggestion(env, iri, None);
+                if *d > 0 {
+                    depth.insert(s.value.clone(), *d);
+                }
+                s
+            })
+            .collect();
+        return (list, depth);
+    }
+    if left
+        .and_then(|t| t.hints.datatype.as_deref())
+        .is_some_and(|d| d != ANY_URI)
+    {
+        return (vec![], HashMap::new());
+    }
+    let group = env.cfg.labels.profile_values.clone();
+    let mut seen = HashSet::new();
+    let list = w
+        .profiles()
+        .flat_map(|p| p.terms_of(TermKind::RightOperand))
+        .filter(|t| !t.deprecated && seen.insert(t.iri.as_str()))
+        .map(|t| profile_suggestion(env, &t.iri, Some(&group)))
+        .collect();
+    (list, HashMap::new())
+}
+
+/// Whether the right operand value at `path` is an IRI reference.
+fn holds_iri(doc: &EditDoc, path: &SlotPath) -> bool {
+    let Field::RightOperand(k) = path.field else {
+        return false;
+    };
+    match doc.node(&path.node) {
+        Some(NodeRef::Constraint(ConstraintNode::Atomic(a))) => {
+            matches!(&a.right, RightOperand::Values(v) if matches!(v.get(k), Some(Literal::Iri(_))))
+        }
+        _ => false,
+    }
+}
+
+fn placeholder(env: &Env, slot: &Slot) -> AttrValue {
+    if slot.kind == SlotKind::Literal
+        && let Some(dt) = left_operand_term(env, slot).and_then(|t| t.hints.datatype.as_deref())
+        && let Some((_, p)) = env
+            .cfg
+            .labels
+            .datatype_placeholders
+            .iter()
+            .find(|(k, _)| k == dt)
+    {
+        return p.clone();
+    }
+    placeholder_of(env, slot.kind)
+}
+
+fn placeholder_of(env: &Env, kind: SlotKind) -> AttrValue {
     let p = &env.cfg.labels.placeholders;
     match kind {
         SlotKind::PolicyKind => &p.kind,
@@ -225,15 +511,46 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
     let query = use_state(String::new);
     let open = use_state(|| false);
     let active = use_state(|| 0usize);
+    // A closed slot: why the text typed into it was not taken (it is still
+    // there, to correct), and what a polite live region says about a draft
+    // that was given up.
+    let invalid = use_state(|| None::<AttrValue>);
+    let announce = use_state(AttrValue::default);
 
     let use_suggestions = cfg.suggestions;
-    let options = if use_suggestions {
+    let (options, depths) = if use_suggestions {
         options_for(&env, slot)
     } else {
-        vec![]
+        (vec![], HashMap::new())
+    };
+    let closed = closure(&env, slot);
+    let not_in_profile = closed.is_some_and(|c| outside(&env, slot, c, &options));
+    let note_id = format!("prose-note-{}", slot.path);
+    let message_id = format!("prose-message-{}", slot.path);
+    // The issues that describe the slot, then the note under it, then why
+    // the text typed into it was not taken.
+    let described = {
+        let mut ids: Vec<String> = described_by.iter().map(|d| d.to_string()).collect();
+        if not_in_profile {
+            ids.push(note_id.clone());
+        }
+        if invalid.is_some() {
+            ids.push(message_id.clone());
+        }
+        (!ids.is_empty()).then(|| AttrValue::from(ids.join(" ")))
+    };
+    // A closed slot lists every entry it takes, scrolling; an open one the
+    // best few.
+    let allowed;
+    let (source, most): (&[Suggestion], usize) = match closed {
+        Some(c) if *open => {
+            allowed = allowed_options(&env, slot, c, &options);
+            (&allowed, usize::MAX)
+        }
+        _ => (&options, cfg.max_suggestions),
     };
     let shown: Vec<Suggestion> = if *open {
-        filter_suggestions(&options, &query, cfg.max_suggestions)
+        filter_suggestions(source, &query, most)
             .into_iter()
             .cloned()
             .collect()
@@ -248,7 +565,14 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         (*active).min(shown.len() - 1)
     };
 
-    let commit: Callback<()> = {
+    // A right operand's suggestions are profile values, which are IRIs. A
+    // slot that already holds an IRI keeps it through SetText; into any
+    // other (a string, a typed or new value) a pick is sent as SetIri.
+    let pick_as_iri = slot.kind == SlotKind::Literal
+        && matches!(slot.path.field, Field::RightOperand(_))
+        && !holds_iri(&env.doc, &slot.path);
+
+    let commit: Callback<How> = {
         let node_ref = node_ref.clone();
         let dirty = dirty.clone();
         let rev = rev.dispatcher();
@@ -256,7 +580,13 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         let path = slot.path.clone();
         let owner = slot.owner;
         let raw = slot.raw.clone();
-        Callback::from(move |_| {
+        let env = env.clone();
+        let slot = slot.clone();
+        let options = closed.map(|_| options.clone());
+        let invalid = invalid.clone();
+        let announce = announce.clone();
+        let open = open.clone();
+        Callback::from(move |how: How| {
             if !*dirty.borrow() {
                 return;
             }
@@ -264,13 +594,65 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                 .cast::<web_sys::Element>()
                 .and_then(|e| e.text_content())
                 .unwrap_or_default();
-            let value = clean_edit(&text, &raw);
+            let mut value = clean_edit(&text, &raw);
+            let mut as_iri = false;
+            if let (Some(closure), Some(options)) = (closed, &options)
+                && value != raw
+                && !value.is_empty()
+            {
+                let allowed = allowed_options(&env, &slot, closure, options);
+                match resolve(&env, &slot, closure, &allowed, &value, how == How::Enter) {
+                    Some(v) => {
+                        value = v;
+                        as_iri = closure == Closure::Values && pick_as_iri;
+                    }
+                    None if how == How::Blur => {
+                        // Given up: back to the value, and say so.
+                        *dirty.borrow_mut() = false;
+                        let labels = &env.cfg.labels;
+                        announce.set(closed::kept_message(labels, &raw, &value).into());
+                        invalid.set(None);
+                        rev.dispatch(());
+                        return;
+                    }
+                    None => {
+                        // Not taken: the text stays, with the reason.
+                        let labels = &env.cfg.labels;
+                        let field = match closure {
+                            Closure::Values => labels.fields.right_operand.to_string(),
+                            Closure::Terms => labels.field_name(slot.path.field),
+                        };
+                        let near = closed::closest(&allowed, &value);
+                        invalid.set(Some(
+                            closed::not_allowed_message(
+                                labels,
+                                &value,
+                                &field,
+                                &closed::profile_names(&env.cfg.wording),
+                                near,
+                            )
+                            .into(),
+                        ));
+                        open.set(true);
+                        return;
+                    }
+                }
+            }
             *dirty.borrow_mut() = false;
             if value != raw {
-                onedit.emit(EditEvent::SetText {
-                    slot: path.clone(),
-                    expect: owner,
-                    value,
+                invalid.set(None);
+                onedit.emit(if as_iri {
+                    EditEvent::SetIri {
+                        slot: path.clone(),
+                        expect: owner,
+                        value,
+                    }
+                } else {
+                    EditEvent::SetText {
+                        slot: path.clone(),
+                        expect: owner,
+                        value,
+                    }
                 });
             }
             rev.dispatch(());
@@ -283,14 +665,28 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         let refocus = refocus.clone();
         let commit = commit.clone();
         let open = open.clone();
+        let rev = rev.dispatcher();
+        let onedit = env.onedit.clone();
+        let path = slot.path.clone();
+        let owner = slot.owner;
         Callback::from(move |value: AttrValue| {
             if let Some(el) = node_ref.cast::<web_sys::Element>() {
                 el.set_text_content(Some(&value));
             }
-            *dirty.borrow_mut() = true;
             *refocus.borrow_mut() = true;
             open.set(false);
-            commit.emit(());
+            if pick_as_iri {
+                *dirty.borrow_mut() = false;
+                onedit.emit(EditEvent::SetIri {
+                    slot: path.clone(),
+                    expect: owner,
+                    value: value.to_string(),
+                });
+                rev.dispatch(());
+                return;
+            }
+            *dirty.borrow_mut() = true;
+            commit.emit(How::Pick);
         })
     };
 
@@ -301,9 +697,13 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         let query = query.clone();
         let open = open.clone();
         let active = active.clone();
+        let invalid = invalid.clone();
         Callback::from(move |e: InputEvent| {
             *dirty.borrow_mut() = true;
             *navigated.borrow_mut() = false;
+            if invalid.is_some() {
+                invalid.set(None);
+            }
             if use_suggestions && !e.is_composing() {
                 let text = node_ref
                     .cast::<web_sys::Element>()
@@ -329,6 +729,8 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         let node_ref = node_ref.clone();
         let shown = shown.clone();
         let navigated = navigated.clone();
+        let invalid = invalid.clone();
+        let rejected = invalid.is_some();
         Callback::from(move |e: KeyboardEvent| {
             // keyCode 229: Safari sends the Enter that confirms an IME
             // candidate after `compositionend`, with isComposing already false.
@@ -349,14 +751,20 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                     if *dirty.borrow() {
                         *refocus.borrow_mut() = true;
                     }
+                    // A closed slot that does not take the text opens the list
+                    // again from the commit.
                     open.set(false);
-                    commit.emit(());
+                    commit.emit(How::Enter);
                 }
                 "Escape" => {
                     e.prevent_default();
-                    if list_open {
+                    if list_open && !rejected {
                         open.set(false);
                     } else {
+                        if rejected {
+                            invalid.set(None);
+                            open.set(false);
+                        }
                         *reverting.borrow_mut() = true;
                         *dirty.borrow_mut() = false;
                         *refocus.borrow_mut() = true;
@@ -397,7 +805,14 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
             kind: FocusKind::Slot(slot.kind),
             raw: slot.raw.clone(),
         };
-        Callback::from(move |_: FocusEvent| on_focus.emit(Some(focus.clone())))
+        let announce = announce.clone();
+        Callback::from(move |_: FocusEvent| {
+            // The same message must be able to be announced again.
+            if !announce.is_empty() {
+                announce.set(AttrValue::default());
+            }
+            on_focus.emit(Some(focus.clone()))
+        })
     };
 
     let onfocusout = {
@@ -410,7 +825,7 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                 *reverting.borrow_mut() = false;
                 return;
             }
-            commit.emit(());
+            commit.emit(How::Blur);
             open.set(false);
             on_focus.emit(None);
         })
@@ -484,6 +899,11 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         class.extend(cls!(cfg, slot_empty, "prose-slot-empty"));
         styles.push(&cfg.styles.slot_empty);
     }
+    let severity = if invalid.is_some() {
+        Some(Severity::Error)
+    } else {
+        *severity
+    };
     match severity {
         Some(Severity::Error) => {
             class.extend(cls!(cfg, slot_invalid, "prose-slot-invalid"));
@@ -508,7 +928,7 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         *epoch.borrow()
     );
     let label = cfg.labels.slot_name(&slot.path);
-    let invalid = matches!(severity, Some(Severity::Error)).then_some("true");
+    let aria_invalid = matches!(severity, Some(Severity::Error)).then_some("true");
     // aria-expanded and the popup relationship belong to a combobox, not a
     // plain textbox.
     let role = if use_suggestions {
@@ -526,6 +946,75 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         (None, None, None)
     };
 
+    let option = |i: usize| {
+        let s = &shown[i];
+        let accept = accept.clone();
+        let value = s.value.clone();
+        let onmousedown = Callback::from(move |e: MouseEvent| {
+            e.prevent_default();
+            accept.emit(value.clone());
+        });
+        // The pointer highlights an option (the stylesheet does it for
+        // `:hover`); the active descendant follows, so what is shown and
+        // what is announced agree. Enter still commits the typed text
+        // unless an arrow key was used.
+        let onmousemove = {
+            let active = active.clone();
+            Callback::from(move |_: MouseEvent| {
+                if *active != i {
+                    active.set(i);
+                }
+            })
+        };
+        let mut class = cls!(cfg, suggestion, "prose-suggestion");
+        let mut styles = vec![&cfg.styles.suggestion];
+        if i == active_idx {
+            class.extend(cls!(cfg, suggestion_active, "prose-suggestion-active"));
+            styles.push(&cfg.styles.suggestion_active);
+        }
+        // A value narrower than a suggested one is indented by the
+        // stylesheet, by depth.
+        let depth = depths.get(&s.value).copied().unwrap_or(0);
+        let depth_style = (depth > 0).then(|| AttrValue::from(format!("--prose-depth: {depth}")));
+        if depth > 0 {
+            class.push("prose-suggestion-nested");
+            styles.push(&depth_style);
+        }
+        let style = merge_styles(&styles);
+        html! {
+            <li
+                id={format!("{list_id}-{i}")}
+                role="option"
+                class={class}
+                style={style}
+                aria-selected={(i == active_idx).to_string()}
+                onmousedown={onmousedown}
+                onmousemove={onmousemove}
+            >
+                { s.label.clone() }
+                if let Some(h) = &s.hint {
+                    <small>{ h.clone() }</small>
+                }
+            </li>
+        }
+    };
+    // Runs of options under one heading. Without any profile group the list
+    // is flat, as it always was.
+    let grouped = shown.iter().any(|s| s.group.is_some());
+    let mut runs: Vec<(AttrValue, std::ops::Range<usize>)> = vec![];
+    if grouped {
+        for (i, s) in shown.iter().enumerate() {
+            let heading = s
+                .group
+                .clone()
+                .unwrap_or_else(|| cfg.labels.group_core.clone());
+            match runs.last_mut() {
+                Some((h, r)) if *h == heading => r.end = i + 1,
+                _ => runs.push((heading, i..i + 1)),
+            }
+        }
+    }
+
     html! {
         <span class="prose-slot-wrap">
             <span class="prose-slot-edit">
@@ -537,17 +1026,18 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                     role={role}
                     contenteditable={editable_value()}
                     aria-multiline={(!use_suggestions).then_some("false")}
-                    aria-placeholder={placeholder(&env, slot.kind)}
+                    aria-placeholder={placeholder(&env, slot)}
                     aria-haspopup={use_suggestions.then_some("listbox")}
                     aria-label={label}
-                    aria-invalid={invalid}
-                    aria-describedby={described_by.clone()}
+                    aria-invalid={aria_invalid}
+                    aria-describedby={described}
                     aria-autocomplete={use_suggestions.then_some("list")}
                     aria-expanded={expanded}
                     aria-controls={controls}
                     aria-activedescendant={activedesc}
                     data-slot={slot.path.to_string()}
-                    data-placeholder={placeholder(&env, slot.kind)}
+                    data-closed={closed.map(|_| "true")}
+                    data-placeholder={placeholder(&env, slot)}
                     title={slot.display.clone()}
                     spellcheck="false"
                     autocapitalize="off"
@@ -563,6 +1053,27 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                     { if slot.raw.is_empty() { Html::default() } else { html! { { slot.raw.clone() } } } }
                 </span>
             </span>
+            if not_in_profile {
+                <small id={note_id} class="prose-slot-note">{ cfg.labels.not_in_profile.clone() }</small>
+            }
+            if let Some(message) = &*invalid {
+                <span
+                    id={message_id}
+                    class={classes!(
+                        cls!(cfg, issue, "prose-issue"),
+                        cls!(cfg, issue_error, "prose-issue-error"),
+                        "prose-slot-message"
+                    )}
+                    style={merge_styles(&[&cfg.styles.issue, &cfg.styles.issue_error])}
+                >
+                    { message.clone() }
+                </span>
+            }
+            if closed.is_some() {
+                <span class={cls!(cfg, live, "prose-live")} role="status" aria-live="polite">
+                    { (*announce).clone() }
+                </span>
+            }
             if list_open {
                 <ul
                     id={list_id.clone()}
@@ -570,50 +1081,16 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                     class={cls!(cfg, suggestions, "prose-suggestions")}
                     style={cfg.styles.suggestions.clone()}
                 >
-                    { for shown.iter().enumerate().map(|(i, s)| {
-                        let accept = accept.clone();
-                        let value = s.value.clone();
-                        let onmousedown = Callback::from(move |e: MouseEvent| {
-                            e.prevent_default();
-                            accept.emit(value.clone());
-                        });
-                        // The pointer highlights an option (the stylesheet does
-                        // it for `:hover`); the active descendant follows, so
-                        // what is shown and what is announced agree. Enter
-                        // still commits the typed text unless an arrow key was
-                        // used.
-                        let onmousemove = {
-                            let active = active.clone();
-                            Callback::from(move |_: MouseEvent| {
-                                if *active != i {
-                                    active.set(i);
-                                }
-                            })
-                        };
-                        let mut class = cls!(cfg, suggestion, "prose-suggestion");
-                        let mut styles = vec![&cfg.styles.suggestion];
-                        if i == active_idx {
-                            class.extend(cls!(cfg, suggestion_active, "prose-suggestion-active"));
-                            styles.push(&cfg.styles.suggestion_active);
-                        }
-                        let style = merge_styles(&styles);
-                        html! {
-                            <li
-                                id={format!("{list_id}-{i}")}
-                                role="option"
-                                class={class}
-                                style={style}
-                                aria-selected={(i == active_idx).to_string()}
-                                onmousedown={onmousedown}
-                                onmousemove={onmousemove}
-                            >
-                                { s.label.clone() }
-                                if let Some(h) = &s.hint {
-                                    <small>{ h.clone() }</small>
-                                }
+                    if grouped {
+                        { for runs.iter().enumerate().map(|(k, (heading, range))| html! {
+                            <li role="group" class="prose-suggestion-group" aria-labelledby={format!("{list_id}-g{k}")}>
+                                <span id={format!("{list_id}-g{k}")} class="prose-suggestion-group-label">{ heading.clone() }</span>
+                                <ul role="none">{ for range.clone().map(&option) }</ul>
                             </li>
-                        }
-                    }) }
+                        }) }
+                    } else {
+                        { for (0..shown.len()).map(&option) }
+                    }
                 </ul>
             }
         </span>

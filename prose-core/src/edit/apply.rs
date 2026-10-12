@@ -1,9 +1,11 @@
 //! Events and the one generic reducer that applies them.
 use std::fmt;
 
+use super::issue::{Issue, IssueTarget, Severity};
 use super::model::*;
 use super::path::*;
 use super::rules::{EditRules, odrl_position};
+use crate::validate::Validator;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
@@ -32,6 +34,15 @@ pub enum EditEvent {
     },
     /// A pick from a closed list: Operator, LogicalOp or Conflict ("" = absent).
     SetChoice {
+        slot: SlotPath,
+        expect: NodeId,
+        value: String,
+    },
+    /// An IRI picked for a right operand value (a suggestion from a
+    /// profile): stored as [`Literal::Iri`] and written `{"@id": value}`,
+    /// whatever the value held before. Only `Field::RightOperand(_)` of an
+    /// atomic constraint takes it; typing stays [`EditEvent::SetText`].
+    SetIri {
         slot: SlotPath,
         expect: NodeId,
         value: String,
@@ -86,10 +97,61 @@ pub enum EditEvent {
 #[non_exhaustive]
 pub enum EditError {
     NoSuchPath(String),
-    Stale { expected: NodeId, found: NodeId },
+    Stale {
+        expected: NodeId,
+        found: NodeId,
+    },
     NotAllowed(String),
     Locked(String),
     Invalid(String),
+    /// Refused by strict mode's reducer gate (see
+    /// [`EditDoc::apply_gated`]): the event writes a term the loaded
+    /// profiles do not allow there. The finding says which rule and why.
+    OutsideProfile(Box<crate::validate::Finding>),
+}
+
+impl EditError {
+    /// A refusal placed at the slot `ev` writes, as the editor shows an
+    /// issue; `None` for the reducer's own errors, which are not about a
+    /// slot's value.
+    pub fn issue(&self, ev: &EditEvent) -> Option<Issue> {
+        let EditError::OutsideProfile(f) = self else {
+            return None;
+        };
+        let target = match ev {
+            EditEvent::SetText { slot, .. }
+            | EditEvent::SetChoice { slot, .. }
+            | EditEvent::SetIri { slot, .. } => IssueTarget::Slot(slot.clone()),
+            _ => f.target.clone(),
+        };
+        Some(Issue {
+            target,
+            severity: Severity::Error,
+            message: f.message.clone(),
+        })
+    }
+}
+
+/// What strict mode does with an event the loaded profiles do not allow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum StrictEdit {
+    /// Commit it; the validator marks it as an error.
+    #[default]
+    Flag,
+    /// Refuse it in the reducer, as [`EditError::OutsideProfile`].
+    RefuseTerms,
+}
+
+impl StrictEdit {
+    /// The gate to hand [`EditDoc::apply_gated`]: `validator` under
+    /// `RefuseTerms`, none under `Flag`.
+    pub fn gate(self, validator: Option<&Validator>) -> Option<&Validator> {
+        match self {
+            StrictEdit::RefuseTerms => validator,
+            StrictEdit::Flag => None,
+        }
+    }
 }
 
 impl fmt::Display for EditError {
@@ -104,6 +166,9 @@ impl fmt::Display for EditError {
             EditError::NotAllowed(why) => write!(f, "not allowed: {why}"),
             EditError::Locked(why) => write!(f, "kept as written: {why}"),
             EditError::Invalid(why) => write!(f, "invalid: {why}"),
+            EditError::OutsideProfile(finding) => {
+                write!(f, "outside the profile: {}", finding.message)
+            }
         }
     }
 }
@@ -166,6 +231,11 @@ pub(crate) fn apply_event(
             expect,
             value,
         } => set_choice(doc, rules, slot, *expect, value),
+        EditEvent::SetIri {
+            slot,
+            expect,
+            value,
+        } => set_iri(doc, slot, *expect, value),
         EditEvent::Add {
             list,
             index,
@@ -255,6 +325,31 @@ fn set_text(
         }
         (NodeMut::Policy(p), Field::InheritFrom(k)) => {
             *p.inherit_from.get_mut(k).ok_or_else(bad)? = value.to_string()
+        }
+        _ => return Err(bad()),
+    }
+    Ok(())
+}
+
+fn set_iri(
+    doc: &mut EditDoc,
+    slot: &SlotPath,
+    expect: NodeId,
+    value: &str,
+) -> Result<(), EditError> {
+    check_node(doc, &slot.node, expect, false)?;
+    let bad = || EditError::NoSuchPath(slot.to_string());
+    let node = resolve_mut(doc, &slot.node).ok_or_else(|| no_node(&slot.node))?;
+    match (node, slot.field) {
+        (NodeMut::Constraint(ConstraintNode::Atomic(a)), Field::RightOperand(k)) => {
+            let RightOperand::Values(v) = &mut a.right else {
+                return Err(bad());
+            };
+            let lit = v.get_mut(k).ok_or_else(bad)?;
+            if value.is_empty() {
+                return Err(EditError::Invalid("an IRI cannot be empty".into()));
+            }
+            *lit = Literal::Iri(value.to_string());
         }
         _ => return Err(bad()),
     }
@@ -733,7 +828,7 @@ fn item_target(doc: &EditDoc, list: &ListPath, index: usize) -> Option<FocusTarg
 /// `doc_after`. `None` when no move is needed or the target is gone.
 pub fn focus_after(ev: &EditEvent, doc_after: &EditDoc) -> Option<FocusTarget> {
     match ev {
-        EditEvent::SetText { .. } | EditEvent::SetChoice { .. } => None,
+        EditEvent::SetText { .. } | EditEvent::SetChoice { .. } | EditEvent::SetIri { .. } => None,
         EditEvent::Add { list, index, .. } => match list.item_path(*index) {
             Some(p) => first_slot(doc_after, &p),
             None => {

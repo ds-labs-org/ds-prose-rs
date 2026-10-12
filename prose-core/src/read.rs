@@ -1,8 +1,11 @@
 //! JSON-LD in, [`Document`] out.
 use crate::ProseError;
 use crate::model::*;
-use crate::words::{self, join, local_name};
+use crate::profile::{Budget, Prefixes, TermKind, Wording};
+use crate::words::{join, local_name};
+use crate::words_ctx::{WordCtx, profile_name};
 use serde_json::{Map, Value};
+use std::sync::Arc;
 
 pub(crate) type Obj = Map<String, Value>;
 
@@ -51,7 +54,7 @@ pub(crate) const QUIET_PREFIXES: &[&str] =
     &["dc:", "dct:", "dcterms:", "rdfs:", "skos:", "schema:"];
 
 /// The ODRL namespace.
-const ODRL_NS: &str = "http://www.w3.org/ns/odrl/2/";
+pub(crate) const ODRL_NS: &str = "http://www.w3.org/ns/odrl/2/";
 /// The ODRL properties the reader looks up by their bare name.
 const ODRL_PROPERTIES: &[&str] = &[
     "uid",
@@ -87,23 +90,43 @@ const ODRL_PROPERTIES: &[&str] = &[
     "partOf",
 ];
 
+/// The most terms one policy's glossary lists.
+const MAX_GLOSSARY: usize = 30;
+
 /// How deep the reader looks into a value that is already parsed. serde_json
 /// stops a parsed document at 128 levels, so nothing parsed from text comes
 /// near this; a value built in code can be deeper, and cutting it with a note
 /// is better than overflowing the stack (a panic in wasm takes the page).
-const MAX_DEPTH: usize = 256;
+pub(crate) const MAX_DEPTH: usize = 256;
 
-pub fn document(value: &Value) -> Result<Document, ProseError> {
-    let mut r = Reader::default();
+/// The reading of `value`, worded with `wording`. With no profile loaded it
+/// is the v0.1 reading and every glossary is empty.
+pub fn document_with(value: &Value, wording: &Wording) -> Result<Reading, ProseError> {
+    let mut r = Reader::new(WordCtx::new(wording, Prefixes::default()));
     let mut notes = Vec::new();
     let value = &bare_odrl_keys(value, odrl_prefix_is_odrl(value), &mut notes);
     for note in notes {
         r.warn(note);
     }
+    // Without a profile no term is expanded: the v0.1 path stays as it was.
+    let scopes = match r.ctx.profiled() {
+        true => node_prefixes(value),
+        false => Vec::new(),
+    };
     let mut doc = Document::default();
-    for v in policy_nodes(value) {
+    let mut glossary = Vec::new();
+    for (i, v) in policy_nodes(value).into_iter().enumerate() {
         match v {
-            Value::Object(o) if looks_like_policy(o) => doc.policies.push(r.policy(o)),
+            Value::Object(o) if looks_like_policy(o) => {
+                if let Some(p) = scopes.get(i) {
+                    r.ctx.set_prefixes(Prefixes::default().inside(p.clone()));
+                }
+                doc.policies.push(r.policy(o));
+                r.glossed.clear();
+                glossary.push(PolicyGlossary {
+                    terms: std::mem::take(&mut r.glossary),
+                });
+            }
             _ => r.warn("skipped a node that is not an ODRL policy"),
         }
     }
@@ -111,7 +134,10 @@ pub fn document(value: &Value) -> Result<Document, ProseError> {
         return Err(ProseError::NoPolicy);
     }
     doc.warnings = r.warnings;
-    Ok(doc)
+    Ok(Reading {
+        document: doc,
+        glossary,
+    })
 }
 
 /// `v` with ODRL property keys written as compact IRIs (`odrl:permission`)
@@ -276,6 +302,33 @@ pub(crate) fn policy_nodes(v: &Value) -> Vec<&Value> {
     }
 }
 
+/// The prefixes of each node [`policy_nodes`] yields, in the same order:
+/// the node's own context, then those of the objects whose `@graph` holds
+/// it. A sibling's context is not in scope. Scopes are shared, never
+/// copied: a node without a context of its own costs one pointer, and one
+/// with a context costs that context.
+pub(crate) fn node_prefixes(v: &Value) -> Vec<Arc<Prefixes>> {
+    fn walk(v: &Value, outer: &Arc<Prefixes>, out: &mut Vec<Arc<Prefixes>>, budget: &mut Budget) {
+        let scope = match v.get("@context") {
+            Some(c) => Arc::new(Prefixes::of_context(c, budget).inside(outer.clone())),
+            None => outer.clone(),
+        };
+        match v {
+            Value::Array(a) => a.iter().for_each(|x| walk(x, outer, out, budget)),
+            Value::Object(o) if o.contains_key("@graph") => walk(&o["@graph"], &scope, out, budget),
+            _ => out.push(scope),
+        }
+    }
+    let mut out = Vec::new();
+    walk(
+        v,
+        &Arc::new(Prefixes::default()),
+        &mut out,
+        &mut Budget::default(),
+    );
+    out
+}
+
 pub(crate) fn looks_like_policy(o: &Obj) -> bool {
     types(o).iter().any(|t| {
         matches!(
@@ -341,11 +394,14 @@ pub(crate) fn ident(v: &Value) -> Option<String> {
     }
 }
 
-#[derive(Default)]
-struct Reader {
+struct Reader<'a> {
     warnings: Vec<String>,
     /// The same messages, for de-duplication in constant time.
     seen: std::collections::HashSet<String>,
+    ctx: WordCtx<'a>,
+    /// The current policy's glossary, and the IRIs already in it.
+    glossary: Vec<Gloss>,
+    glossed: std::collections::HashSet<String>,
 }
 
 /// What a rule inherits from its policy when it states none of its own.
@@ -357,7 +413,47 @@ struct Inherited {
     actions: Vec<(String, Vec<Condition>)>,
 }
 
-impl Reader {
+impl<'a> Reader<'a> {
+    fn new(ctx: WordCtx<'a>) -> Reader<'a> {
+        Reader {
+            warnings: Vec::new(),
+            seen: Default::default(),
+            ctx,
+            glossary: Vec::new(),
+            glossed: Default::default(),
+        }
+    }
+
+    /// Notes one use of `written` as a `kind`: its first use in a policy
+    /// goes into the glossary, a deprecated term is warned about, and so is
+    /// a term (`what` names it) a loaded profile's namespace does not
+    /// declare. Nothing happens while no profile is loaded.
+    fn term(&mut self, written: &str, kind: TermKind, what: Option<&str>) {
+        if !self.ctx.profiled() || written.is_empty() {
+            return;
+        }
+        if let Some((t, p)) = self.ctx.resolve(written) {
+            if t.deprecated {
+                self.warn(format!(
+                    "\"{written}\" is deprecated in the profile {}",
+                    profile_name(p)
+                ));
+            }
+            if self.glossary.len() < MAX_GLOSSARY
+                && !self.glossed.contains(&t.iri)
+                && let Some(g) = self.ctx.gloss(written, kind)
+            {
+                self.glossed.insert(t.iri.clone());
+                self.glossary.push(g);
+            }
+        } else if let (Some(what), Some(p)) = (what, self.ctx.undeclared_in(written)) {
+            self.warn(format!(
+                "the {what} \"{written}\" is not declared by the loaded profile {}",
+                profile_name(p)
+            ));
+        }
+    }
+
     fn warn(&mut self, msg: impl Into<String>) {
         let msg = msg.into();
         if self.seen.insert(msg.clone()) {
@@ -365,14 +461,35 @@ impl Reader {
         }
     }
 
+    /// A declared profile as the note names it: a loaded profile with its
+    /// title and version, any other by its IRI.
+    fn profile_named(&self, id: &str) -> String {
+        let Some(p) = self.ctx.profile(id) else {
+            return id.to_string();
+        };
+        match (self.ctx.title(p), p.version()) {
+            (Some(t), Some(v)) => format!("{t} ({id}, version {v})"),
+            (Some(t), None) => format!("{t} ({id})"),
+            (None, _) => id.to_string(),
+        }
+    }
+
     fn unknown_keys(&mut self, o: &Obj, known: &[&str], what: &str) {
+        self.unknown_keys_but(o, known, &[], what);
+    }
+
+    /// As `unknown_keys`, with `also` known too.
+    fn unknown_keys_but(&mut self, o: &Obj, known: &[&str], also: &[String], what: &str) {
         // Sorted, not in document order: `serde_json` keeps document order when
         // its `preserve_order` feature is on (the edit module needs it), and
         // the v0.1 warnings were always alphabetical.
         let mut keys: Vec<&String> = o.keys().collect();
         keys.sort();
         for k in keys {
-            if known.contains(&k.as_str()) || QUIET_PREFIXES.iter().any(|p| k.starts_with(p)) {
+            if known.contains(&k.as_str())
+                || also.contains(k)
+                || QUIET_PREFIXES.iter().any(|p| k.starts_with(p))
+            {
                 continue;
             }
             self.warn(format!("ignored unknown property \"{k}\" on {what}"));
@@ -393,6 +510,10 @@ impl Reader {
             None => PolicyKind::Other("Policy".into()),
         };
         let uid = get(o, &["uid", "@id", "id"]).and_then(ident);
+        let class = types(o).iter().find_map(|t| self.ctx.policy_class(t));
+        for t in types(o) {
+            self.term(t, TermKind::PolicyClass, None);
+        }
         let assigner = self.parties(o.get("assigner"));
         let assignee = self.parties(o.get("assignee"));
 
@@ -428,11 +549,20 @@ impl Reader {
         let mut notes = Vec::new();
         if let Some(p) = o.get("profile") {
             let ids: Vec<String> = items(p).into_iter().filter_map(ident).collect();
+            for id in &ids {
+                if !self.ctx.covers(id) {
+                    self.warn(format!(
+                        "the policy declares the profile <{id}>, which is not loaded"
+                    ));
+                }
+            }
+            let ids: Vec<String> = ids.iter().map(|id| self.profile_named(id)).collect();
             if !ids.is_empty() {
                 notes.push(format!("Written to the profile {}.", join(&ids)));
             }
         }
         if let Some(c) = o.get("conflict").and_then(ident) {
+            self.term(&c, TermKind::ConflictTerm, None);
             notes.push(match local_name(&c) {
                 "perm" => "If a permission and a prohibition conflict, the permission wins.".into(),
                 "prohibit" => {
@@ -473,6 +603,7 @@ impl Reader {
             self.warn("a policy has no permission, prohibition or obligation");
         }
 
+        let label = class.as_deref().unwrap_or(label);
         Policy {
             heading: match &uid {
                 Some(u) => format!("{label} {u}"),
@@ -501,7 +632,13 @@ impl Reader {
                 };
             }
         };
-        self.unknown_keys(o, RULE_KEYS, "a rule");
+        let functions: Vec<(String, String)> = o
+            .keys()
+            .filter(|k| !RULE_KEYS.contains(&k.as_str()))
+            .filter_map(|k| self.ctx.party_function(k).map(|l| (k.clone(), l)))
+            .collect();
+        let function_keys: Vec<String> = functions.iter().map(|(k, _)| k.clone()).collect();
+        self.unknown_keys_but(o, RULE_KEYS, &function_keys, "a rule");
         let uid = get(o, &["uid", "@id", "id"]).and_then(ident);
 
         let own_assigner = self.parties(o.get("assigner"));
@@ -547,7 +684,7 @@ impl Reader {
             true => String::new(),
             false => format!(", as {verb} by {}", join(assigner)),
         };
-        let sentence = match kind {
+        let mut sentence = match kind {
             RuleKind::Permission => {
                 let who = if assignee.is_empty() {
                     "Anyone".into()
@@ -573,6 +710,13 @@ impl Reader {
                 format!("{who} must {action}{target_text}{}.", by("required"))
             }
         };
+        for (key, label) in &functions {
+            self.term(key, TermKind::PartyFunction, None);
+            let parties = self.parties(o.get(key));
+            if !parties.is_empty() {
+                sentence.push_str(&format!(" {label}: {}.", join(&parties)));
+            }
+        }
 
         let refinements = actions
             .iter()
@@ -696,7 +840,10 @@ impl Reader {
         items(v)
             .into_iter()
             .filter_map(|a| match a {
-                Value::String(s) => Some((words::action(s), vec![])),
+                Value::String(s) => {
+                    self.term(s, TermKind::Action, Some("action"));
+                    Some((self.ctx.action(s), vec![]))
+                }
                 Value::Object(o) => {
                     // Pre-0.7 profiles name the action under `type`.
                     let Some(name) =
@@ -705,11 +852,12 @@ impl Reader {
                         self.warn("skipped an action object that names no action");
                         return None;
                     };
+                    self.term(&name, TermKind::Action, Some("action"));
                     let refine = o
                         .get("refinement")
                         .map(|r| items(r).into_iter().map(|c| self.constraint(c)).collect())
                         .unwrap_or_default();
-                    Some((words::action(&name), refine))
+                    Some((self.ctx.action(&name), refine))
                 }
                 _ => {
                     self.warn("skipped an unreadable action");
@@ -753,6 +901,8 @@ impl Reader {
             self.warn("a constraint is missing its leftOperand or operator");
             return Condition::leaf("an incomplete constraint holds");
         };
+        self.term(&left, TermKind::LeftOperand, Some("left operand"));
+        self.term(&op, TermKind::Operator, Some("operator"));
         let right = if let Some(r) = o.get("rightOperand") {
             let conj = match local_name(&op) {
                 "isAnyOf" | "isNoneOf" => "or",
@@ -761,8 +911,9 @@ impl Reader {
             let vals: Vec<String> = items(r).into_iter().map(|x| self.literal(x)).collect();
             let mut text = join_with(&vals, conj);
             if let Some(u) = o.get("unit").and_then(ident) {
+                self.term(&u, TermKind::RightOperand, None);
                 text.push(' ');
-                text.push_str(&words::humanise(local_name(&u)));
+                text.push_str(&self.ctx.unit(&u));
             }
             text
         } else if let Some(r) = o.get("rightOperandReference").and_then(ident) {
@@ -773,8 +924,8 @@ impl Reader {
         };
         Condition::leaf(format!(
             "{} {} {}",
-            words::operand(&left),
-            words::operator_for(&left, &op),
+            self.ctx.operand(&left),
+            self.ctx.operator_for(&left, &op),
             right
         ))
     }
@@ -795,7 +946,11 @@ impl Reader {
                     };
                 }
                 match ident(v) {
-                    Some(id) => id,
+                    // `id` and `uid` are the ODRL context's aliases of `@id`.
+                    Some(id) => {
+                        self.term(&id, TermKind::RightOperand, Some("right operand"));
+                        self.ctx.value(&id).unwrap_or(id)
+                    }
                     None => {
                         self.warn("skipped an unreadable right operand");
                         "an unreadable value".to_string()

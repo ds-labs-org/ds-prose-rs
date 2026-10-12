@@ -1,0 +1,53 @@
+{
+  "schema": "ds-prose/validation-report@1",
+  "tool": {
+    "name": "ds-prose-rs",
+    "version": "<version>"
+  },
+  "mode": "advisory",
+  "tiers": [
+    "profile",
+    "prose",
+    "input"
+  ],
+  "ruleset": 1,
+  "verdict": "conforms",
+  "vocabulary": {
+    "odrl": "common",
+    "profiles": [
+      {
+        "iri": "https://example.org/odrl/profile/research",
+        "title": "Research Data Profile",
+        "version": "0.1.0"
+      }
+    ]
+  },
+  "gaps": [],
+  "counts": {
+    "error": 0,
+    "warning": 1,
+    "info": 0
+  },
+  "findings": [
+    {
+      "rule": "profile.undeclared-in-namespace",
+      "tier": "profile",
+      "basis": "standard-derived",
+      "severity": "warning",
+      "message": "the action \"ex:distill\" is not declared by the loaded profile <https://example.org/odrl/profile/research>",
+      "target": {
+        "kind": "slot",
+        "path": "policy[0].permission[1].action[0]#name"
+      },
+      "pointer": null,
+      "term": {
+        "written": "ex:distill",
+        "iri": "https://example.org/odrl/profile/research/distill"
+      },
+      "profile": "https://example.org/odrl/profile/research",
+      "expected": null,
+      "fixes": [],
+      "fingerprint": "00eac079d78d541d"
+    }
+  ]
+}

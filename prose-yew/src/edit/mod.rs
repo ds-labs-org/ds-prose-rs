@@ -21,6 +21,12 @@
 //! `prose-decoration`, `prose-suggestions`, `prose-suggestion`
 //! (`-active`), `prose-live`, `prose-empty`.
 //!
+//! Strict validation (see [`EditConfig::with_strict`]) adds `prose-problems`
+//! (with `prose-problem-*`, see [`ProseProblems`]), `prose-slot-note` and
+//! `prose-slot-message` under a closed slot, which carries
+//! `data-closed="true"`; the read-only component's `prose-violations`.
+//! Without a validator none of it is rendered.
+//!
 //! Markup: every policy, rule and condition container carries
 //! `data-node="<NodePath>"`; slots `data-slot="<SlotPath>"`; add buttons
 //! `data-add="<ListPath>"`. Controls the [`EditRules`](prose_core::edit::EditRules) do not allow are not
@@ -30,9 +36,11 @@
 //! server renderer, so set `EditConfig::base_css` to `false` and ship
 //! [`BASE_CSS`] yourself there.
 mod choice;
+mod closed;
 mod config;
 mod css;
 mod hook;
+mod problems;
 mod slot;
 mod suggest;
 mod view;
@@ -45,7 +53,12 @@ pub use config::{
     ProseClasses, ProseStyles, Reveal, Suggestion, Vocabulary, fill,
 };
 pub use css::BASE_CSS;
-pub use hook::{ProseEditor, use_prose_editor};
+pub use hook::{
+    ProseEditor, ProseEditorWith, use_prose_editor, use_prose_editor_with, use_validation,
+};
+pub(crate) use problems::status;
+pub use problems::{ProseProblems, ProseProblemsProps};
+pub use prose_core::edit::StrictEdit;
 pub use suggest::filter_suggestions;
 pub use view::{OdrlProseView, OdrlProseViewProps};
 
@@ -105,6 +118,32 @@ pub(crate) struct Env {
     pub on_focus_slot: Callback<Option<SlotFocus>>,
     /// (policy index, uid) of every policy that has one.
     pub policy_uids: Vec<(usize, AttrValue)>,
+    /// The prefixes the document binds, for writing picked IRIs.
+    pub prefixes: Rc<prose_core::profile::Prefixes>,
+    /// The document, for what a slot's constraint says elsewhere.
+    pub doc: Rc<prose_core::edit::EditDoc>,
+    /// Whether a slot is closed by strict validation, by (policy, kind of
+    /// slot) or slot, so that one render asks the validator once.
+    pub closed_cache: std::cell::RefCell<std::collections::HashMap<String, bool>>,
+    /// How many more times one render may ask the validator (see
+    /// [`Env::spend`]).
+    pub checks: std::cell::Cell<u32>,
+}
+
+/// The most times one render of the view asks the validator whether a term
+/// is allowed, for the markers and the closed lists. Each ask reads the
+/// whole document, so a hostile one cannot be allowed to make a render
+/// quadratic; past the limit the view shows what it would without a
+/// validator (the markers from the host's issues are not affected).
+pub(crate) const MAX_CHECKS: u32 = 2000;
+
+impl Env {
+    /// Takes one of the render's checks; `false` when none is left.
+    pub(crate) fn spend(&self) -> bool {
+        let left = self.checks.get();
+        self.checks.set(left.saturating_sub(1));
+        left > 0
+    }
 }
 
 #[derive(Clone)]

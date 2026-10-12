@@ -49,12 +49,26 @@ jobs:
         env:
           RUSTDOCFLAGS: "-D warnings"
 
+      # The workspace build turns on prose-core's turtle feature (prose-wasm
+      # asks for it); prose-core alone is tested without it and with it.
+      - name: prose-core with and without Turtle
+        run: |
+          cargo test -p prose-core --locked
+          cargo test -p prose-core --features turtle --locked
+
+      # A time budget for strict validation (building the index, then one
+      # large policy). Ignored in the debug run above, where it would measure
+      # the wrong thing; here it runs optimised.
+      - name: Strict validation time budget
+        run: cargo test -p prose-core --release --locked --test validate_perf -- --ignored
+
       # Each feature combination a consumer can pick must at least compile:
       # the host-side SSR build, and the browser build the site uses.
       - name: Feature builds
         run: |
           cargo check -p prose-core --locked
           cargo check -p prose-core --target wasm32-unknown-unknown --locked
+          cargo check -p prose-core --features turtle --target wasm32-unknown-unknown --locked
           cargo check -p prose-yew --locked
           cargo check -p prose-yew --features ssr --locked
           cargo check -p prose-yew --features csr --target wasm32-unknown-unknown --locked
@@ -88,7 +102,9 @@ jobs:
           tool: wasm-bindgen-cli@${{ steps.wb.outputs.version }}
 
       - name: Clippy (wasm32)
-        run: cargo clippy -p prose-yew -p demo --target wasm32-unknown-unknown --features csr --all-targets --locked -- -D warnings
+        run: |
+          cargo clippy -p prose-yew -p demo --target wasm32-unknown-unknown --features csr --all-targets --locked -- -D warnings
+          cargo clippy -p prose-wasm --target wasm32-unknown-unknown --all-targets --locked -- -D warnings
 
       # `--test '*'`, not a list of names: a new file under tests/ is covered
       # the moment it exists (a bare `cargo test -p ... --target
@@ -105,6 +121,7 @@ jobs:
           echo "chromedriver: ${CHROMEDRIVER}"
           cargo test -p prose-yew --target wasm32-unknown-unknown --features csr --locked --test '*'
           cargo test -p demo --target wasm32-unknown-unknown --locked --test '*'
+          cargo test -p prose-wasm --target wasm32-unknown-unknown --locked --test '*'
 
   # The release demo build, served under the Pages sub-path and booted in a
   # browser. Catches a build or boot failure before the deploy workflow does.
@@ -156,6 +173,14 @@ jobs:
       - name: Check the tarballs
         run: node scripts/check-npm-packages.mjs
 
+      # The ds-prose-validate command: its arguments and exit codes with a
+      # fake engine, then every exit code (0 to 3) through the bin npm links
+      # from the packed wasm tarball.
+      - name: Test the ds-prose-validate command
+        run: |
+          node --test scripts/test/*.test.mjs
+          node scripts/test-cli-tarball.mjs
+
       # The same command shape the release workflow uses, minus the upload
       # (needs no credentials). The leading "./" is required: npm reads
       # "dist-npm/x" as the GitHub shorthand "user/repo".
@@ -181,6 +206,7 @@ jobs:
         run: scripts/smoke-demo.sh demo-angular/dist/demo-angular/browser /
         env:
           SMOKE_TITLE: ds-prose-rs Angular demo
+          SMOKE_EXTRA: ""
 
   # Licences, advisories, banned or unknown sources: deny.toml.
   supply-chain:

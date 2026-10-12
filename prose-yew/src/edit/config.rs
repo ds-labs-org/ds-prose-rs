@@ -3,7 +3,12 @@
 //! button looks. Nothing here is specific to a host; the defaults are the
 //! ODRL JSON-LD preset.
 use prose_core::edit::{EditRules, EmptyText, Field, ListKind, ListPath, NodePath, RuleList, Step};
+use prose_core::profile::{Prefixes, ProfileVocab, Term, TermKind, Wording};
+use prose_core::validate::{Options, Validator};
 use prose_core::wording;
+use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
+use std::sync::Arc;
 use yew::prelude::*;
 
 /// What a + or - button shows. The accessible name is always the specific
@@ -35,6 +40,10 @@ pub struct Suggestion {
     pub value: AttrValue,
     pub label: AttrValue,
     pub hint: Option<AttrValue>,
+    /// The heading the suggestion is listed under, e.g. "From profile:
+    /// Research Data Profile". `None`: listed under `Labels::group_core`
+    /// when the list has groups, under no heading otherwise.
+    pub group: Option<AttrValue>,
 }
 
 impl Suggestion {
@@ -43,6 +52,7 @@ impl Suggestion {
             value: value.to_string().into(),
             label: label.to_string().into(),
             hint: hint.map(|h| h.to_string().into()),
+            group: None,
         }
     }
 }
@@ -139,6 +149,181 @@ impl Default for Vocabulary {
             ],
         }
     }
+}
+
+impl Vocabulary {
+    /// Adds the terms of the profiles `w` holds: actions, left operands and
+    /// policy classes first, each under a "From profile: {title}" group,
+    /// and operators and conflict terms after the built-in ones. Deprecated
+    /// terms are left out, and an entry already listed (compared by IRI) is
+    /// listed once. A profile term's value is its full IRI; the editor
+    /// writes it as a compact IRI only where the policy binds the prefix.
+    pub fn with_profiles(self, w: &Wording) -> Vocabulary {
+        self.with_profiles_in(w, &Labels::default().group_profile)
+    }
+
+    /// As [`Vocabulary::with_profiles`], with the group heading template.
+    pub(crate) fn with_profiles_in(mut self, w: &Wording, group: &str) -> Vocabulary {
+        if w.is_empty() {
+            return self;
+        }
+        let langs = w.languages();
+        let no_prefixes = Prefixes::default();
+        let iri_of = |value: &str| w.expand(&no_prefixes, value);
+        let value_of = |iri: &str| no_prefixes.compact(iri).unwrap_or_else(|| iri.to_string());
+        let (mut actions, mut left, mut kinds) = (vec![], vec![], vec![]);
+        // What each list holds already, by IRI: a term of two kinds goes
+        // in both lists, and each check costs one lookup.
+        let (mut seen_actions, mut seen_left, mut seen_kinds) =
+            (HashSet::new(), HashSet::new(), HashSet::new());
+        let mut seen_operators: HashSet<String> =
+            self.operators.iter().map(|o| iri_of(o)).collect();
+        let mut seen_conflicts: HashSet<String> =
+            self.conflicts.iter().map(|c| iri_of(&c.value)).collect();
+        for p in w.profiles() {
+            let title = p
+                .title()
+                .pick(langs)
+                .or(p.iri())
+                .unwrap_or("unnamed profile");
+            let g = AttrValue::from(fill(group, &[("profile", title)]));
+            let entry = |t: &Term, hint: Option<String>| Suggestion {
+                value: value_of(&t.iri).into(),
+                label: t.display_label(langs).into(),
+                hint: hint.filter(|h| !h.is_empty()).map(AttrValue::from),
+                group: Some(g.clone()),
+            };
+            let definition = |t: &Term| t.definition.pick(langs).map(str::to_string);
+            for t in action_order(p) {
+                if seen_actions.insert(t.iri.clone()) {
+                    actions.push(entry(t, Some(action_hint(w, t))));
+                }
+            }
+            for t in p.terms_of(TermKind::LeftOperand).filter(|t| !t.deprecated) {
+                if seen_left.insert(t.iri.clone()) {
+                    left.push(entry(t, definition(t)));
+                }
+            }
+            for t in p.terms_of(TermKind::PolicyClass).filter(|t| !t.deprecated) {
+                if seen_kinds.insert(t.iri.clone()) {
+                    kinds.push(entry(t, definition(t)));
+                }
+            }
+            for t in p.terms_of(TermKind::Operator).filter(|t| !t.deprecated) {
+                if seen_operators.insert(t.iri.clone()) {
+                    self.operators.push(value_of(&t.iri).into());
+                }
+            }
+            for t in p.terms_of(TermKind::ConflictTerm).filter(|t| !t.deprecated) {
+                if seen_conflicts.insert(t.iri.clone()) {
+                    self.conflicts
+                        .push(Choice::new(&value_of(&t.iri), &t.display_label(langs)));
+                }
+            }
+        }
+        // Profile entries first; a listed entry with the same IRI goes.
+        let merge = |new: Vec<Suggestion>, old: Vec<Suggestion>| -> Vec<Suggestion> {
+            let iris: HashSet<String> = new.iter().map(|s| iri_of(&s.value)).collect();
+            new.into_iter()
+                .chain(
+                    old.into_iter()
+                        .filter(|s| !iris.contains(&iri_of(&s.value))),
+                )
+                .collect()
+        };
+        self.actions = merge(actions, std::mem::take(&mut self.actions));
+        self.left_operands = merge(left, std::mem::take(&mut self.left_operands));
+        self.policy_kinds = merge(kinds, std::mem::take(&mut self.policy_kinds));
+        self
+    }
+}
+
+/// A profile's actions, not deprecated, depth first along `includedIn`
+/// within the profile: an action right after the one it is included in.
+/// A tree goes where its first action in the document is; a cycle is cut
+/// where it closes.
+fn action_order(p: &ProfileVocab) -> Vec<&Term> {
+    let acts: Vec<&Term> = p
+        .terms_of(TermKind::Action)
+        .filter(|t| !t.deprecated)
+        .collect();
+    let at: HashMap<&str, usize> = acts
+        .iter()
+        .enumerate()
+        .map(|(i, t)| (t.iri.as_str(), i))
+        .collect();
+    let parent: Vec<Option<usize>> = acts
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            t.included_in
+                .iter()
+                .find_map(|p| at.get(p.as_str()).copied().filter(|&p| p != i))
+        })
+        .collect();
+    let mut children: Vec<Vec<usize>> = vec![vec![]; acts.len()];
+    for (i, p) in parent.iter().enumerate() {
+        if let Some(p) = p {
+            children[*p].push(i);
+        }
+    }
+    let mut done = vec![false; acts.len()];
+    // The climb that last passed each action, so a climb stops on a cycle.
+    let mut climbed: Vec<Option<usize>> = vec![None; acts.len()];
+    let mut out = Vec::with_capacity(acts.len());
+    for first in 0..acts.len() {
+        if done[first] {
+            continue;
+        }
+        // Up to the root of this action's tree, or to where a cycle closes.
+        let mut root = first;
+        climbed[root] = Some(first);
+        while let Some(p) = parent[root].filter(|&p| climbed[p] != Some(first) && !done[p]) {
+            climbed[p] = Some(first);
+            root = p;
+        }
+        let mut stack = vec![root];
+        while let Some(i) = stack.pop() {
+            if std::mem::replace(&mut done[i], true) {
+                continue;
+            }
+            out.push(acts[i]);
+            stack.extend(children[i].iter().rev().filter(|&&c| !done[c]));
+        }
+    }
+    out
+}
+
+/// "{definition} · part of {broader action}", with either part left out
+/// when the profile does not give it.
+fn action_hint(w: &Wording, t: &Term) -> String {
+    let langs = w.languages();
+    let parent = t.included_in.first().map(|i| match w.lookup(i) {
+        Some((p, _)) => p.display_label(langs),
+        None if i.starts_with(ODRL_NS) => wording::action(wording::local_name(i)),
+        None => wording::humanise(wording::local_name(i)),
+    });
+    let definition = t.definition.pick(langs);
+    match (definition, parent) {
+        (Some(d), Some(p)) => format!("{d} \u{b7} part of {p}"),
+        (Some(d), None) => d.to_string(),
+        (None, Some(p)) => format!("part of {p}"),
+        (None, None) => String::new(),
+    }
+}
+
+const ODRL_NS: &str = "http://www.w3.org/ns/odrl/2/";
+const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
+
+/// How a suggested value is written into a policy whose prefixes are
+/// `prefixes`: a full IRI as a compact IRI or bare ODRL term where the
+/// policy binds it, else in full; any other text as it is.
+pub(crate) fn written_form(value: &str, prefixes: &Prefixes) -> AttrValue {
+    let written = value
+        .contains("://")
+        .then(|| prefixes.compact(value))
+        .flatten();
+    AttrValue::from(written.unwrap_or_else(|| value.to_string()))
 }
 
 /// Texts shown where a list is empty.
@@ -314,6 +499,58 @@ pub struct Labels {
     pub nouns: Nouns,
     pub fields: FieldNames,
     pub placeholders: Placeholders,
+    /// The heading of the built-in suggestions in a list that also has
+    /// profile suggestions.
+    pub group_core: AttrValue,
+    /// The heading of one profile's suggestions; `{profile}` is its title.
+    pub group_profile: AttrValue,
+    /// The glossary's summary line.
+    pub glossary_heading: AttrValue,
+    /// Glossary lines: `{terms}` is a list of labels, `{note}` the usage
+    /// note, `{profile}` the profile's title.
+    pub kind_of: AttrValue,
+    pub implies: AttrValue,
+    pub usage_note: AttrValue,
+    pub from_profile: AttrValue,
+    /// Shown for a term the profile marks `owl:deprecated`.
+    pub deprecated: AttrValue,
+    /// The operator select's two groups, when the profile suggests
+    /// operators for the left operand.
+    pub suggested_operators: AttrValue,
+    pub other_operators: AttrValue,
+    /// The heading of profile values offered for a left operand the profile
+    /// suggests no values for.
+    pub profile_values: AttrValue,
+    /// (xsd datatype IRI, placeholder) for a value slot whose left operand
+    /// names a datatype.
+    pub datatype_placeholders: Vec<(AttrValue, AttrValue)>,
+    /// Strict validation. The note under a field whose value the profile
+    /// does not allow.
+    pub not_in_profile: AttrValue,
+    /// Announced when a closed field is left with text it does not take and
+    /// goes back to its value: `{kept}` is that value, `{typed}` the text.
+    pub kept_previous: AttrValue,
+    /// As `kept_previous`, for a field that was empty.
+    pub kept_empty: AttrValue,
+    /// The operator select's groups under a closed left operand.
+    pub allowed_group: AttrValue,
+    pub not_allowed_group: AttrValue,
+    /// The selected option when it is one the profile does not allow;
+    /// `{label}` is its label.
+    pub not_allowed_option: AttrValue,
+    /// Shown under a closed field that was left with text it does not take;
+    /// `{typed}`, `{field}` and `{profile}`.
+    pub not_allowed_term: AttrValue,
+    /// Appended to that message when a listed entry is close; `{suggestion}`.
+    pub did_you_mean: AttrValue,
+    /// The problems panel: its heading, the button that moves to a finding,
+    /// the verdict, and the counts (`{errors}`, `{warnings}`, `{notes}`).
+    pub problems_heading: AttrValue,
+    pub go_to: AttrValue,
+    pub status_conforms: AttrValue,
+    pub status_violations: AttrValue,
+    pub status_incomplete: AttrValue,
+    pub counts: AttrValue,
 }
 
 impl Default for Labels {
@@ -360,6 +597,42 @@ impl Default for Labels {
             nouns: Nouns::default(),
             fields: FieldNames::default(),
             placeholders: Placeholders::default(),
+            group_core: a("ODRL core"),
+            group_profile: a("From profile: {profile}"),
+            glossary_heading: a("Terms from the profile"),
+            kind_of: a("A kind of: {terms}"),
+            implies: a("Implies: {terms}"),
+            usage_note: a("Usage: {note}"),
+            from_profile: a("From {profile}"),
+            deprecated: a("Deprecated in the profile"),
+            suggested_operators: a("Suggested by the profile"),
+            other_operators: a("Other operators"),
+            profile_values: a("Profile values (not specific to this operand)"),
+            datatype_placeholders: [
+                ("integer", "whole number"),
+                ("decimal", "number"),
+                ("boolean", "true or false"),
+                ("date", "YYYY-MM-DD"),
+                ("dateTime", "YYYY-MM-DDThh:mm:ss"),
+                ("duration", "duration, e.g. P2Y"),
+            ]
+            .iter()
+            .map(|(t, p)| (a(&format!("{XSD}{t}")), a(p)))
+            .collect(),
+            not_in_profile: a("(not in the profile)"),
+            kept_previous: a("Kept \"{kept}\"; \"{typed}\" is not in the profile"),
+            kept_empty: a("\"{typed}\" is not in the profile; the field stays empty"),
+            allowed_group: a("Allowed by the profile"),
+            not_allowed_group: a("Not allowed by the profile"),
+            not_allowed_option: a("{label} (not allowed)"),
+            not_allowed_term: a("\"{typed}\" is not an allowed {field} in {profile}."),
+            did_you_mean: a("Did you mean {suggestion}?"),
+            problems_heading: a("Problems"),
+            go_to: a("Go to"),
+            status_conforms: a("Conforms"),
+            status_violations: a("Does not conform"),
+            status_incomplete: a("Cannot be certified: part of the vocabulary was not checked"),
+            counts: a("errors: {errors}, warnings: {warnings}, notes: {notes}"),
         }
     }
 }
@@ -608,6 +881,140 @@ pub struct EditConfig {
     /// the operator select offers every operator. Off: only the switches the
     /// reducer accepts as they are.
     pub host_plans_operator_switches: bool,
+    /// The loaded profiles: their labels in the sentences, their terms in
+    /// the suggestions and selects. Set it with [`EditConfig::with_wording`],
+    /// which also extends `vocab`.
+    pub wording: Rc<Wording>,
+    /// Validation of the document against `wording`, when the host asks
+    /// for it. Set it with [`EditConfig::with_strict`]; `None` (the
+    /// default) validates nothing.
+    pub validator: Option<Validator>,
+}
+
+impl EditConfig {
+    /// Uses the profiles `w` holds, and adds their terms to `vocab` (with
+    /// the `labels.group_profile` heading, so set the labels first). Meant
+    /// for a configuration without a profile yet: the terms of a profile
+    /// set before are not taken out.
+    pub fn with_wording(mut self, w: Rc<Wording>) -> EditConfig {
+        self.vocab = self.vocab.with_profiles_in(&w, &self.labels.group_profile);
+        self.wording = w;
+        match self.validator.take() {
+            Some(v) => self.with_strict(v.options().clone()),
+            None => self,
+        }
+    }
+
+    /// Validates against `wording` with `options` (usually
+    /// [`Options::strict`]), and rewrites `rules.defaults` so that what an
+    /// add button creates is admissible: the left operand, operator, action
+    /// and policy type each stay as they are when admissible, and otherwise
+    /// become the first admissible entry of `vocab`, or `""` when there is
+    /// none. The policy type is the exception: a policy cannot do without
+    /// one, so with nothing admissible it stays as it was. Call it after
+    /// [`EditConfig::with_wording`], which rebuilds the validator anyway.
+    pub fn with_strict(mut self, options: Options) -> EditConfig {
+        let v = Validator::new(Arc::new((*self.wording).clone()), options);
+        let d = &mut self.rules.defaults;
+        let ops: Vec<String> = self.vocab.operators.iter().map(|o| o.to_string()).collect();
+        let values = |list: &[Suggestion]| -> Vec<String> {
+            list.iter().map(|s| s.value.to_string()).collect()
+        };
+        d.left_operand = admissible_default(&v, Field::LeftOperand, &d.left_operand, &[], "")
+            .unwrap_or_default();
+        d.operator = admissible_default(&v, Field::Operator, &d.operator, &ops, &d.left_operand)
+            .unwrap_or_default();
+        d.action = admissible_default(&v, Field::Name, &d.action, &values(&self.vocab.actions), "")
+            .unwrap_or_default();
+        if let Some(kind) = admissible_default(
+            &v,
+            Field::Kind,
+            &d.policy_kind,
+            &values(&self.vocab.policy_kinds),
+            "",
+        ) {
+            d.policy_kind = kind;
+        }
+        self.validator = Some(v);
+        self
+    }
+}
+
+/// `current` when `v` admits it in `field` of a new node, else the first
+/// of `candidates` it admits; `None` when it admits none. `left` is the
+/// left operand of the new constraint an operator is checked under.
+fn admissible_default(
+    v: &Validator,
+    field: Field,
+    current: &str,
+    candidates: &[String],
+    left: &str,
+) -> Option<String> {
+    std::iter::once(current)
+        .chain(candidates.iter().map(String::as_str))
+        .find(|c| admits(v, field, c, left))
+        .map(str::to_string)
+}
+
+/// Whether `v`'s reducer gate lets `value` be written into `field` of a
+/// fresh policy with one permission and one constraint (under `left`).
+/// Both are read as the loaded profiles' prefixes read them: whether a
+/// policy binds a prefix is that policy's to say.
+fn admits(v: &Validator, field: Field, value: &str, left: &str) -> bool {
+    use prose_core::edit::{
+        ActionNode, AtomicConstraint, ConstraintNode, EditDoc, EditEvent, Literal, PolicyNode,
+        RightOperand, RuleNode, SlotPath,
+    };
+    let none = Prefixes::default();
+    let expand = |t: &str| {
+        if t.is_empty() {
+            String::new()
+        } else {
+            v.wording().expand(&none, t)
+        }
+    };
+    let doc = EditDoc::new(vec![PolicyNode {
+        kind: "Set".into(),
+        uid: Some("urn:ds-prose:defaults".into()),
+        permission: vec![RuleNode {
+            action: vec![ActionNode {
+                name: "use".into(),
+                ..ActionNode::default()
+            }],
+            constraint: vec![ConstraintNode::Atomic(AtomicConstraint {
+                left: expand(left),
+                operator: "eq".into(),
+                right: RightOperand::Values(vec![Literal::Str(String::new())]),
+                ..AtomicConstraint::default()
+            })],
+            ..RuleNode::default()
+        }],
+        ..PolicyNode::default()
+    }]);
+    let rule = NodePath::policy(0).child(Step::Rule(RuleList::Permission, 0));
+    let node = match field {
+        Field::Kind => NodePath::policy(0),
+        Field::Name => rule.child(Step::Action(0)),
+        _ => rule.child(Step::Constraint(0)),
+    };
+    let Some(expect) = doc.node(&node).map(|n| n.id()) else {
+        return false;
+    };
+    let slot = SlotPath { node, field };
+    let value = expand(value);
+    let ev = match field {
+        Field::Operator => EditEvent::SetChoice {
+            slot,
+            expect,
+            value,
+        },
+        _ => EditEvent::SetText {
+            slot,
+            expect,
+            value,
+        },
+    };
+    v.admissible(&doc, &ev).is_ok()
 }
 
 impl Default for EditConfig {
@@ -626,6 +1033,8 @@ impl Default for EditConfig {
             suggestions: true,
             max_suggestions: 8,
             host_plans_operator_switches: false,
+            wording: Rc::new(Wording::default()),
+            validator: None,
         }
     }
 }
@@ -665,6 +1074,37 @@ pub(crate) fn merge_styles(parts: &[&Option<AttrValue>]) -> Option<AttrValue> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vocabulary_defaults_are_odrl_terms() {
+        // Strict validation knows ODRL by its built-in table; every term
+        // the editor offers by default must be in it, of the right kind.
+        use prose_core::profile::{OdrlVocab, odrl_term};
+        let v = Vocabulary::default();
+        let kind = |raw: &str| {
+            odrl_term(
+                &format!("http://www.w3.org/ns/odrl/2/{raw}"),
+                OdrlVocab::Common,
+            )
+            .unwrap_or_else(|| panic!("{raw} is not an ODRL term"))
+            .kind
+        };
+        for s in &v.actions {
+            assert_eq!(kind(&s.value), TermKind::Action, "{}", s.value);
+        }
+        for s in &v.left_operands {
+            assert_eq!(kind(&s.value), TermKind::LeftOperand, "{}", s.value);
+        }
+        for s in &v.policy_kinds {
+            assert_eq!(kind(&s.value), TermKind::PolicyClass, "{}", s.value);
+        }
+        for o in &v.operators {
+            assert_eq!(kind(o), TermKind::Operator, "{o}");
+        }
+        for c in v.conflicts.iter().filter(|c| !c.value.is_empty()) {
+            assert_eq!(kind(&c.value), TermKind::ConflictTerm, "{}", c.value);
+        }
+    }
 
     #[test]
     fn fill_substitutes_known_keys_only() {
@@ -718,5 +1158,442 @@ mod tests {
         assert_eq!(v.operators.len(), 12);
         assert_eq!(v.policy_kinds.len(), 7);
         assert_eq!(v.conflicts[0].value, "");
+    }
+
+    // --- profiles -------------------------------------------------------------
+
+    use prose_core::profile::ProfileVocab;
+
+    const EX: &str = "https://example.org/odrl/profile/research/";
+    const ODRL: &str = "http://www.w3.org/ns/odrl/2/";
+
+    fn research() -> Wording {
+        let text = include_str!("../../../prose-core/tests/profiles/research.jsonld");
+        Wording::new().with_profile(ProfileVocab::parse(text).unwrap())
+    }
+
+    fn odrl22() -> Wording {
+        let text = include_str!("../../../prose-core/tests/profiles/odrl22-excerpt.json");
+        Wording::new().with_profile(ProfileVocab::parse(text).unwrap())
+    }
+
+    fn values(list: &[Suggestion]) -> Vec<&str> {
+        list.iter().map(|s| s.value.as_str()).collect()
+    }
+
+    #[test]
+    fn profile_actions_first_grouped_with_definition_hint() {
+        let v = Vocabulary::default().with_profiles(&research());
+        let group = Some(AttrValue::from("From profile: Research Data Profile"));
+        let head: Vec<(&str, &str)> = v.actions[..3]
+            .iter()
+            .map(|s| (s.value.as_str(), s.label.as_str()))
+            .collect();
+        assert_eq!(
+            head,
+            [
+                (&*format!("{EX}train"), "Train"),
+                (&*format!("{EX}fineTune"), "Fine-tune"),
+                (&*format!("{EX}pseudonymise"), "Pseudonymise"),
+            ]
+        );
+        assert!(v.actions[..3].iter().all(|s| s.group == group));
+        assert_eq!(
+            v.actions[1].hint.as_deref(),
+            Some("To adapt an already trained model using the Asset. \u{b7} part of Train")
+        );
+        assert!(
+            v.actions[0]
+                .hint
+                .as_deref()
+                .unwrap()
+                .starts_with("To use the Asset as training data"),
+            "{:?}",
+            v.actions[0].hint
+        );
+        // The built-in actions follow, unchanged and ungrouped.
+        assert_eq!(v.actions[3..], Vocabulary::default().actions[..]);
+
+        // Left operands: the profile's first, with their definition.
+        assert_eq!(
+            values(&v.left_operands[..3]),
+            [
+                format!("{EX}dataSubjectCount"),
+                format!("{EX}researchPurpose"),
+                format!("{EX}retentionPeriod"),
+            ]
+        );
+        assert_eq!(v.left_operands[0].label, "Number of data subjects");
+        assert!(v.left_operands[..3].iter().all(|s| s.group == group));
+        assert_eq!(
+            v.left_operands[1].hint.as_deref(),
+            Some("The research purpose the action of the Rule is exercised for.")
+        );
+        assert_eq!(
+            v.left_operands[3..],
+            Vocabulary::default().left_operands[..]
+        );
+    }
+
+    #[test]
+    fn actions_follow_included_in_depth_first_without_deprecated() {
+        let p = ProfileVocab::parse(&format!(
+            r#"{{
+                "@context": {{"odrl": "{ODRL}", "ex": "{EX}",
+                             "owl": "http://www.w3.org/2002/07/owl#",
+                             "rdfs": "http://www.w3.org/2000/01/rdf-schema#"}},
+                "@graph": [
+                    {{"@id": "ex:child", "@type": "odrl:Action", "odrl:includedIn": {{"@id": "ex:parent"}}}},
+                    {{"@id": "ex:other", "@type": "odrl:Action"}},
+                    {{"@id": "ex:old", "@type": "odrl:Action", "owl:deprecated": true}},
+                    {{"@id": "ex:parent", "@type": "odrl:Action", "rdfs:label": "Parent"}}
+                ]
+            }}"#
+        ))
+        .unwrap();
+        let v = Vocabulary::default().with_profiles(&Wording::new().with_profile(p));
+        assert_eq!(
+            values(&v.actions[..3]),
+            [
+                format!("{EX}parent"),
+                format!("{EX}child"),
+                format!("{EX}other")
+            ]
+        );
+        assert!(!values(&v.actions).contains(&&*format!("{EX}old")));
+        assert_eq!(v.actions[1].hint.as_deref(), Some("part of Parent"));
+        assert_eq!(
+            v.actions[1].group.as_deref(),
+            Some("From profile: unnamed profile")
+        );
+    }
+
+    #[test]
+    fn action_order_ends_on_an_included_in_cycle() {
+        let text = include_str!("../../../prose-core/tests/profiles/hostile/cycle.jsonld");
+        let p = ProfileVocab::parse(text).unwrap();
+        let order: Vec<&str> = action_order(&p).iter().map(|t| t.iri.as_str()).collect();
+        let ex = "https://example.org/cycle/";
+        // a's tree is entered at b (where the cycle closes), and c follows a.
+        assert_eq!(
+            order,
+            [format!("{ex}b"), format!("{ex}a"), format!("{ex}c")]
+        );
+    }
+
+    #[test]
+    fn dedup_by_iri() {
+        let v = Vocabulary::default().with_profiles(&odrl22());
+        let uses: Vec<&Suggestion> = v.actions.iter().filter(|s| s.value == "use").collect();
+        assert_eq!(uses.len(), 1, "{:?}", values(&v.actions));
+        assert_eq!(uses[0].label, "Use");
+        assert_eq!(
+            uses[0].group.as_deref(),
+            Some("From profile: ODRL Version 2.2")
+        );
+        // An ODRL term is offered bare, so it is written bare; one that
+        // ODRL 2.2 deprecates (commercialize) is not offered.
+        assert!(values(&v.actions[..2]).contains(&"distribute"));
+        assert!(!values(&v.actions).contains(&"commercialize"));
+        assert_eq!(
+            v.actions.iter().filter(|s| s.value == "distribute").count(),
+            1
+        );
+        // A closed list keeps its built-in entry and wording.
+        assert_eq!(v.operators.iter().filter(|o| *o == "gteq").count(), 1);
+        assert_eq!(v.operators.len(), 12);
+        assert_eq!(v.conflicts.iter().filter(|c| c.value == "perm").count(), 1);
+        assert_eq!(v.conflicts, Vocabulary::default().conflicts);
+        // Applied twice, nothing is listed twice.
+        let twice = v.clone().with_profiles(&odrl22());
+        assert_eq!(twice, v);
+    }
+
+    #[test]
+    fn value_is_curie_only_if_policy_binds_prefix() {
+        let doc = |context: &str| {
+            let json = format!(r#"{{"@context": {context}, "@type": "Set", "permission": []}}"#);
+            prose_core::edit::prefixes(&prose_core::edit::read_model(&json).unwrap())
+        };
+        let policy = doc(&format!(
+            r#"["http://www.w3.org/ns/odrl.jsonld", {{"ex": "{EX}"}}]"#
+        ));
+        let unbound = doc(r#""http://www.w3.org/ns/odrl.jsonld""#);
+        let iri = format!("{EX}fineTune");
+        assert_eq!(written_form(&iri, &policy), "ex:fineTune");
+        assert_eq!(written_form(&iri, &unbound), iri.as_str());
+        assert_eq!(written_form(&format!("{ODRL}use"), &unbound), "use");
+        // Text that is not a full IRI is written as it is.
+        assert_eq!(written_form("use", &policy), "use");
+        assert_eq!(written_form("ex:fineTune", &unbound), "ex:fineTune");
+    }
+
+    #[test]
+    fn operators_conflicts_policy_kinds_extended() {
+        let v = Vocabulary::default().with_profiles(&research());
+        let d = Vocabulary::default();
+        assert_eq!(v.operators[..12], d.operators[..]);
+        assert_eq!(
+            v.operators[12..],
+            [AttrValue::from(format!("{EX}withinRegion"))]
+        );
+        assert_eq!(v.conflicts[..4], d.conflicts[..]);
+        assert_eq!(
+            v.conflicts[4..],
+            [Choice::new(&format!("{EX}ignore"), "Ignore conflicts")]
+        );
+        assert_eq!(v.policy_kinds[0].value, format!("{EX}ResearchAgreement"));
+        assert_eq!(v.policy_kinds[0].label, "Research agreement");
+        assert_eq!(v.policy_kinds[1..], d.policy_kinds[..]);
+        // Party and asset lists are not touched.
+        assert_eq!(v.parties, d.parties);
+        assert_eq!(v.assets, d.assets);
+    }
+
+    #[test]
+    fn ex_archive_absent() {
+        let v = Vocabulary::default().with_profiles(&research());
+        let archive = format!("{EX}archive");
+        for list in [&v.actions, &v.left_operands, &v.policy_kinds] {
+            assert!(!values(list).contains(&archive.as_str()));
+        }
+        assert!(!v.operators.iter().any(|o| *o == archive));
+        assert!(!v.conflicts.iter().any(|c| c.value == archive));
+    }
+
+    #[test]
+    fn a_term_of_two_kinds_is_offered_in_each_list() {
+        let p = ProfileVocab::parse(&format!(
+            r#"{{
+                "@context": {{"odrl": "{ODRL}", "ex": "{EX}"}},
+                "@graph": [{{"@id": "ex:dual",
+                             "@type": ["odrl:Action", "odrl:LeftOperand"]}}]
+            }}"#
+        ))
+        .unwrap();
+        let v = Vocabulary::default().with_profiles(&Wording::new().with_profile(p));
+        let dual = format!("{EX}dual");
+        assert!(values(&v.actions).contains(&dual.as_str()));
+        assert!(values(&v.left_operands).contains(&dual.as_str()));
+    }
+
+    #[test]
+    fn many_operators_and_conflict_terms_take_linear_time() {
+        // A profile within the default limits: 10,000 operators and 10,000
+        // conflict terms. Extending the closed lists must cost about what
+        // reading the profile did, not the square of the term count.
+        let mut graph = vec![];
+        for i in 0..10_000 {
+            graph.push(format!(r#"{{"@id": "ex:o{i}", "@type": "odrl:Operator"}}"#));
+            graph.push(format!(
+                r#"{{"@id": "ex:c{i}", "@type": "odrl:ConflictTerm"}}"#
+            ));
+        }
+        let text = format!(
+            r#"{{"@context": {{"odrl": "{ODRL}", "ex": "{EX}"}}, "@graph": [{}]}}"#,
+            graph.join(",")
+        );
+        let start = std::time::Instant::now();
+        let w = Wording::new().with_profile(ProfileVocab::parse(&text).unwrap());
+        let parse = start.elapsed();
+        let start = std::time::Instant::now();
+        let v = Vocabulary::default().with_profiles(&w);
+        let extend = start.elapsed();
+        assert_eq!(v.operators.len(), 12 + 10_000);
+        assert_eq!(v.conflicts.len(), 4 + 10_000);
+        assert!(
+            extend <= parse * 4 + std::time::Duration::from_millis(200),
+            "with_profiles took {extend:?}, parsing {parse:?}"
+        );
+    }
+
+    #[test]
+    fn deprecated_terms_are_offered_nowhere() {
+        let p = ProfileVocab::parse(&format!(
+            r#"{{
+                "@context": {{"odrl": "{ODRL}", "ex": "{EX}",
+                             "owl": "http://www.w3.org/2002/07/owl#",
+                             "rdfs": "http://www.w3.org/2000/01/rdf-schema#"}},
+                "@graph": [
+                    {{"@id": "ex:lo", "@type": "odrl:LeftOperand"}},
+                    {{"@id": "ex:oldLo", "@type": "odrl:LeftOperand", "owl:deprecated": true}},
+                    {{"@id": "ex:Kind", "rdfs:subClassOf": {{"@id": "odrl:Policy"}}}},
+                    {{"@id": "ex:OldKind", "rdfs:subClassOf": {{"@id": "odrl:Policy"}},
+                      "owl:deprecated": true}},
+                    {{"@id": "ex:op", "@type": "odrl:Operator"}},
+                    {{"@id": "ex:oldOp", "@type": "odrl:Operator", "owl:deprecated": true}},
+                    {{"@id": "ex:cf", "@type": "odrl:ConflictTerm"}},
+                    {{"@id": "ex:oldCf", "@type": "odrl:ConflictTerm", "owl:deprecated": true}}
+                ]
+            }}"#
+        ))
+        .unwrap();
+        let v = Vocabulary::default().with_profiles(&Wording::new().with_profile(p));
+        let has =
+            |list: &[Suggestion], local: &str| values(list).contains(&&*format!("{EX}{local}"));
+        // The current terms are offered, so the profile was read.
+        assert!(has(&v.left_operands, "lo") && !has(&v.left_operands, "oldLo"));
+        assert!(has(&v.policy_kinds, "Kind") && !has(&v.policy_kinds, "OldKind"));
+        let ops: Vec<&str> = v.operators.iter().map(|o| o.as_str()).collect();
+        assert!(ops.contains(&&*format!("{EX}op")));
+        assert!(!ops.contains(&&*format!("{EX}oldOp")));
+        let cfs: Vec<&str> = v.conflicts.iter().map(|c| c.value.as_str()).collect();
+        assert!(cfs.contains(&&*format!("{EX}cf")));
+        assert!(!cfs.contains(&&*format!("{EX}oldCf")));
+    }
+
+    #[test]
+    fn with_wording_extends_the_vocabulary_with_the_labels_heading() {
+        let mut cfg = EditConfig::default();
+        cfg.labels.group_profile = "Profil : {profile}".into();
+        let w = Rc::new(research());
+        let cfg = cfg.with_wording(w.clone());
+        assert!(Rc::ptr_eq(&cfg.wording, &w));
+        assert_eq!(cfg.actions_group(), Some("Profil : Research Data Profile"));
+        assert_eq!(EditConfig::default().wording.as_ref(), &Wording::default());
+    }
+
+    impl EditConfig {
+        fn actions_group(&self) -> Option<&str> {
+            self.vocab.actions.first().and_then(|s| s.group.as_deref())
+        }
+    }
+
+    fn research_closed() -> Wording {
+        let text = include_str!("../../../prose-core/tests/profiles/research-closed.jsonld");
+        Wording::new().with_profile(ProfileVocab::parse(text).unwrap())
+    }
+
+    fn defaults(cfg: &EditConfig) -> [&str; 4] {
+        let d = &cfg.rules.defaults;
+        [&d.policy_kind, &d.action, &d.left_operand, &d.operator]
+    }
+
+    #[test]
+    fn no_validator_by_default() {
+        assert!(EditConfig::default().validator.is_none());
+        let cfg = EditConfig::default().with_wording(Rc::new(research_closed()));
+        assert!(cfg.validator.is_none());
+    }
+
+    #[test]
+    fn with_strict_sets_validator_and_admissible_defaults() {
+        use prose_core::validate::{Mode, Options};
+        let w = Rc::new(research_closed());
+        let cfg = EditConfig::default()
+            .with_wording(w.clone())
+            .with_strict(Options::strict());
+        let v = cfg.validator.as_ref().expect("a validator");
+        assert_eq!(v.options().mode(), Mode::Strict);
+        assert_eq!(v.wording().as_ref(), w.as_ref());
+        // The stock defaults are ODRL terms: kept.
+        assert_eq!(defaults(&cfg), ["Set", "use", "", "eq"]);
+
+        // Defaults the profiles do not allow give way to the first
+        // admissible entry of the vocabulary, where the profile's terms
+        // come first.
+        let mut cfg = EditConfig::default().with_wording(w.clone());
+        cfg.rules.defaults.policy_kind = format!("{EX}fineTune");
+        cfg.rules.defaults.action = "https://example.net/foo/bar".into();
+        cfg.rules.defaults.left_operand = format!("{EX}academic");
+        cfg.rules.defaults.operator = "https://example.net/foo/op".into();
+        let cfg = cfg.with_strict(Options::strict());
+        let (kind, action) = (format!("{EX}ResearchAgreement"), format!("{EX}train"));
+        assert_eq!(cfg.vocab.policy_kinds[0].value.as_str(), kind);
+        assert_eq!(cfg.vocab.actions[0].value.as_str(), action);
+        assert_eq!(defaults(&cfg), [kind.as_str(), action.as_str(), "", "eq"]);
+        // Without a profile, ODRL's own.
+        let mut cfg = EditConfig::default();
+        cfg.rules.defaults.policy_kind = format!("{EX}fineTune");
+        cfg.rules.defaults.action = "https://example.net/foo/bar".into();
+        let cfg = cfg.with_strict(Options::strict());
+        assert_eq!(defaults(&cfg), ["Set", "use", "", "eq"]);
+
+        // A default left operand that is closed binds the default operator.
+        let mut cfg = EditConfig::default().with_wording(w.clone());
+        cfg.rules.defaults.left_operand = format!("{EX}dataSubjectCount");
+        let cfg = cfg.with_strict(Options::strict());
+        let count = format!("{EX}dataSubjectCount");
+        assert_eq!(defaults(&cfg), ["Set", "use", count.as_str(), "gt"]);
+
+        // A compact IRI is kept as written when its profile term is
+        // admissible: whether a policy binds the prefix is the policy's.
+        let mut cfg = EditConfig::default().with_wording(w.clone());
+        cfg.rules.defaults.action = "ex:train".into();
+        let cfg = cfg.with_strict(Options::strict());
+        assert_eq!(cfg.rules.defaults.action, "ex:train");
+
+        // Nothing admissible: empty, except the policy type, which a policy
+        // cannot do without, and which stays as it was.
+        let mut cfg = EditConfig::default().with_wording(w.clone());
+        cfg.vocab.actions.clear();
+        cfg.vocab.operators.clear();
+        cfg.vocab.policy_kinds.clear();
+        cfg.rules.defaults.policy_kind = format!("{EX}fineTune");
+        cfg.rules.defaults.action = "https://example.net/foo/bar".into();
+        cfg.rules.defaults.operator = "https://example.net/foo/op".into();
+        let cfg = cfg.with_strict(Options::strict());
+        let kind = format!("{EX}fineTune");
+        assert_eq!(defaults(&cfg), [kind.as_str(), "", "", ""]);
+
+        // Advisory mode admits everything: nothing is rewritten.
+        let mut cfg = EditConfig::default().with_wording(w);
+        cfg.rules.defaults.action = "https://example.net/foo/bar".into();
+        let cfg = cfg.with_strict(Options::advisory());
+        assert_eq!(cfg.rules.defaults.action, "https://example.net/foo/bar");
+        assert!(cfg.validator.is_some());
+    }
+
+    #[test]
+    fn with_wording_after_with_strict_rebuilds() {
+        use prose_core::validate::Options;
+        let options = Options::strict().structural(true);
+        let mut cfg = EditConfig::default().with_strict(options.clone());
+        cfg.rules.defaults.action = format!("{EX}train");
+        // Without the profile the research action is unknown...
+        let cfg = cfg.with_strict(options.clone());
+        assert_eq!(cfg.rules.defaults.action, "use");
+        let before = cfg.validator.clone().unwrap();
+        assert!(before.wording().is_empty());
+        // ...and with it, the validator is rebuilt over the new wording,
+        // with the same options.
+        let mut cfg = cfg;
+        cfg.rules.defaults.action = format!("{EX}train");
+        let w = Rc::new(research_closed());
+        let cfg = cfg.with_wording(w.clone());
+        let after = cfg.validator.as_ref().unwrap();
+        assert_eq!(after.options(), &options);
+        assert_eq!(after.wording().as_ref(), w.as_ref());
+        assert_ne!(after, &before);
+        assert_eq!(cfg.rules.defaults.action, format!("{EX}train"));
+    }
+
+    #[test]
+    fn an_added_rule_takes_admissible_defaults() {
+        use prose_core::edit::{EditEvent, NewItem, read_model};
+        use prose_core::validate::{Options, RuleId};
+        let w = Rc::new(research_closed());
+        let mut cfg = EditConfig::default().with_wording(w);
+        cfg.rules.defaults.action = "https://example.net/foo/bar".into();
+        let cfg = cfg.with_strict(Options::strict());
+        let v = cfg.validator.clone().unwrap();
+        let mut doc = read_model(r#"{"@type": "Set", "uid": "urn:p"}"#).unwrap();
+        let list = ListPath::of(&NodePath::policy(0), ListKind::Rules(RuleList::Permission));
+        let ev = EditEvent::Add {
+            expect: doc.list_owner_id(&list),
+            list,
+            index: 0,
+            item: NewItem::Default,
+        };
+        doc.apply_gated(&ev, &cfg.rules, Some(&v)).unwrap();
+        let report = v.validate(&doc);
+        assert!(
+            report
+                .findings
+                .iter()
+                .all(|f| f.rule != RuleId::ProfileUnknownTerm),
+            "{:?}",
+            report.findings
+        );
     }
 }

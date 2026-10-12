@@ -1,0 +1,32 @@
+{
+  "schema": "ds-prose/validation-report@1",
+  "tool": {
+    "name": "ds-prose-rs",
+    "version": "<version>"
+  },
+  "mode": "strict",
+  "tiers": [
+    "profile",
+    "prose",
+    "input"
+  ],
+  "ruleset": 1,
+  "verdict": "conforms",
+  "vocabulary": {
+    "odrl": "common",
+    "profiles": [
+      {
+        "iri": "https://example.org/odrl/profile/research",
+        "title": "Research Data Profile",
+        "version": "0.1.0"
+      }
+    ]
+  },
+  "gaps": [],
+  "counts": {
+    "error": 0,
+    "warning": 0,
+    "info": 0
+  },
+  "findings": []
+}

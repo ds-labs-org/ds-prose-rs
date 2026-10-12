@@ -1,0 +1,26 @@
+{
+  "@context": [
+    "http://www.w3.org/ns/odrl.jsonld",
+    { "ex": "https://example.org/odrl/profile/research/" }
+  ],
+  "@type": "Set",
+  "uid": "urn:policy:datatype",
+  "profile": "https://example.org/odrl/profile/research",
+  "permission": [{
+    "target": "urn:asset:1",
+    "action": "use",
+    "constraint": [{
+      "leftOperand": "count",
+      "operator": "lteq",
+      "rightOperand": { "@value": "ten", "@type": "xsd:integer" }
+    }, {
+      "leftOperand": "ex:dataSubjectCount",
+      "operator": "gteq",
+      "rightOperand": { "@value": "50", "@type": "xsd:decimal" }
+    }, {
+      "leftOperand": "dateTime",
+      "operator": "lt",
+      "rightOperand": { "@value": "2026-02-30T10:00", "@type": "xsd:dateTime" }
+    }]
+  }]
+}

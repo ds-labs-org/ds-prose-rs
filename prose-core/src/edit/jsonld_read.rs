@@ -5,8 +5,8 @@ use serde_json::{Map, Value};
 use super::model::*;
 use crate::ProseError;
 use crate::read::{
-    POLICY_KEYS, QUIET_PREFIXES, RULE_KEYS, bare_reference, get, ident, items, looks_like_policy,
-    policy_nodes, types,
+    MAX_DEPTH, ODRL_NS, POLICY_KEYS, QUIET_PREFIXES, RULE_KEYS, bare_reference, get, ident, items,
+    looks_like_policy, policy_nodes, types,
 };
 use crate::words::local_name;
 
@@ -59,6 +59,7 @@ pub fn read_model_value(value: &Value) -> Result<EditDoc, ProseError> {
     doc.shape = shape;
     doc.origin = origin;
     doc.warnings = r.warnings;
+    doc.unread = unread_odrl_keys(value);
     Ok(doc)
 }
 
@@ -361,5 +362,176 @@ pub(crate) fn literal(v: &Value) -> Option<Literal> {
             ident(v).map(Literal::Iri)
         }
         _ => None,
+    }
+}
+
+/// The property keys in `v` that are ODRL's but are not bare, and so were
+/// not read: a compact or full IRI that expands into the ODRL namespace, or
+/// a term an @context defines as an ODRL IRI other than its own name.
+/// Expansion follows what the document's @contexts define, as JSON-LD does:
+/// a prefix defined through another prefix (`"o": "odrl:"`), a term defined
+/// through another term, and a term relative to the `@vocab`. It
+/// over-reports rather than guesses: every definition of a name counts,
+/// whatever its scope, `odrl:` is always the ODRL namespace (a rebound
+/// `odrl` prefix is not tracked), and an expansion that runs past
+/// [`MAX_EXPANSION`] steps counts as ODRL's. Skips `@context`, `@value`
+/// and the value of a term typed `@json` (JSON data, not properties);
+/// iterative and depth-bounded, so a hostile value cannot overflow the
+/// stack.
+fn unread_odrl_keys(v: &Value) -> Vec<String> {
+    let ctx = Defs::of(v);
+    let mut out: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut stack = vec![(v, 0usize)];
+    while let Some((x, depth)) = stack.pop() {
+        if depth > MAX_DEPTH {
+            continue;
+        }
+        match x {
+            Value::Array(a) => stack.extend(a.iter().rev().map(|y| (y, depth + 1))),
+            Value::Object(o) => {
+                for (k, y) in o.iter().rev() {
+                    if k == "@context" || k == "@value" {
+                        continue;
+                    }
+                    if !seen.contains(k) && ctx.odrl_key(k) {
+                        seen.insert(k.clone());
+                        out.push(k.clone());
+                    }
+                    if !ctx.json_typed(k) {
+                        stack.push((y, depth + 1));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// How many definitions one key's expansion may follow before it stops and
+/// counts the key as ODRL's.
+const MAX_EXPANSION: usize = 64;
+
+/// Every term definition and `@vocab` the @contexts of a document hold,
+/// whatever their scope.
+#[derive(Default)]
+struct Defs {
+    terms: std::collections::HashMap<String, Vec<String>>,
+    vocab: Vec<String>,
+    json: std::collections::HashSet<String>,
+    plain: std::collections::HashSet<String>,
+}
+
+impl Defs {
+    fn of(v: &Value) -> Defs {
+        let mut d = Defs::default();
+        let mut stack = vec![(v, 0usize, false)];
+        while let Some((x, depth, in_ctx)) = stack.pop() {
+            if depth > MAX_DEPTH {
+                continue;
+            }
+            match x {
+                Value::Array(a) => stack.extend(a.iter().map(|y| (y, depth + 1, in_ctx))),
+                Value::Object(o) => {
+                    for (k, y) in o {
+                        if k == "@context" {
+                            stack.push((y, depth + 1, true));
+                        } else if in_ctx && k == "@vocab" {
+                            // An empty @vocab (the base) never reaches ODRL's
+                            // namespace from a term.
+                            if let Value::String(s) = y
+                                && !s.is_empty()
+                                && !d.vocab.contains(s)
+                            {
+                                d.vocab.push(s.clone());
+                            }
+                        } else if in_ctx && !k.starts_with('@') {
+                            let (iri, json) = match y {
+                                Value::String(s) => (Some(s.as_str()), false),
+                                Value::Object(t) => (
+                                    t.get("@id").and_then(Value::as_str),
+                                    t.get("@type").and_then(Value::as_str) == Some("@json"),
+                                ),
+                                _ => (None, false),
+                            };
+                            if let Some(iri) = iri {
+                                // A context repeated on every node is one
+                                // definition, not one per node.
+                                let iris = d.terms.entry(k.clone()).or_default();
+                                if !iris.iter().any(|i| i == iri) {
+                                    iris.push(iri.to_string());
+                                }
+                            }
+                            if json {
+                                d.json.insert(k.clone());
+                            } else {
+                                d.plain.insert(k.clone());
+                            }
+                            // A term definition may carry a scoped context.
+                            stack.push((y, depth + 1, true));
+                        } else {
+                            stack.push((y, depth + 1, in_ctx));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        d
+    }
+
+    /// Whether every definition of the term `k` types it `@json`.
+    fn json_typed(&self, k: &str) -> bool {
+        self.json.contains(k) && !self.plain.contains(k)
+    }
+
+    /// Whether the property key `k` is ODRL's and not read as a bare key.
+    fn odrl_key(&self, k: &str) -> bool {
+        let mut budget = MAX_EXPANSION;
+        if k.contains(':') {
+            return self.odrl_iri(k, None, &mut budget);
+        }
+        self.terms
+            .get(k)
+            .is_some_and(|iris| iris.iter().any(|i| self.odrl_iri(i, Some(k), &mut budget)))
+    }
+
+    /// Whether `iri`, as written in a term definition (or as a key), may
+    /// expand into the ODRL namespace with a local name other than `own`.
+    fn odrl_iri(&self, iri: &str, own: Option<&str>, budget: &mut usize) -> bool {
+        if *budget == 0 {
+            return true;
+        }
+        *budget -= 1;
+        if let Some(local) = iri.strip_prefix(ODRL_NS) {
+            return !local.is_empty() && Some(local) != own;
+        }
+        if iri.starts_with('@') {
+            return false;
+        }
+        match iri.split_once(':') {
+            // An absolute IRI or a blank node, not a compact one.
+            Some((_, rest)) if rest.starts_with("//") => false,
+            Some(("_", _)) => false,
+            Some((p, rest)) => {
+                (p == "odrl" && self.odrl_iri(&format!("{ODRL_NS}{rest}"), own, budget))
+                    || self.terms.get(p).is_some_and(|iris| {
+                        iris.iter()
+                            .any(|i| self.odrl_iri(&format!("{i}{rest}"), own, budget))
+                    })
+            }
+            // A term, or relative to the @vocab.
+            None => {
+                self.terms.get(iri).is_some_and(|iris| {
+                    iris.iter()
+                        .filter(|i| i.as_str() != iri)
+                        .any(|i| self.odrl_iri(i, own, budget))
+                }) || self
+                    .vocab
+                    .iter()
+                    .any(|v| self.odrl_iri(&format!("{v}{iri}"), own, budget))
+            }
+        }
     }
 }

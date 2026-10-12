@@ -1,0 +1,58 @@
+{
+  "schema": "ds-prose/validation-report@1",
+  "tool": {
+    "name": "ds-prose-rs",
+    "version": "<version>"
+  },
+  "mode": "strict",
+  "tiers": [
+    "profile",
+    "prose",
+    "input"
+  ],
+  "ruleset": 1,
+  "verdict": "incomplete",
+  "vocabulary": {
+    "odrl": "common",
+    "profiles": [
+      {
+        "iri": "https://example.org/odrl/profile/research",
+        "title": "Research Data Profile",
+        "version": "0.1.0"
+      }
+    ]
+  },
+  "gaps": [
+    {
+      "rule": "profile.not-loaded",
+      "detail": "https://example.org/odrl/profile/missing"
+    }
+  ],
+  "counts": {
+    "error": 1,
+    "warning": 0,
+    "info": 0
+  },
+  "findings": [
+    {
+      "rule": "profile.not-loaded",
+      "tier": "profile",
+      "basis": "standard-derived",
+      "severity": "error",
+      "message": "the policy declares the profile <https://example.org/odrl/profile/missing>, which is not loaded",
+      "target": {
+        "kind": "node",
+        "path": "policy[0]"
+      },
+      "pointer": null,
+      "term": {
+        "written": "https://example.org/odrl/profile/missing",
+        "iri": "https://example.org/odrl/profile/missing"
+      },
+      "profile": "https://example.org/odrl/profile/missing",
+      "expected": null,
+      "fixes": [],
+      "fingerprint": "6364f5a406f634cf"
+    }
+  ]
+}

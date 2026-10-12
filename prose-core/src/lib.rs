@@ -14,10 +14,26 @@
 //! JSON-LD processor, so a custom `@context` that renames ODRL terms is not
 //! followed; unknown terms are reported in [`Document::warnings`] instead of
 //! guessed at.
+//!
+//! Profiles: [`render_with`] reads the policy with the labels of the ODRL
+//! profiles a [`profile::Wording`] holds, and returns a [`Reading`]: the
+//! [`Document`] plus a glossary per policy. With `Wording::default()` the
+//! document is exactly what [`render`] returns. See [`profile`].
+//!
+//! Validation: [`validate`] checks a policy against the loaded profiles,
+//! in the advisory mode [`edit::check_profile`] has always used, or in a
+//! strict mode that reads ODRL plus the loaded profiles as a closed
+//! vocabulary and reports a verdict.
+//!
+//! Features: `turtle` (off by default) also reads profiles written in
+//! Turtle, through oxttl.
 pub mod edit;
 mod model;
+pub mod profile;
 mod read;
+pub mod validate;
 mod words;
+mod words_ctx;
 
 /// The wording helpers the reader uses, public so an editor can show the
 /// same phrases for the same terms.
@@ -28,9 +44,35 @@ pub mod wording {
     pub fn known_left_operands() -> &'static [(&'static str, &'static str)] {
         crate::words::OPERANDS
     }
+
+    /// How the loaded profiles explain `written`, a term as a policy whose
+    /// prefixes are `prefixes` writes it; `None` when no loaded profile
+    /// declares it.
+    pub fn gloss(
+        wording: &crate::profile::Wording,
+        prefixes: &crate::profile::Prefixes,
+        written: &str,
+    ) -> Option<crate::Gloss> {
+        crate::words_ctx::gloss(wording, prefixes, written)
+    }
+
+    /// [`operator_for`], worded with the loaded profiles: an operator a
+    /// profile declares (outside ODRL's namespace) reads with its label,
+    /// e.g. "is within region"; any other as [`operator_for`] phrases it.
+    pub fn operator_with(
+        wording: &crate::profile::Wording,
+        prefixes: &crate::profile::Prefixes,
+        left: &str,
+        op: &str,
+    ) -> String {
+        crate::words_ctx::operator_with(wording, prefixes, left, op)
+    }
 }
 
-pub use model::{Condition, Document, FollowUp, Policy, PolicyKind, Rule, RuleKind};
+pub use model::{
+    Condition, Document, FollowUp, Gloss, Policy, PolicyGlossary, PolicyKind, Reading, Rule,
+    RuleKind,
+};
 
 /// Why a document could not be read at all.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,7 +107,24 @@ pub fn render(json: &str) -> Result<Document, ProseError> {
 /// As [`render`], for a value that is already parsed. Accepts a single
 /// policy, an array of policies, or an object whose `@graph` holds them.
 pub fn render_value(value: &serde_json::Value) -> Result<Document, ProseError> {
-    read::document(value)
+    read::document_with(value, &profile::Wording::default()).map(|r| r.document)
+}
+
+/// As [`render`], worded with the profiles `wording` holds: profile terms
+/// read with their labels and a glossary explains them. With no profile
+/// loaded, `document` is exactly what [`render`] returns.
+pub fn render_with(json: &str, wording: &profile::Wording) -> Result<Reading, ProseError> {
+    let value: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| ProseError::Json(e.to_string()))?;
+    render_value_with(&value, wording)
+}
+
+/// As [`render_with`], for a value that is already parsed.
+pub fn render_value_with(
+    value: &serde_json::Value,
+    wording: &profile::Wording,
+) -> Result<Reading, ProseError> {
+    read::document_with(value, wording)
 }
 
 #[cfg(doctest)]

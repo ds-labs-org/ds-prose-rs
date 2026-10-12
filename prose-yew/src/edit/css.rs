@@ -78,6 +78,20 @@ pub const BASE_CSS: &str = r#"
 .ds-prose.prose-edit .prose-issue-warning { color: var(--prose-warning, #b45309); }
 .ds-prose.prose-edit .prose-issue-info { opacity: .8; }
 .ds-prose.prose-edit .prose-slot-wrap { position: relative; display: inline-block; }
+.ds-prose.prose-edit .prose-slot-note { margin-inline-start: .3em; font-size: .8em; opacity: .8; }
+/* Why a closed slot did not take its text: above the slot, out of the flow of
+   the sentence, so the list below it stays reachable. */
+.ds-prose.prose-edit .prose-slot-message {
+  position: absolute;
+  z-index: 11;
+  left: 0;
+  bottom: 100%;
+  width: max-content;
+  max-width: min(24em, 90vw);
+  padding: .1em .4em;
+  background: Canvas;
+  border: 1px solid currentColor;
+}
 .ds-prose.prose-edit .prose-suggestions {
   position: absolute;
   z-index: 10;
@@ -101,6 +115,17 @@ pub const BASE_CSS: &str = r#"
   color: HighlightText;
 }
 .ds-prose.prose-edit .prose-suggestion small { opacity: .75; margin-left: .5em; }
+.ds-prose.prose-edit .prose-suggestion-nested {
+  padding-inline-start: calc(.5em + var(--prose-depth, 1) * 1em);
+}
+.ds-prose.prose-edit .prose-suggestion-group > ul { list-style: none; margin: 0; padding: 0; }
+.ds-prose.prose-edit .prose-suggestion-group-label {
+  display: block;
+  padding: .25em .5em .1em;
+  font-size: .85em;
+  font-weight: bold;
+  opacity: .8;
+}
 .ds-prose.prose-edit.prose-reveal-hover .prose-add,
 .ds-prose.prose-edit.prose-reveal-hover .prose-remove,
 .ds-prose.prose-edit.prose-reveal-hover .prose-reorder,

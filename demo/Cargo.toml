@@ -18,15 +18,32 @@ path = "src/main.rs"
 
 [dependencies]
 prose-yew = { path = "../prose-yew", features = ["csr"] }
+# The Profile field reads Turtle as well as JSON-LD.
+prose-core = { path = "../prose-core", features = ["turtle"] }
 yew = { version = "0.23", features = ["csr"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-web-sys = { version = "0.3", features = ["HtmlTextAreaElement", "Window", "Document", "Element"] }
+wasm-bindgen-futures = "0.4"
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+# Loading a profile from a URL (the only network access, on request).
+gloo-net = { version = "0.5", default-features = false, features = ["http"] }
+gloo-timers = "0.3"
+web-sys = { version = "0.3", features = [
+    "HtmlTextAreaElement", "Window", "Document", "Element", "HtmlInputElement", "File",
+    "FileList", "Blob", "AbortController", "AbortSignal", "RequestMode", "RequestCredentials",
+    "Url", "Location", "ReadableStream", "ReadableStreamDefaultReader",
+    "ReadableStreamReadResult", "HtmlElement", "Navigator", "Clipboard", "BlobPropertyBag",
+] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3"
 gloo-timers = { version = "0.3", features = ["futures"] }
 wasm-bindgen = "0.2"
+js-sys = "0.3"
 web-sys = { version = "0.3", features = [
     "HtmlTextAreaElement", "HtmlElement", "InputEvent", "InputEventInit", "FocusEvent",
-    "FocusEventInit", "EventInit", "MouseEvent", "NodeList",
+    "FocusEventInit", "EventInit", "MouseEvent", "NodeList", "HtmlInputElement",
+    "DataTransfer", "DataTransferItem", "DataTransferItemList", "File", "FileList", "Event",
+    "Blob", "BlobPropertyBag", "Url", "HtmlButtonElement", "KeyboardEvent",
+    "KeyboardEventInit",
 ] }

@@ -104,10 +104,14 @@ impl Default for EditRules {
             right_operand_values: Limit::at_least(1),
             profile: Limit::ANY,
             inherit_from: Limit::ANY,
-            set_operators: ["isAnyOf", "isAllOf", "isNoneOf"]
-                .into_iter()
-                .map(String::from)
-                .collect(),
+            // ODRL22.ttl defines all six as set-based; matches
+            // odrl.set-operator-cardinality.
+            set_operators: [
+                "isA", "hasPart", "isPartOf", "isAnyOf", "isAllOf", "isNoneOf",
+            ]
+            .into_iter()
+            .map(String::from)
+            .collect(),
             allow_rule_kind_change: true,
             allow_reorder: true,
             allow_logical: true,

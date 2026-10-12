@@ -1,0 +1,21 @@
+{
+  "@context": {
+    "odrl": "http://www.w3.org/ns/odrl/2/",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "skos": "http://www.w3.org/2004/02/skos/core#",
+    "owl": "http://www.w3.org/2002/07/owl#"
+  },
+  "@graph": [
+    {
+      "@id": "https://example.org/odrl/profile/relabel",
+      "@type": "owl:Ontology",
+      "rdfs:label": "A profile that relabels a core term"
+    },
+    {
+      "@id": "odrl:distribute",
+      "@type": "odrl:Action",
+      "rdfs:label": { "@value": "never distribute", "@language": "en" },
+      "skos:definition": { "@value": "A profile must not change what a core term's sentence says.", "@language": "en" }
+    }
+  ]
+}

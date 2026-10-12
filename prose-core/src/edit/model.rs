@@ -49,6 +49,11 @@ pub struct EditDoc {
     pub policies: Vec<PolicyNode>,
     /// Reader notes (unknown keys, skipped nodes).
     pub warnings: Vec<String>,
+    /// The property keys the reader skipped that are ODRL's: compact IRIs
+    /// (`odrl:permission`), full IRIs and @context aliases of an ODRL
+    /// property, in document order. The reader takes bare keys only, so
+    /// nothing under them was read, and a validator must not certify them.
+    pub unread: Vec<String>,
     next_id: u32,
 }
 
@@ -99,6 +104,7 @@ impl EditDoc {
         let mut d = self.clone();
         d.origin = None;
         d.warnings.clear();
+        d.unread.clear();
         d.next_id = 0;
         for p in &mut d.policies {
             p.normalize();
@@ -122,6 +128,46 @@ impl EditDoc {
     pub fn apply(&mut self, ev: &EditEvent, rules: &EditRules) -> Result<(), EditError> {
         let mut work = self.clone();
         super::apply::apply_event(&mut work, ev, rules)?;
+        *self = work;
+        Ok(())
+    }
+
+    /// As [`EditDoc::apply`], and then, when `gate` is given, strict mode's
+    /// reducer gate ([`Validator::admissible`]): an event `apply` would
+    /// accept is refused as [`EditError::OutsideProfile`] when it writes a
+    /// term the loaded profiles do not allow in that slot. The reducer's own
+    /// errors come first. With `None` it is `apply`. Atomic.
+    ///
+    /// [`Validator::admissible`]: crate::validate::Validator::admissible
+    pub fn apply_gated(
+        &mut self,
+        ev: &EditEvent,
+        rules: &EditRules,
+        gate: Option<&crate::validate::Validator>,
+    ) -> Result<(), EditError> {
+        let mut work = self.clone();
+        super::apply::apply_event(&mut work, ev, rules)?;
+        if let Some(v) = gate {
+            v.admissible(self, ev).map_err(EditError::OutsideProfile)?;
+        }
+        *self = work;
+        Ok(())
+    }
+
+    /// Applies `evs` in order, each through [`EditDoc::apply_gated`] on the
+    /// document the ones before it made: all of them or, on the first
+    /// error, none, with the index of the event that failed. A fix of
+    /// several events is one change.
+    pub fn apply_all(
+        &mut self,
+        evs: &[EditEvent],
+        rules: &EditRules,
+        gate: Option<&crate::validate::Validator>,
+    ) -> Result<(), (usize, EditError)> {
+        let mut work = self.clone();
+        for (i, ev) in evs.iter().enumerate() {
+            work.apply_gated(ev, rules, gate).map_err(|e| (i, e))?;
+        }
         *self = work;
         Ok(())
     }

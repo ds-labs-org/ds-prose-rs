@@ -1,0 +1,39 @@
+{
+  "@context": [
+    "http://www.w3.org/ns/odrl.jsonld",
+    { "ex": "https://example.org/odrl/profile/research/" }
+  ],
+  "@type": "Agreement",
+  "uid": "urn:policy:research-1",
+  "profile": "https://example.org/odrl/profile/research",
+  "assigner": "http://example.com/org:hospital",
+  "assignee": "http://example.com/org:university",
+  "target": "http://example.com/data:cohort-2026",
+  "permission": [{
+    "action": {
+      "rdf:value": { "@id": "ex:fineTune" },
+      "refinement": [{
+        "leftOperand": "ex:dataSubjectCount",
+        "operator": "gteq",
+        "rightOperand": { "@value": "50", "@type": "xsd:integer" }
+      }]
+    },
+    "constraint": [{
+      "leftOperand": "ex:researchPurpose",
+      "operator": "isAnyOf",
+      "rightOperand": [{ "@id": "ex:clinical" }, { "@id": "ex:academic" }]
+    }, {
+      "leftOperand": "ex:retentionPeriod",
+      "operator": "lteq",
+      "rightOperand": { "@value": "P2Y", "@type": "xsd:duration" }
+    }]
+  }, {
+    "action": "ex:distill"
+  }],
+  "prohibition": [{
+    "action": "commercialize"
+  }],
+  "obligation": [{
+    "action": "ex:pseudonymise"
+  }]
+}

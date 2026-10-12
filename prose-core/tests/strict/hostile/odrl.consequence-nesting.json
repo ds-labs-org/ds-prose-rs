@@ -1,0 +1,40 @@
+{
+  "profiles": [],
+  "options": {
+    "structural": true
+  },
+  "policy": {
+    "@context": [
+      "http://www.w3.org/ns/odrl.jsonld",
+      {
+        "ex": "https://example.org/odrl/profile/research/",
+        "foo": "https://example.net/foo/",
+        "other": "https://example.com/odrl/profile/other/",
+        "ext": "https://example.org/odrl/profile/research-ext/"
+      }
+    ],
+    "@type": "Set",
+    "uid": "urn:policy:h",
+    "obligation": [
+      {
+        "action": "compensate",
+        "consequence": [
+          {
+            "action": "inform",
+            "consequence": [
+              {
+                "action": "delete"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "permission": [
+      {
+        "target": "urn:asset:1",
+        "action": "use"
+      }
+    ]
+  }
+}

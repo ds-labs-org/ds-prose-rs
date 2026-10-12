@@ -1,0 +1,13 @@
+{
+  "@context": {
+    "@version": 1.1,
+    "@protected": true,
+    "odrl": "http://www.w3.org/ns/odrl/2/",
+    "dspace": "https://w3id.org/dspace/2025/1/",
+    "action": { "@id": "odrl:action", "@type": "@vocab" },
+    "leftOperand": { "@id": "odrl:leftOperand", "@type": "@vocab" },
+    "operator": { "@id": "odrl:operator", "@type": "@vocab" },
+    "rightOperand": { "@id": "odrl:rightOperand" },
+    "constraint": { "@id": "odrl:constraint", "@container": "@set" }
+  }
+}

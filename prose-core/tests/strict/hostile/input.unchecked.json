@@ -1,0 +1,20 @@
+{
+  "profiles": [],
+  "options": {},
+  "policy": {
+    "@context": [
+      "http://www.w3.org/ns/odrl.jsonld",
+      {
+        "ex": "https://example.org/odrl/profile/research/",
+        "foo": "https://example.net/foo/",
+        "other": "https://example.com/odrl/profile/other/",
+        "ext": "https://example.org/odrl/profile/research-ext/"
+      }
+    ],
+    "@type": "Set",
+    "uid": "urn:policy:h",
+    "permission": [
+      "urn:rule:shared"
+    ]
+  }
+}
