@@ -420,3 +420,15 @@ fn inherited_parts_survive_a_cycle_without_looping() {
     let rules: Vec<_> = odrl_findings(&r).into_iter().map(|x| x.0).collect();
     assert_eq!(rules, ["odrl.inheritance-cycle", "odrl.inheritance-cycle"]);
 }
+
+#[test]
+fn a_remote_parent_is_a_gap_even_with_the_cycle_rule_off() {
+    // The four rules stay quiet on what a remote parent may supply; the
+    // gap that says so must not depend on the cycle rule being on.
+    let o = structural().level(RuleId::OdrlInheritanceCycle, Level::Off);
+    let r = validate_json(&graph(vec![im_32()]), &Wording::new(), &o);
+    assert_eq!(odrl_findings(&r), pairs(&[]), "{:?}", r.findings);
+    assert_eq!(r.gaps.len(), 1, "{:?}", r.findings);
+    assert_eq!(r.gaps[0].rule, RuleId::InputUnchecked);
+    assert_eq!(r.verdict, Verdict::Incomplete);
+}
