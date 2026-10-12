@@ -1138,3 +1138,55 @@ fn the_gate_refuses_exactly_what_validation_reports_at_the_slot() {
     }
     assert!(refused > 100 && admitted > 100, "{refused} {admitted}");
 }
+
+/// R2: a closed list asks about every entry of one slot. The batch call
+/// prepares the document once and must answer exactly as one call per value.
+#[test]
+fn admissible_values_agrees_with_admissible_per_value() {
+    let v = strict_gate(closed());
+    let values = [
+        "",
+        "use",
+        "read",
+        "ex:train",
+        "ex:fineTune",
+        "foo:bar",
+        "ex:distil",
+        "ex:researchPurpose",
+        "gteq",
+        "isAnyOf",
+        "perm",
+        "http://",
+        "ex:",
+    ];
+    let slots = [
+        ACTION.to_string(),
+        format!("{PURPOSE}#leftOperand"),
+        format!("{PURPOSE}#operator"),
+        format!("{COUNT}#operator"),
+        format!("{COUNT}#unit"),
+        "policy[0]#kind".to_string(),
+        "policy[0]#conflict".to_string(),
+        // Not vocabulary slots, and one that is not there.
+        format!("{COUNT}#rightOperand[0]"),
+        "policy[9].permission[0].action[0]#name".to_string(),
+    ];
+    for doc in [base(), incomplete()] {
+        for slot in &slots {
+            let at = sp(slot);
+            let batch = v.admissible_values(&doc, &at, &values);
+            assert_eq!(batch.len(), values.len(), "{slot}");
+            for (value, got) in values.iter().zip(&batch) {
+                let one = v.admissible(&doc, &text(&doc, slot, value));
+                assert_eq!(got.is_ok(), one.is_ok(), "{slot} <- {value:?}");
+                if let (Err(a), Err(b)) = (got, &one) {
+                    assert_eq!(a.rule, b.rule, "{slot} <- {value:?}");
+                }
+            }
+        }
+    }
+    // Advisory: everything is admitted.
+    let advisory = Validator::new(Arc::new(closed()), Options::advisory());
+    let all = advisory.admissible_values(&base(), &sp(ACTION), &["foo:bar", "use"]);
+    assert!(all.iter().all(Result::is_ok));
+}
