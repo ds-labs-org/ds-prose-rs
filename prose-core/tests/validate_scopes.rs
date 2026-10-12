@@ -4,6 +4,7 @@
 //! one `@graph` may bind the same prefix to different namespaces.
 mod common;
 mod corpus;
+use common::*;
 use corpus::*;
 use prose_core::edit::*;
 use prose_core::validate::*;
@@ -83,6 +84,78 @@ fn a_graph_policy_overrides_the_wrapper_context() {
         got.iter().map(|g| g.1.as_str()).collect::<Vec<_>>(),
         ["policy[0].permission[0].action[0]#name"]
     );
+}
+
+fn strict_of(doc: &EditDoc) -> Vec<(String, String, Severity)> {
+    validate(doc, &wording_of(&["research.jsonld"]), &Options::strict())
+        .findings
+        .iter()
+        .map(|f| (f.rule.to_string(), target_str(&f.target), f.severity))
+        .collect()
+}
+
+#[test]
+fn a_moved_graph_policy_keeps_its_own_scope() {
+    let mut doc = read_model_value(&json!({"@graph": [
+        policy("urn:p1", OTHER_NS, false),
+        policy("urn:p2", RESEARCH_NS, true),
+    ]}))
+    .unwrap();
+    let expect = doc.policies[1].id;
+    doc.apply(
+        &EditEvent::Move {
+            list: ListPath::policies(),
+            from: 1,
+            to: 0,
+            expect,
+        },
+        &EditRules::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        strict_of(&doc),
+        [(
+            "profile.unknown-term".to_string(),
+            "policy[1].permission[0].action[0]#name".to_string(),
+            Severity::Error
+        )]
+    );
+}
+
+#[test]
+fn a_policy_added_beside_a_single_one_reads_the_context_it_is_written_under() {
+    // Written out, the single policy's context moves up to the @graph
+    // wrapper, so it binds `ex` for the new policy too.
+    let mut doc = read_model_value(&policy("urn:p1", RESEARCH_NS, true)).unwrap();
+    let rules = EditRules::default();
+    doc.apply(
+        &add_ev(&doc, ListPath::policies(), 1, NewItem::Default),
+        &rules,
+    )
+    .unwrap();
+    doc.apply(
+        &add_ev(&doc, lp("policy[1]@permission"), 0, NewItem::Default),
+        &rules,
+    )
+    .unwrap();
+    doc.policies[1].profile = vec![RESEARCH.to_string()];
+    set_text(
+        &mut doc,
+        "policy[1].permission[0].action[0]#name",
+        "ex:train",
+    )
+    .unwrap();
+    let written = write_jsonld(&doc);
+    assert_eq!(
+        written["@context"][1]["ex"],
+        json!(RESEARCH_NS),
+        "{written}"
+    );
+    let terms: Vec<_> = strict_of(&doc)
+        .into_iter()
+        .filter(|f| f.0.starts_with("profile."))
+        .collect();
+    assert_eq!(terms, []);
 }
 
 #[test]
