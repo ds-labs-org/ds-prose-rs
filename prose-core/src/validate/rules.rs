@@ -220,8 +220,8 @@ macro_rules! rule {
 /// A `prose.*` rule that binds (a closed operand, strict mode) reads a
 /// loaded term's hints, so it is silent while an `@context` was not read (the
 /// prefix may be rebound) and, for `prose.value-not-allowed` alone, while a
-/// declared profile is not loaded (it may add a value narrower than an
-/// allowed one). The operator, unit, datatype and string-for-IRI rules read
+/// declared profile is not loaded and the value is an IRI (it may add an IRI
+/// narrower than an allowed one, never a literal). The operator, unit, datatype and string-for-IRI rules read
 /// the loaded term and the written value only, which a missing profile cannot
 /// change, so they hold. `prose.ill-typed-literal` reads no hints.
 pub static RULES: &[RuleInfo] = &[

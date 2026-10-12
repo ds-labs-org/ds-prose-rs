@@ -1577,9 +1577,14 @@ impl<'a> Checker<'a> {
                 }
                 continue;
             }
-            if h.closed && self.options.mode() == Mode::Strict && self.incomplete() {
-                // A profile that is not loaded may add a value narrower
-                // than an allowed one: not a violation until it is read.
+            if h.closed
+                && matches!(l, Literal::Iri(_))
+                && self.options.mode() == Mode::Strict
+                && self.incomplete()
+            {
+                // A profile that is not loaded may add an IRI narrower than
+                // an allowed one: not a violation until it is read. It
+                // cannot add a literal, so a literal stays an error.
                 continue;
             }
             let msg = format!(

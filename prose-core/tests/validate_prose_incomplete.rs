@@ -5,7 +5,8 @@
 //!
 //! Per rule, under a declared profile that is not loaded (a gap):
 //! - `prose.value-not-allowed` is unsound: the missing profile may add a
-//!   value narrower (`skos:broader`) than an allowed one, so it is silent.
+//!   value narrower (`skos:broader`) than an allowed one, so it is silent
+//!   for an IRI value. A literal is never such a value, so it still fires.
 //! - `prose.operator-not-allowed`, `prose.unit-not-allowed`,
 //!   `prose.datatype-lexical`, `prose.datatype-conflict` and
 //!   `prose.iri-expected` read only the loaded term's own hints and the
