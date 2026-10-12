@@ -79,7 +79,7 @@ When the wasm module cannot be loaded, the component logs `ds-odrl-prose: could 
 
 > The ODRL prose renderer could not be loaded (the URL). Check that the file is served; it is tried again when the input changes.
 
-A tree that is already mounted is left alone.
+A tree that is already mounted is left alone. The error paragraph is a child of the host, outside `article.ds-prose`: select it as `ds-odrl-prose > .prose-error`, as [CSS hooks](/angular/css-hooks/) says.
 
 ## Exports
 

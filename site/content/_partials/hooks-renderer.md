@@ -13,7 +13,7 @@ These classes are written by `OdrlProse` (Yew), by `ProseHandle` (the wasm bridg
 | `.prose-rule-sentence` | `p` | The sentence of a rule. |
 | `.prose-label` | `p` | A lead-in such as "Applies only if:", and the heading of the warnings block. |
 | `.prose-warnings` | `aside` | The "Not rendered" block: parts of the policy the renderer did not turn into sentences. |
-| `.prose-error` | `p[role="alert"]` | Replaces the policy when the JSON cannot be read. It sits inside `article.ds-prose`. |
+| `.prose-error` | `p[role="alert"]` | Replaces the policy when the JSON cannot be read. It sits inside `article.ds-prose`. The Angular component also writes it when the wasm module cannot be loaded; that one is a child of `ds-odrl-prose`, outside `article.ds-prose`, and `.ds-prose .prose-error` does not match it. Select `ds-odrl-prose > .prose-error`. |
 | `.prose-glossary` | `details[open]` | Terms of the loaded profile that the policy uses, after the policy. At most 30 entries. |
 | `.prose-note`, `.prose-kind-of`, `.prose-implies`, `.prose-deprecated`, `.prose-from` | `dd` | One line of a glossary entry: usage note, "A kind of", "Implies", deprecation, source profile. |
 | `.prose-violations` | `section` | Validation findings and the verdict, after the policies. Written only with a validator and the findings switched on. |
