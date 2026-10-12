@@ -220,3 +220,40 @@ fn several_logical_operands_violate_the_information_model() {
             .all(|f| f.rule != RuleId::OdrlConstraintShape)
     );
 }
+
+#[test]
+fn expected_values_cap_boundary_is_exact() {
+    let find = |allowed: usize| {
+        let w = value_profile(allowed, true);
+        let j = validate_json(&value_policy(1), &w, &Options::strict()).to_json();
+        j["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["rule"] == "prose.value-not-allowed")
+            .unwrap()
+            .clone()
+    };
+    // Exactly at the cap: everything is listed and nothing is counted.
+    let f = find(8);
+    assert_eq!(f["expected"]["values"].as_array().unwrap().len(), 8);
+    assert!(f["expected"].get("valuesTotal").is_none());
+    // One over: the cap applies and the real count is given.
+    let f = find(9);
+    assert_eq!(f["expected"]["values"].as_array().unwrap().len(), 8);
+    assert_eq!(f["expected"]["valuesTotal"], 9);
+}
+
+#[test]
+fn several_logical_operands_are_not_also_reported_unchecked() {
+    let text = json!({
+        "@context": "http://www.w3.org/ns/odrl.jsonld", "@type": "Set", "uid": "urn:p",
+        "permission": [{"target": "urn:a", "action": "use", "constraint": [{
+            "and": [{"leftOperand": "count", "operator": "lt", "rightOperand": 3}],
+            "or": [{"leftOperand": "count", "operator": "gt", "rightOperand": 1}]
+        }]}]
+    })
+    .to_string();
+    let r = validate_json(&text, &Wording::new(), &Options::strict().structural(true));
+    assert!(r.findings.iter().all(|f| f.rule != RuleId::InputUnchecked));
+}
