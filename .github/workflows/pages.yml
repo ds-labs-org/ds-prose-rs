@@ -1,5 +1,9 @@
 # Same Pages pattern as ds-shacl-form-rs / ds-honeycomb-editor-rs: pinned
 # toolchain and Trunk, build_type "workflow", project-page public URL.
+#
+# The published tree is site/dist: the documentation pages, the Yew demo under
+# /demo/ and the Angular demo under /demo-angular/, the two demos carrying the
+# shared top navigation that site/build.mjs stamps in.
 name: Deploy Pages
 
 on:
@@ -7,11 +11,15 @@ on:
     branches: [main]
     paths:
       - "demo/**"
+      - "demo-angular/**"
       - "prose-core/**"
       - "prose-yew/**"
+      - "prose-wasm/**"
+      - "prose-angular/**"
+      - "site/**"
       - "Cargo.toml"
       - "Cargo.lock"
-      - "scripts/smoke-demo.sh"
+      - "scripts/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -34,23 +42,68 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2.87.24
         with:
-          tool: trunk@0.22.0-beta.2
+          tool: trunk@0.22.0-beta.2,wasm-pack
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          # Angular 20 (the demo) needs Node 20.19, 22.12 or newer; the site
+          # build and its tests use Node's built-in WebSocket and test runner.
+          node-version: 22
+
       - name: Test
         run: cargo test --workspace --locked
-      # --public-url makes asset URLs resolve under /ds-prose-rs/ on a
+
+      # The generator, the contract tests that tie the docs to the sources,
+      # and the browser tests of the switch. No network, no build output.
+      - name: Site tests
+        run: node --test "site/test/*.test.mjs"
+
+      # --public-url makes asset URLs resolve under /ds-prose-rs/demo/ on a
       # GitHub project page; it also feeds index.html's <base>.
-      - name: Build demo
+      - name: Build the Yew demo
         working-directory: demo
-        run: trunk build --release --public-url /ds-prose-rs/
-      # Never publish a demo whose wasm does not boot.
-      - name: Boot check
-        run: scripts/smoke-demo.sh demo/dist /ds-prose-rs/
+        run: trunk build --release --public-url /ds-prose-rs/demo/
+
+      # The Angular demo installs the two packed npm packages, like a
+      # downstream app; --base-href rewrites the <base> of its index.html.
+      - name: Build and pack the npm packages
+        run: scripts/build-npm-packages.sh
+      - name: Build the Angular demo
+        working-directory: demo-angular
+        run: |
+          npm ci --no-audit --no-fund
+          npm install --no-audit --no-fund --no-save ../dist-npm/tarballs/*.tgz
+          npx ng build --base-href /ds-prose-rs/demo-angular/
+
+      # Pages, the two demos, and the navigation stamped into the demos.
+      - name: Assemble the site
+        env:
+          SITE_BASE: /ds-prose-rs/
+        run: node site/build.mjs
+
+      # Never publish a demo whose wasm does not boot. The stamped trees are
+      # what gets published, so they are what is booted.
+      - name: Boot check, Yew demo
+        run: scripts/smoke-demo.sh site/dist/demo /ds-prose-rs/demo/
+        env:
+          SMOKE_EXTRA: 'id="profile-json" id="profile-strict" class="topnav"'
+      - name: Boot check, Angular demo
+        run: scripts/smoke-demo.sh site/dist/demo-angular /ds-prose-rs/demo-angular/
+        env:
+          SMOKE_TITLE: ds-prose-rs Angular demo
+          SMOKE_EXTRA: 'class="topnav" id="strict" id="findings"'
+
+      # Every page and both demos at 1280 and 400 px, light and dark; then the
+      # demos' switch, theme, example stylesheet and validation controls.
+      - name: Layout check
+        run: node site/test/layout-check.mjs site/dist /ds-prose-rs/
+        env:
+          LAYOUT_REQUIRE_CHROME: "1"
 
       - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
 
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
-          path: demo/dist
+          path: site/dist
 
   deploy:
     needs: build
