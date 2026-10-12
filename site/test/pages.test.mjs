@@ -60,3 +60,12 @@ test('headings do not skip levels inside a page', () => {
     for (let i = 1; i < levels.length; i++) assert.ok(levels[i] - levels[i - 1] <= 1, `${p.url}: h${levels[i - 1]} then h${levels[i]}`);
   }
 });
+
+test('a page can name an extra stylesheet; it is linked after site.css and must exist in the output', async () => {
+  const { renderPage } = await import('../lib/shell.mjs');
+  const html = renderPage({ title: 'T', description: 'A description.', active: null, base: '/ds-prose-rs/', body: '<h1>T</h1>\n', stylesheet: 'examples/prose.css' });
+  const site = html.indexOf('assets/site.css');
+  const extra = html.indexOf('<link rel="stylesheet" href="/ds-prose-rs/examples/prose.css">');
+  assert.ok(site > 0 && extra > site, 'extra stylesheet follows site.css');
+  assert.doesNotMatch(renderPage({ title: 'T', description: 'A description.', active: null, base: '/', body: '' }), /examples\/prose\.css/);
+});
