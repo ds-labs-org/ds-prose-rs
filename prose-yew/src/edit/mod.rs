@@ -32,9 +32,9 @@
 //! `data-add="<ListPath>"`. Controls the [`EditRules`](prose_core::edit::EditRules) do not allow are not
 //! rendered.
 //!
-//! Server rendering: Edit mode's `<style>` text is HTML-escaped by Yew's
-//! server renderer, so set `EditConfig::base_css` to `false` and ship
-//! [`BASE_CSS`] yourself there.
+//! Server rendering: Yew 0.23's server renderer writes Edit mode's `<style>`
+//! text unchanged, so [`BASE_CSS`] arrives as CSS; `EditConfig::base_css` can
+//! stay on.
 mod choice;
 mod closed;
 mod config;

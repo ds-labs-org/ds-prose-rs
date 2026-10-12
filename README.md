@@ -742,7 +742,7 @@ Props of `OdrlProseView`:
   permission 1 of policy 1").
 - `reveal`: `Always`, or `OnHoverOrFocus` to dim the controls until needed.
 - `base_css`: Edit mode ships `BASE_CSS` in a `<style>` element; turn it off to
-  bring your own (also needed with server rendering, where Yew escapes style text).
+  bring your own. Server rendering keeps `BASE_CSS` as it is with Yew 0.23.
 - `wording: Rc<Wording>`: the loaded profiles. Set it with
   `EditConfig::with_wording`, which also adds the profiles' terms to `vocab`.
 - `show_raw_terms`, `suggestions`, `max_suggestions`.
