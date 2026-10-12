@@ -22,8 +22,8 @@ test('built site: no overflow, nav present, AA contrast, menu, theme toggle', { 
     t.skip('no Chrome or Chromium found: layout check not run (set CHROME=/path/to/chrome)');
     return;
   }
-  const site = buildSite();
+  const site = buildSite({ kitchenSink: true });
   const { failures, checked } = await runLayoutCheck({ dist: site.out, base: site.base, chrome, shotDir: process.env.SHOT_DIR });
-  assert.ok(checked >= 7 * VIEWPORTS.length * THEMES.length, `only ${checked} page views checked`);
+  assert.ok(checked >= 8 * VIEWPORTS.length * THEMES.length, `only ${checked} page views checked`);
   assert.deepEqual(failures, []);
 });

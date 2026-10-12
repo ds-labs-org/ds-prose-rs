@@ -25,10 +25,20 @@ export function fixtureDemos(root) {
   return { demo, 'demo-angular': ng };
 }
 
-export function buildSite({ base = BASE } = {}) {
+// A page with every block type at its awkward size: long unbroken tokens, a
+// wide table, a long code line. Layout checks build it in; the site does not.
+export const KITCHEN_SINK = fs.readFileSync(path.join(SITE_DIR, 'test/kitchen-sink.md'), 'utf8');
+
+export function buildSite({ base = BASE, kitchenSink = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'site-'));
   const out = path.join(root, 'dist');
-  build({ outDir: out, base, demos: fixtureDemos(root) });
+  const opts = { outDir: out, base, demos: fixtureDemos(root) };
+  if (kitchenSink) {
+    opts.contentDir = path.join(root, 'content');
+    fs.cpSync(path.join(SITE_DIR, 'content'), opts.contentDir, { recursive: true });
+    fs.writeFileSync(path.join(opts.contentDir, 'kitchen-sink.md'), KITCHEN_SINK);
+  }
+  build(opts);
   return { root, out, base };
 }
 
