@@ -123,8 +123,9 @@ jobs:
           cargo test -p demo --target wasm32-unknown-unknown --locked --test '*'
           cargo test -p prose-wasm --target wasm32-unknown-unknown --locked --test '*'
 
-  # The release demo build, served under the Pages sub-path and booted in a
-  # browser. Catches a build or boot failure before the deploy workflow does.
+  # The release demo build, served under the Pages sub-path (/demo/ of the
+  # site) and booted in a browser. Catches a build or boot failure before the
+  # deploy workflow does.
   demo:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -140,15 +141,20 @@ jobs:
 
       - name: Build demo
         working-directory: demo
-        run: trunk build --release --public-url /ds-prose-rs/
+        run: trunk build --release --public-url /ds-prose-rs/demo/
 
       - name: Boot check
-        run: scripts/smoke-demo.sh demo/dist /ds-prose-rs/
+        run: scripts/smoke-demo.sh demo/dist /ds-prose-rs/demo/
 
   # The Angular bridge, built and consumed the way a downstream app does it:
   # both npm packages are built and packed, checked, and the demo app installs
   # only the tarballs (no path alias into this repository) and is booted in a
-  # browser. v1 is read-only: it mounts <OdrlProse>, not the edit mode.
+  # browser under its Pages sub-path (/demo-angular/ of the site). v1 is
+  # read-only: it mounts <OdrlProse>, not the edit mode.
+  #
+  # This job also holds the whole site: it has both demos built, so it runs the
+  # site tests, assembles site/dist as Pages does and checks the real tree in
+  # headless Chrome (every page and both demos, 1280 and 400 px).
   angular:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -160,7 +166,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
-          tool: wasm-pack
+          # wasm-pack builds the npm package; Trunk builds the Yew demo that
+          # goes into the site tree.
+          tool: trunk@0.22.0-beta.2,wasm-pack
       - uses: actions/setup-node@v4
         with:
           # Angular 20 (the demo) needs Node 20.19, 22.12 or newer; the
@@ -200,13 +208,34 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npm install --no-audit --no-fund --no-save ../dist-npm/tarballs/*.tgz
-          npx ng build
+          npx ng build --base-href /ds-prose-rs/demo-angular/
 
       - name: Boot check
-        run: scripts/smoke-demo.sh demo-angular/dist/demo-angular/browser /
+        run: scripts/smoke-demo.sh demo-angular/dist/demo-angular/browser /ds-prose-rs/demo-angular/
         env:
           SMOKE_TITLE: ds-prose-rs Angular demo
           SMOKE_EXTRA: ""
+
+      - name: Build the Yew demo for the site
+        working-directory: demo
+        run: trunk build --release --public-url /ds-prose-rs/demo/
+
+      # The generator, the contract tests that tie the docs to the sources, and
+      # the browser tests of the stylesheet switch and the smoke script.
+      - name: Site tests
+        run: node --test "site/test/*.test.mjs"
+
+      - name: Assemble the site
+        run: node site/build.mjs
+        env:
+          SITE_BASE: /ds-prose-rs/
+
+      # Every page and both demos at 1280 and 400 px, light and dark; the
+      # demos' switch, theme, example stylesheet and validation controls.
+      - name: Layout check
+        run: node site/test/layout-check.mjs site/dist /ds-prose-rs/
+        env:
+          LAYOUT_REQUIRE_CHROME: "1"
 
   # Licences, advisories, banned or unknown sources: deny.toml.
   supply-chain:
