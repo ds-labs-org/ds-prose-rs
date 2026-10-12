@@ -26,6 +26,9 @@ enum Action {
     All(Vec<EditEvent>, Rc<EditRules>, Option<Validator>),
     Set(EditDoc),
     Undo,
+    /// The gate or the validator changed: a refusal made by the old one
+    /// says nothing about the new one.
+    DropRefusal,
 }
 
 impl State {
@@ -83,6 +86,10 @@ impl Reducible for State {
                 next.last_error = None;
                 next.refused = None;
             }
+            Action::DropRefusal => {
+                next.last_error = None;
+                next.refused = None;
+            }
             Action::Undo => {
                 if let Some(prev) = next.history.pop() {
                     next.doc = prev;
@@ -118,7 +125,8 @@ pub struct ProseEditorWith {
     /// Applies the events as one: all of them or none, one undo step. This
     /// is how a fix from a [`prose_core::validate::Report`] is applied.
     pub apply_all: Callback<Vec<EditEvent>>,
-    /// The last refused event and why, until the next edit succeeds. Hand
+    /// The last refused event and why, until the next edit succeeds or the
+    /// validator or the [`StrictEdit`] policy changes. Hand
     /// `error.issue(&event)` to `OdrlProseView::refusal` to show it.
     pub refused: Option<(EditEvent, EditError)>,
 }
@@ -149,6 +157,18 @@ pub fn use_prose_editor_with(
     });
     let dispatcher = state.dispatcher();
     let gate = policy.gate(validator.as_ref()).cloned();
+    {
+        // A refusal is about the gate that made it: when the validator or
+        // the policy changes (strict switched off, another profile), it goes.
+        // Nothing is dispatched when there is none, so a mount costs no render.
+        let refusal = state.refused.is_some() || state.last_error.is_some();
+        let dispatcher = dispatcher.clone();
+        use_effect_with((validator.clone(), policy), move |_| {
+            if refusal {
+                dispatcher.dispatch(Action::DropRefusal);
+            }
+        });
+    }
     let onedit = use_callback(
         (dispatcher.clone(), rules.clone(), gate.clone()),
         |ev: EditEvent, (d, rules, gate)| d.dispatch(Action::Edit(ev, rules.clone(), gate.clone())),
@@ -296,6 +316,18 @@ mod tests {
         assert_eq!(ok.history.len(), 1);
         let replaced = s.reduce(Action::Set(doc()));
         assert!(replaced.refused.is_none() && replaced.last_error.is_none());
+    }
+
+    #[test]
+    fn a_changed_gate_drops_the_refusal_and_keeps_the_document() {
+        let s = state();
+        let bad = set(&s.doc, ACTION, "foo:bar");
+        let s = s.reduce(Action::Edit(bad, rules(), Some(gate())));
+        assert!(s.refused.is_some());
+        let doc = s.doc.clone();
+        let s = s.reduce(Action::DropRefusal);
+        assert!(s.refused.is_none() && s.last_error.is_none());
+        assert!(Rc::ptr_eq(&s.doc, &doc) && s.history.is_empty());
     }
 
     #[test]
