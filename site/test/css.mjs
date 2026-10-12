@@ -45,3 +45,29 @@ export function hex(h) {
   if (!m) throw new Error(`not a 6-digit hex colour: ${h}`);
   return [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16));
 }
+
+// A form of a stylesheet that two builds of the same rules agree on: no
+// comments, one space where there was whitespace and none around punctuation, no quotes inside attribute selectors. A bundler
+// that minifies or re-prints a sheet may change these and nothing else we read.
+export function normaliseCss(css) {
+  return css
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\[([\w-]+)=(["'])([^"']*)\2\]/g, '[$1=$3]')
+    .replace(/\s+/g, ' ')
+    .replace(/\s*([{};,>])\s*/g, '$1')
+    .replace(/:\s+/g, ':')
+    .trim();
+}
+
+// The selectors of every style rule, at any depth, as written but with
+// whitespace collapsed. At-rule preludes are skipped; their bodies are read.
+export function selectorsOf(css) {
+  const clean = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const out = [];
+  for (const m of clean.matchAll(/([^{}]+)\{/g)) {
+    const prelude = m[1].trim();
+    if (prelude.startsWith('@')) continue;
+    for (const sel of prelude.split(',')) out.push(sel.trim().replace(/\s+/g, ' ').replace(/\[([\w-]+)=(["'])([^"']*)\2\]/g, '[$1=$3]'));
+  }
+  return out;
+}
