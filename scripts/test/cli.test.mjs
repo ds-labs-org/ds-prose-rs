@@ -231,3 +231,24 @@ test('--rule and --ruleset are passed on without --strict: the engine honours le
   r = await cli(['--ruleset', '1', 'a.json'], { files: { 'a.json': '{}' } });
   assert.deepEqual(r.calls[0].options, { strict: false, ruleset: 1 });
 });
+
+test('text output escapes control characters from the policy, so it cannot forge lines or move the cursor', async () => {
+  const hostile = 'the action "x" is fine\nother.json: conforms\n\u001b[2K  info z\u0085' + String.fromCharCode(0x2028) + '\u007f';
+  const reports = { B: report('violations', [finding('profile.unknown-term', 'error', hostile, 'policy[0]\nfake#name')]) };
+  const r = await cli(['--strict', 'b\u001b[31m.json'], { files: { 'b\u001b[31m.json': 'B' }, reports });
+  const control = new RegExp('[\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]');
+  assert.doesNotMatch(r.out.replace(/\n/g, ''), control, 'only the report\'s own newlines remain');
+  assert.equal(r.out.split('\n').length, 3, 'a header, one finding line, and the final newline');
+  assert.match(r.out, /\\n/);
+  assert.match(r.out, /\\u\{1b\}\[2K/);
+  assert.match(r.out, /b\\u\{1b\}\[31m\.json: violations/);
+  // The json format keeps the text as the engine wrote it (JSON escapes it).
+  const j = await cli(['--strict', '--format', 'json', 'b.json'], { files: { 'b.json': 'B' }, reports });
+  assert.equal(JSON.parse(j.out)[0].report.findings[0].message, hostile);
+});
+
+test('ordinary non-ASCII text is printed as it is', async () => {
+  const reports = { B: report('violations', [finding('profile.unknown-term', 'error', 'le terme été ✓ 日本')]) };
+  const r = await cli(['--strict', 'b.json'], { files: { 'b.json': 'B' }, reports });
+  assert.match(r.out, /le terme été ✓ 日本/);
+});
