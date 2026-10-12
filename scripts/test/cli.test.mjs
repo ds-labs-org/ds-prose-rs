@@ -251,6 +251,20 @@ test('text output escapes control characters from the policy, so it cannot forge
   assert.equal(JSON.parse(j.out)[0].report.findings[0].message, hostile);
 });
 
+test('text output escapes the characters that reorder or hide text, and the stderr messages too', async () => {
+  const cc = (...n) => String.fromCharCode(...n);
+  const tricky = `a${cc(0x202e)}b${cc(0x2066)}c${cc(0x2069)}d${cc(0x200e)}e${cc(0x200f)}f${cc(0x061c)}g${cc(0x200b)}h`;
+  const reports = { B: report('violations', [finding('profile.unknown-term', 'error', tricky)]) };
+  const r = await cli(['--strict', 'b.json'], { files: { 'b.json': 'B' }, reports });
+  assert.doesNotMatch(r.out, new RegExp(`[${cc(0x200b)}-${cc(0x200f)}${cc(0x061c)}${cc(0x202a)}-${cc(0x202e)}${cc(0x2066)}-${cc(0x2069)}]`));
+  assert.match(r.out, /a\\u\{202e\}b\\u\{2066\}c\\u\{2069\}d/);
+  // A file that cannot be read: its name is in the message on stderr.
+  const gone = await cli(['--strict', 'x\u001b[2Ky.json'], { files: {} });
+  assert.equal(gone.code, 2);
+  assert.doesNotMatch(gone.err, /\u001b/);
+  assert.match(gone.err, /x\\u\{1b\}\[2Ky\.json/);
+});
+
 test('ordinary non-ASCII text is printed as it is', async () => {
   const reports = { B: report('violations', [finding('profile.unknown-term', 'error', 'le terme été ✓ 日本')]) };
   const r = await cli(['--strict', 'b.json'], { files: { 'b.json': 'B' }, reports });
