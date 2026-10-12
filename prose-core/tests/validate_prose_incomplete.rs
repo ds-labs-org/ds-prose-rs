@@ -231,3 +231,27 @@ fn advisory_levels_set_by_hand_are_unchanged_by_a_missing_profile() {
         rules(&r)
     );
 }
+
+#[test]
+fn a_literal_no_profile_can_narrow_is_still_an_error() {
+    // A missing profile can add only narrower IRIs (prose:rightOperand and
+    // skos:broader name IRIs), never a literal, so a literal on a closed
+    // IRI-valued operand is an error whatever it holds.
+    for v in [
+        json!("ten"),
+        json!({"@value": "10", "@type": "xsd:integer"}),
+    ] {
+        let text = local(
+            json!([RESEARCH, EXT]),
+            json!({"leftOperand": "ex:researchPurpose", "operator": "eq", "rightOperand": v}),
+        );
+        let r = run(&text);
+        assert_eq!(
+            prose_errors(&r),
+            ["prose.value-not-allowed"],
+            "{v}: {:?}",
+            rules(&r)
+        );
+        assert_eq!(r.verdict, Verdict::Violations, "{v}");
+    }
+}
