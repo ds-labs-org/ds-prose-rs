@@ -8,7 +8,7 @@ use crate::profile::{
     OdrlVocab, OperandHints, Prefixes, ProfileVocab, Term, TermKind, Wording, is_odrl_context,
     odrl_spelling, odrl_term,
 };
-use crate::read::join_with;
+use crate::read::{join_with, node_prefixes};
 use crate::words::local_name;
 use crate::words_ctx::{namespace, profile_name};
 use std::collections::{HashMap, HashSet};
@@ -96,6 +96,7 @@ pub(crate) fn run(doc: &EditDoc, w: &Wording, index: &Index, o: &Options) -> Vec
         );
     }
     for (i, p) in doc.policies.iter().enumerate() {
+        c.scope(i);
         c.policy(NodePath::policy(i), p);
     }
     let mut out = c.out;
@@ -168,6 +169,7 @@ pub(crate) fn admissible(
     let mut c = Checker::new(doc, w, index, o);
     c.imports();
     c.contexts(doc);
+    c.scope(slot.node.policy);
     c.enter(NodePath::policy(slot.node.policy), policy);
     if c.incomplete() {
         return Ok(());
@@ -207,7 +209,11 @@ struct Checker<'a> {
     profiles: Vec<&'a ProfileVocab>,
     index: &'a Index,
     options: &'a Options,
+    /// The prefixes in effect for the policy being checked.
     prefixes: Prefixes,
+    /// Each policy's own prefix scope, by index; empty when the document
+    /// has none to tell them apart (then `prefixes` is every context merged).
+    scopes: Vec<Prefixes>,
     /// The policy being checked.
     cur: Option<PolicyCtx>,
     /// A loaded profile builds on one that is not loaded: no policy's
@@ -458,6 +464,40 @@ fn unread_contexts(doc: &EditDoc) -> Vec<Unread> {
     out
 }
 
+/// The prefixes each policy of `doc` is read with, by index: its own
+/// `@context`, then those of the objects whose `@graph` holds it, as the
+/// reader scopes them. A hand-built document, or one whose policies were
+/// added or removed since it was read, has no such scopes: empty, and the
+/// checker reads every policy with all the contexts merged.
+fn policy_scopes(doc: &EditDoc) -> Vec<Prefixes> {
+    let scoped = |v: &serde_json::Value| -> Vec<Prefixes> {
+        node_prefixes(v)
+            .into_iter()
+            .map(|s| Prefixes::default().inside(s))
+            .collect()
+    };
+    let n = doc.policies.len();
+    if let Some(o) = &doc.origin {
+        let s = scoped(o.value());
+        if s.len() == n {
+            return s;
+        }
+    } else {
+        let s: Vec<Prefixes> = doc
+            .policies
+            .iter()
+            .map(|p| match &p.origin {
+                Some(o) => scoped(o.value()).into_iter().next().unwrap_or_default(),
+                None => Prefixes::default(),
+            })
+            .collect();
+        if s.len() == n {
+            return s;
+        }
+    }
+    Vec::new()
+}
+
 fn slot(node: &NodePath, field: Field) -> IssueTarget {
     IssueTarget::Slot(SlotPath {
         node: node.clone(),
@@ -467,12 +507,17 @@ fn slot(node: &NodePath, field: Field) -> IssueTarget {
 
 impl<'a> Checker<'a> {
     fn new(doc: &EditDoc, w: &'a Wording, index: &'a Index, o: &'a Options) -> Checker<'a> {
+        let scopes = policy_scopes(doc);
         Checker {
             w,
             profiles: w.profiles().collect(),
             index,
             options: o,
-            prefixes: prefixes(doc),
+            prefixes: match scopes.is_empty() {
+                true => prefixes(doc),
+                false => Prefixes::default(),
+            },
+            scopes,
             cur: None,
             unsure: false,
             context_unread: false,
@@ -480,6 +525,13 @@ impl<'a> Checker<'a> {
             remote: Vec::new(),
             inherited: Vec::new(),
             out: Vec::new(),
+        }
+    }
+
+    /// Reads the terms that follow with the prefixes of policy `i`.
+    fn scope(&mut self, i: usize) {
+        if let Some(p) = self.scopes.get(i) {
+            self.prefixes = p.clone();
         }
     }
 
@@ -1068,6 +1120,7 @@ impl<'a> Checker<'a> {
             if p.locked.is_none()
                 && let Some(uid) = p.uid.as_deref().filter(|u| !u.is_empty())
             {
+                self.scope(i);
                 by_uid.entry(self.expand(uid)).or_insert(i);
             }
         }
@@ -1077,6 +1130,7 @@ impl<'a> Checker<'a> {
             if p.locked.is_some() {
                 continue;
             }
+            self.scope(i);
             for parent in p.inherit_from.iter().filter(|x| !x.is_empty()) {
                 match by_uid.get(&self.expand(parent)) {
                     Some(&j) => parents[i].push(j),

@@ -307,7 +307,7 @@ pub(crate) fn policy_nodes(v: &Value) -> Vec<&Value> {
 /// it. A sibling's context is not in scope. Scopes are shared, never
 /// copied: a node without a context of its own costs one pointer, and one
 /// with a context costs that context.
-fn node_prefixes(v: &Value) -> Vec<Arc<Prefixes>> {
+pub(crate) fn node_prefixes(v: &Value) -> Vec<Arc<Prefixes>> {
     fn walk(v: &Value, outer: &Arc<Prefixes>, out: &mut Vec<Arc<Prefixes>>, budget: &mut Budget) {
         let scope = match v.get("@context") {
             Some(c) => Arc::new(Prefixes::of_context(c, budget).inside(outer.clone())),
