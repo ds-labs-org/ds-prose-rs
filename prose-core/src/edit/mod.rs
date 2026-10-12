@@ -11,6 +11,7 @@ mod apply;
 mod check;
 mod issue;
 mod jsonld_read;
+pub(crate) use jsonld_read::LOGICAL_KEYS;
 mod jsonld_write;
 mod model;
 mod path;

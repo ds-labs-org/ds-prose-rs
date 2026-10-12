@@ -324,7 +324,7 @@ that makes this finding, and only under `StrictEdit::RefuseTerms`.
 | <a id="rule-odrl-agreement-parties"></a>`odrl.agreement-parties` | an Agreement rule without an assigner or an assignee (IM §2.1.3, §2.7.1) | off, error | standard | no |
 | <a id="rule-odrl-rule-target"></a>`odrl.rule-target` | a permission or prohibition without a target (IM §2.6.1, §2.6.2, §2.7.1) | off, error | standard | no |
 | <a id="rule-odrl-rule-action"></a>`odrl.rule-action` | a rule without an action (IM §2.6, §2.7.1) | off, error | standard | no |
-| <a id="rule-odrl-constraint-shape"></a>`odrl.constraint-shape` | a constraint without a left operand, an operator, or exactly one of `rightOperand` and `rightOperandReference` (IM §2.5.1) | off, error | standard | no |
+| <a id="rule-odrl-constraint-shape"></a>`odrl.constraint-shape` | a constraint without a left operand, an operator, or exactly one of `rightOperand` and `rightOperandReference` (IM §2.5.1), or a logical constraint with several of `and`, `or`, `xone`, `andSequence` (IM §2.5.2) | off, error | standard | no |
 | <a id="rule-odrl-set-operator-cardinality"></a>`odrl.set-operator-cardinality` | several right operand values with a comparison operator (eq, neq, gt, gteq, lt, lteq); isA, hasPart, isPartOf, isAnyOf, isAllOf and isNoneOf are set-based in ODRL22.ttl and take a list (IM §2.5.1) | off, error | standard | no |
 | <a id="rule-odrl-consequence-nesting"></a>`odrl.consequence-nesting` | a consequence on a consequence, or a remedy that has a consequence (IM §2.6.3, §2.6.7) | off, error | standard | no |
 | <a id="rule-odrl-inheritance-cycle"></a>`odrl.inheritance-cycle` | policies in the document that inherit from each other in a circle (IM §2.9) | off, error | standard | no |
@@ -415,6 +415,10 @@ order. A change to `@1` may only add keys; removing or renaming one is `@2`.
     "fingerprint": "16 hex digits"
   }] }
 ```
+
+`expected.values` lists at most 8 values so a report grows with its findings;
+when the profile allows more, `expected.valuesTotal` (an added key, absent
+otherwise) gives how many. `gaps` lists each distinct gap once.
 
 - `verdict` is `conforms`, `violations` or `incomplete`; `gaps` lists the
   findings that make a verdict incomplete, and they are also in `findings`.

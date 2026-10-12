@@ -284,13 +284,21 @@ pub struct TermRef {
     pub iri: String,
 }
 
+/// The most values one finding lists as expected.
+pub const MAX_EXPECTED_VALUES: usize = 8;
+
 /// What would have been accepted where a finding was made.
 #[non_exhaustive]
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Expected {
     pub kinds: Vec<crate::profile::TermKind>,
     pub operators: Vec<String>,
+    /// The values the profile allows, at most [`MAX_EXPECTED_VALUES`] of
+    /// them, so a report grows with the findings and not with the profile.
     pub values: Vec<String>,
+    /// How many values the profile allows when `values` was cut short, else
+    /// 0 (all of them are listed).
+    pub values_total: usize,
     pub units: Vec<String>,
     pub datatype: Option<String>,
     /// The left operand is closed by its profile.
