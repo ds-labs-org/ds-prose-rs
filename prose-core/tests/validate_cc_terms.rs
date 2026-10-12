@@ -226,3 +226,35 @@ fn a_cc_term_outside_the_common_vocabulary_is_still_the_profile_s() {
     let r = validate_json(&policy("cc:Attribution"), &w, &Options::strict());
     assert!(r.findings.is_empty(), "{:?}", r.findings);
 }
+
+#[test]
+fn the_vocabulary_text_spelling_is_accepted_too() {
+    // The ODRL 2.2 Vocabulary REC (4.4.8) and ODRL22.json give the
+    // identifier as cc:CommericalUse; ODRL22.ttl and Creative Commons as
+    // cc:CommercialUse. A policy written from either W3C text is ODRL's own.
+    let typo = "cc:CommericalUse";
+    let r = validate_json(&policy(typo), &Wording::new(), &Options::strict());
+    assert!(r.findings.is_empty(), "{:?}", r.findings);
+    for w in [odrl_with_cc(true), odrl_with_cc(false)] {
+        for opts in [Options::strict(), Options::advisory()] {
+            let r = validate_json(&policy(typo), &w, &opts);
+            assert!(r.findings.is_empty(), "{:?}", r.findings);
+        }
+    }
+    // Still not a Core Vocabulary term.
+    let core = Options::strict().odrl_vocabulary(OdrlVocab::Core);
+    let r = validate_json(&policy(typo), &Wording::new(), &core);
+    assert_eq!(rules(&r), [RuleId::ProfileUnknownTerm], "{:?}", r.findings);
+}
+
+#[test]
+fn under_the_core_vocabulary_a_cc_term_needs_its_profile_declared() {
+    // With only the Core Vocabulary counted as ODRL's (IM 2.1), cc:
+    // Attribution is a profile's term like any other.
+    let core = Options::strict().odrl_vocabulary(OdrlVocab::Core);
+    let w = adopting();
+    let r = validate_json(&policy("cc:Attribution"), &w, &core);
+    assert_eq!(rules(&r), [RuleId::ProfileNotDeclared], "{:?}", r.findings);
+    let r = validate_json(&declaring("cc:Attribution", "urn:prof"), &w, &core);
+    assert!(r.findings.is_empty(), "{:?}", r.findings);
+}
