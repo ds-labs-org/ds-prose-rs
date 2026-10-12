@@ -251,7 +251,7 @@ test('server rendering: the docs say BASE_CSS arrives intact, as the pinned Yew 
   const styling = frontMatterless(content('yew/styling.md'));
   assert.match(styling, /server renderer writes the text of `<style>` unescaped/);
   assert.match(styling, /site_examples\.rs/);
-  const claim = /escap\w+[^.\n]{0,40}(?:style|`<style>`)|(?:style|`<style>`)[^.\n]{0,40}escap/i;
+  const claim = /(?<!un)escap\w+[^.\n]{0,40}style|style[^.\n]{0,40}(?<!un)escap/i;
   for (const [name, text] of [['styling.md', styling], ['README.md', source('README.md').replace(/\s+/g, ' ')], ['edit/mod.rs', source('prose-yew/src/edit/mod.rs').replace(/\s+/g, ' ')], ['edit/config.rs', source('prose-yew/src/edit/config.rs').replace(/\s+/g, ' ')]])
     assert.doesNotMatch(text, claim, `${name} says the style text is escaped`);
 });

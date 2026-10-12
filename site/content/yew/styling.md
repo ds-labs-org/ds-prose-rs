@@ -45,7 +45,7 @@ Set `base_css` to `false` and ship the CSS yourself, optionally starting from `B
 
 A test confirms the first point: with `BASE_CSS` the announcer is clipped to a pixel, and without it, it is not.
 
-Server rendering needs this route. Yew's server renderer HTML-escapes the text of `<style>`, so the stylesheet would arrive as text. `ssr.rs` pins that `base_css = false` emits no `<style`.
+Server rendering does not need this route. With Yew 0.23, the version `prose-yew` depends on, the server renderer writes the text of `<style>` unescaped, so `BASE_CSS` arrives as CSS. A test in `prose-yew/tests/site_examples.rs` pins that the server output holds `BASE_CSS` byte for byte as the first child of the root. `ssr.rs` pins that `base_css = false` emits no `<style`.
 
 ### 3. Extra classes
 
