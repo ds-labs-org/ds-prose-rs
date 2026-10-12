@@ -335,3 +335,44 @@ fn a_json_typed_term_holds_data_not_keys() {
     let r = run(&v, &Options::strict().fail_closed(true));
     assert_eq!(r.verdict, Verdict::Conforms, "{:?}", r.findings);
 }
+
+/// The same inline @context repeated on every policy of a @graph is one
+/// definition, not one per policy: it must not run the expansion out.
+#[test]
+fn a_context_repeated_across_a_graph_is_not_over_reported() {
+    let policies: Vec<Value> = (0..200)
+        .map(|i| {
+            json!({
+                "@context": ["http://www.w3.org/ns/odrl.jsonld", {
+                    "dc": "http://purl.org/dc/terms/",
+                    "title": "dc:title"
+                }],
+                "@type": "Set",
+                "uid": format!("urn:p{i}"),
+                "dc:creator": "someone",
+                "title": "a title",
+                "permission": [{"target": "urn:a", "action": "use"}]
+            })
+        })
+        .collect();
+    let r = run(
+        &json!({"@graph": policies}),
+        &Options::strict().fail_closed(true),
+    );
+    assert!(unchecked(&r).is_empty(), "{:?}", unchecked(&r));
+}
+
+/// Prefixes defined through each other never expand (JSON-LD calls it a
+/// cyclic IRI mapping): the key is reported, never certified.
+#[test]
+fn a_cyclic_prefix_is_reported_not_certified() {
+    let v = json!({
+        "@context": ["http://www.w3.org/ns/odrl.jsonld", {"a": "b:x", "b": "a:y"}],
+        "@type": "Set",
+        "uid": "urn:p",
+        "a:permission": [{"target": "urn:a", "action": "use"}],
+        "permission": [{"target": "urn:a", "action": "use"}]
+    });
+    let r = run(&v, &Options::strict());
+    assert_eq!(r.verdict, Verdict::Incomplete, "{:?}", r.findings);
+}
