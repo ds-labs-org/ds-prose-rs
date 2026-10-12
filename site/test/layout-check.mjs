@@ -228,6 +228,7 @@ async function demoChecks({ send, evaluate, visit, waitFor, key, base, failures,
   const read = () => evaluate(`({
     verdict: (document.getElementById('verdict') || {}).textContent || null,
     status: (document.querySelector('.prose-violations-status') || {}).textContent || null,
+    statusClass: (document.querySelector('.prose-violations-status') || {}).className || '',
     glossary: !!document.querySelector('.prose-glossary'),
     strict: !!document.getElementById('strict') && document.getElementById('strict').checked,
     live: document.getElementById('verdict') && document.getElementById('verdict').getAttribute('role'),
@@ -242,7 +243,8 @@ async function demoChecks({ send, evaluate, visit, waitFor, key, base, failures,
   await waitFor(`document.querySelector('.prose-violations-status')`, 5000);
   v = await read();
   const word = /conforms|violations|incomplete/i.exec(v.verdict ?? '')?.[0]?.toLowerCase();
-  if (!v.status || !word || !v.status.toLowerCase().includes(word === 'violations' ? 'violation' : word)) failures.push(`Angular demo: the readout and the findings under the prose disagree (${JSON.stringify(v)})`);
+  const CLASS = { conforms: 'prose-conforms', violations: 'prose-violations-found', incomplete: 'prose-incomplete' };
+  if (!v.status || !word || !v.statusClass.split(/\s+/).includes(CLASS[word])) failures.push(`Angular demo: the readout and the findings under the prose disagree (${JSON.stringify(v)})`);
   await shot('demo-angular-1280-strict.png');
 
   // The research policy declares a profile; loading it through [profile] changes the verdict and adds the glossary.
@@ -387,6 +389,9 @@ export async function runLayoutCheck({ dist, base, chrome = findChrome(), shotDi
       }
     }
 
+    // The page with the awkward blocks: the kitchen sink in a fixture build, a long docs page with code blocks in a real tree.
+    const sink = urlPaths.includes(base + 'kitchen-sink/') ? 'kitchen-sink/' : 'yew/styling/';
+
     // Menu by keyboard at a narrow width.
     await send('Emulation.setDeviceMetricsOverride', { width: 400, height: 800, deviceScaleFactor: 1, mobile: false });
     await visit(base);
@@ -416,10 +421,10 @@ export async function runLayoutCheck({ dist, base, chrome = findChrome(), shotDi
     // region, falls back when the async clipboard is missing or refuses, never
     // throws, and leaves keyboard focus on the button.
     await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
-    await visit(base + 'kitchen-sink/');
+    await visit(base + sink);
     const copyState = () => evaluate(`(() => { const b = document.querySelector('[data-copy]'); const st = document.querySelector('[role=status]'); return { label: b.textContent, status: st ? st.textContent : null, focusOnButton: document.activeElement === b, expected: b.parentElement.querySelector('code').textContent, copied: window.__copied ?? null, copiedBy: window.__copiedBy ?? null }; })()`);
     const clickCopy = async (setup) => {
-      await visit(base + 'kitchen-sink/');
+      await visit(base + sink);
       errors.length = 0;
       await evaluate(setup + `; document.querySelector('[data-copy]').focus(); document.querySelector('[data-copy]').click();`);
       await new Promise((r) => setTimeout(r, 120));
@@ -435,10 +440,10 @@ export async function runLayoutCheck({ dist, base, chrome = findChrome(), shotDi
     c = await clickCopy(`Object.defineProperty(navigator, 'clipboard', { value: { writeText: () => { throw new Error('sync throw'); } }, configurable: true }); document.execCommand = () => false`);
     if (c.label !== 'Copy failed') failures.push(`copy (writeText throws synchronously): ${JSON.stringify(c)}`);
 
-    // Focus is not hidden under the sticky header (WCAG 2.2, 2.4.11).
+    // Focus is not hidden under the sticky header (WCAG 2.2, 2.4.11). The page scrolls smoothly, so wait for the position to settle.
     await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 400, deviceScaleFactor: 1, mobile: false });
-    await visit(base + 'kitchen-sink/');
-    const obscured = await evaluate(`(async () => { window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }); const el = document.querySelector('main pre[tabindex], main a'); el.focus(); await new Promise((r) => setTimeout(r, 700)); const h = document.querySelector('.site-header').getBoundingClientRect().bottom; return { top: el.getBoundingClientRect().top, header: h, scrolled: window.scrollY }; })()`);
+    await visit(base + sink);
+    const obscured = await evaluate(`(async () => { window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }); const el = document.querySelector('main pre[tabindex], main a'); el.focus(); let last = -1, still = 0; for (let i = 0; i < 80 && still < 4; i++) { await new Promise((r) => setTimeout(r, 100)); still = window.scrollY === last ? still + 1 : 0; last = window.scrollY; } const h = document.querySelector('.site-header').getBoundingClientRect().bottom; return { top: el.getBoundingClientRect().top, header: h, scrolled: window.scrollY }; })()`);
     if (obscured.scrolled === 0) failures.push('focus check: page is too short to scroll');
     else if (obscured.top < obscured.header) failures.push(`focused element sits under the sticky header: ${JSON.stringify(obscured)}`);
 

@@ -9,6 +9,28 @@
       <button type="button" (click)="json.set(p.json)">{{ p.label }}</button>
     }
   </div>
+  <fieldset class="validation">
+    <legend>Validation</legend>
+    <div class="row">
+      <label>
+        <input type="checkbox" id="strict" [checked]="strict()" (change)="setStrict($any($event.target).checked)" />
+        Strict
+      </label>
+      <label>
+        <input type="checkbox" id="findings" [checked]="findings()" (change)="findings.set($any($event.target).checked)" />
+        Show the findings under the prose
+      </label>
+      <span>
+        <label for="profile">Profile</label>
+        <select id="profile" (change)="chooseProfile($any($event.target).value)">
+          <option value="">None</option>
+          <option value="research">Research Data Profile (JSON-LD)</option>
+        </select>
+      </span>
+    </div>
+    <p class="hint" id="profile-note">{{ profileNote() }}</p>
+    <p id="verdict" role="status">{{ verdict() }}</p>
+  </fieldset>
   <div class="columns">
     <section>
       <label for="policy">ODRL JSON-LD</label>
@@ -16,7 +38,15 @@
     </section>
     <section>
       <h2>Prose</h2>
-      <ds-odrl-prose [json]="json()" />
+      <ds-odrl-prose
+        [json]="json()"
+        [profile]="profileText()"
+        [strict]="strict()"
+        [showViolations]="findings()"
+        (validationChange)="onReport($event)"
+        (profileLoaded)="onProfileLoaded($event)"
+        (profileError)="onProfileError($event)"
+      />
     </section>
   </div>
 </main>
