@@ -64,7 +64,16 @@ pub(crate) fn run(doc: &EditDoc, w: &Wording, index: &Index, o: &Options) -> Vec
         return Vec::new();
     }
     let mut c = Checker::new(doc, w, index, o);
-    if o.level_of(RuleId::OdrlInheritanceCycle, false) != Level::Off {
+    if [
+        RuleId::OdrlInheritanceCycle,
+        RuleId::OdrlAgreementParties,
+        RuleId::OdrlOfferAssigner,
+        RuleId::OdrlRuleTarget,
+        RuleId::OdrlRuleAction,
+    ]
+    .iter()
+    .any(|r| o.level_of(*r, false) != Level::Off)
+    {
         c.inheritance(doc);
     }
     c.imports();
@@ -205,8 +214,20 @@ struct Checker<'a> {
     cycles: Vec<bool>,
     /// Per policy: the parents it names that are not in the document.
     remote: Vec<Vec<String>>,
+    /// Per policy: the policy-level parts (`INH_*`) it has of its own or
+    /// takes from its parents in the document, at any depth (IM 2.9), and
+    /// `INH_REMOTE` when it or an ancestor names a parent outside the
+    /// document. Empty when the structural tier is off.
+    inherited: Vec<u8>,
     out: Vec<Finding>,
 }
+
+const INH_ASSIGNER: u8 = 1;
+const INH_ASSIGNEE: u8 = 2;
+const INH_TARGET: u8 = 4;
+const INH_ACTION: u8 = 8;
+/// An ancestor is outside the document: what it would give is unknown.
+const INH_REMOTE: u8 = 16;
 
 /// What the terms of one policy are checked against.
 struct PolicyCtx {
@@ -225,6 +246,8 @@ struct PolicyCtx {
     assignee: bool,
     target: bool,
     action: bool,
+    /// Whatever the rules lack may come from a parent outside the document.
+    remote_parent: bool,
 }
 
 /// The policy classes with structural requirements of their own.
@@ -447,6 +470,7 @@ impl<'a> Checker<'a> {
             context_unread: false,
             cycles: Vec::new(),
             remote: Vec::new(),
+            inherited: Vec::new(),
             out: Vec::new(),
         }
     }
@@ -994,6 +1018,16 @@ impl<'a> Checker<'a> {
                 f.node = Some(p.id);
             }
         }
+        // Own parts, plus a parent's when the document has it (IM 2.9).
+        let own = [
+            (!p.assigner.is_empty(), INH_ASSIGNER),
+            (!p.assignee.is_empty(), INH_ASSIGNEE),
+            (!p.target.is_empty(), INH_TARGET),
+            (!p.action.is_empty(), INH_ACTION),
+        ]
+        .iter()
+        .fold(0u8, |a, (on, bit)| if *on { a | bit } else { a });
+        let inh = own | self.inherited.get(path.policy).copied().unwrap_or(0);
         self.cur = Some(PolicyCtx {
             path: path.clone(),
             id: p.id,
@@ -1005,10 +1039,11 @@ impl<'a> Checker<'a> {
                 .collect(),
             incomplete: !declared.is_empty(),
             class: self.class_of(&p.kind),
-            assigner: !p.assigner.is_empty(),
-            assignee: !p.assignee.is_empty(),
-            target: !p.target.is_empty(),
-            action: !p.action.is_empty(),
+            assigner: inh & INH_ASSIGNER != 0,
+            assignee: inh & INH_ASSIGNEE != 0,
+            target: inh & INH_TARGET != 0,
+            action: inh & INH_ACTION != 0,
+            remote_parent: inh & INH_REMOTE != 0,
         });
     }
 
@@ -1037,6 +1072,41 @@ impl<'a> Checker<'a> {
             }
         }
         self.cycles = inherit::on_cycle(&parents);
+        // Push the parts down the links to a fixpoint. Each policy's value
+        // gains at most five bits, so this ends on a cycle too.
+        let mut eff: Vec<u8> = doc
+            .policies
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let own = [
+                    (!p.assigner.is_empty(), INH_ASSIGNER),
+                    (!p.assignee.is_empty(), INH_ASSIGNEE),
+                    (!p.target.is_empty(), INH_TARGET),
+                    (!p.action.is_empty(), INH_ACTION),
+                    (!self.remote[i].is_empty(), INH_REMOTE),
+                ];
+                own.iter()
+                    .fold(0u8, |a, (on, bit)| if *on { a | bit } else { a })
+            })
+            .collect();
+        let mut children: Vec<Vec<usize>> = vec![Vec::new(); parents.len()];
+        for (i, ps) in parents.iter().enumerate() {
+            for &j in ps {
+                children[j].push(i);
+            }
+        }
+        let mut todo: Vec<usize> = (0..eff.len()).collect();
+        while let Some(v) = todo.pop() {
+            for &c in &children[v] {
+                let next = eff[c] | eff[v];
+                if next != eff[c] {
+                    eff[c] = next;
+                    todo.push(c);
+                }
+            }
+        }
+        self.inherited = eff;
     }
 
     /// The policy's own requirements (IM 2.1, 2.9).
@@ -1066,7 +1136,11 @@ impl<'a> Checker<'a> {
             );
             self.emit(RuleId::OdrlInheritanceCycle, false, node(), msg);
         }
-        let remote = self.remote.get(path.policy).cloned().unwrap_or_default();
+        let remote = if self.options.level_of(RuleId::OdrlInheritanceCycle, false) == Level::Off {
+            Vec::new()
+        } else {
+            self.remote.get(path.policy).cloned().unwrap_or_default()
+        };
         for parent in remote {
             let msg = format!(
                 "the parent policy <{parent}> is not in this document, so the inheritance could not be checked"
@@ -1081,12 +1155,15 @@ impl<'a> Checker<'a> {
         let Some(c) = self.cur.as_ref() else {
             return;
         };
+        // A part missing here may be supplied by a parent that is not in the
+        // document: that is the reported gap, not an error.
+        let unknown = c.remote_parent;
         let (class, assigner, assignee, target, action) = (
             c.class,
-            !r.assigner.is_empty() || c.assigner,
-            !r.assignee.is_empty() || c.assignee,
-            !r.target.is_empty() || c.target,
-            !r.action.is_empty() || c.action,
+            !r.assigner.is_empty() || c.assigner || unknown,
+            !r.assignee.is_empty() || c.assignee || unknown,
+            !r.target.is_empty() || c.target || unknown,
+            !r.action.is_empty() || c.action || unknown,
         );
         let node = || IssueTarget::Node(path.clone());
         if list.is_top_level() {
