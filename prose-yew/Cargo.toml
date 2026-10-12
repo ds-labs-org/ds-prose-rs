@@ -17,7 +17,7 @@ wasm-bindgen = "0.2"
 web-sys = { version = "0.3", features = [
     "Document", "Window", "Element", "HtmlElement", "Node", "Text", "Selection", "Range",
     "Event", "EventTarget", "KeyboardEvent", "FocusEvent", "InputEvent", "ClipboardEvent",
-    "DataTransfer", "DragEvent", "HtmlSelectElement",
+    "DataTransfer", "DragEvent", "HtmlSelectElement", "DomRect",
 ] }
 
 [features]
