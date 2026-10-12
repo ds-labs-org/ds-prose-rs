@@ -80,6 +80,14 @@ body.site {
   font-family: var(--font-text);
   font-size: 1.0625rem;
   line-height: 1.6;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+body.site > main,
+body.site > .layout {
+  flex: 1 0 auto;
+  width: 100%;
 }
 :focus-visible {
   outline: 3px solid var(--focus);
@@ -338,6 +346,11 @@ main ul,
 main ol,
 main blockquote {
   max-width: 65ch;
+}
+main p,
+main li,
+main blockquote {
+  overflow-wrap: anywhere;
 }
 main li + li {
   margin-top: var(--s1);
