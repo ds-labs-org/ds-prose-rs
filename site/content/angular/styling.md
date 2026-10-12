@@ -48,7 +48,7 @@ The compiled forms below are what Angular's own style compiler produces for a co
 
 So, with default encapsulation, a component's `styles` can style the `ds-odrl-prose` element, and cannot style what is inside it, unless it uses `::ng-deep`.
 
-How this is checked: a test in `site/test/angular-encapsulation.test.mjs` runs `encapsulateStyle` from the `@angular/compiler` of `prose-angular`, and then loads the compiled CSS in Chrome around the real renderer output, with the attribute on the host element and none on the Yew nodes. The first rule does not reach the output, the third does, and `ds-odrl-prose { display: block; }` does apply. The test does not boot an Angular application. That Angular puts the attribute only on elements it creates is Angular's documented behaviour, not code in this repository.
+How this is checked: a test in `site/test/angular-encapsulation.test.mjs` runs `encapsulateStyle` from the `@angular/compiler` of `prose-angular`. It then loads the compiled CSS in Chrome around the real renderer output, with the attribute on the host element and none on the Yew nodes. The first rule does not reach the output, the third does, and `ds-odrl-prose { display: block; }` does apply. The test does not boot an Angular application. That Angular puts the attribute only on elements it creates is Angular's documented behaviour, not code in this repository.
 
 ## `ViewEncapsulation.None`
 

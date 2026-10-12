@@ -16,11 +16,11 @@ function prose(md) {
     .split('\n')
     .filter((l) => !/^(\||\{\{|#|\s*$)/.test(l))
     .join('\n')
-    .replace(/\n(?=[-*] )/g, '\n')
     .replace(/^[-*] /gm, '');
 }
 
-const sentences = (text) => text.split(/(?<=[.!?:])\s+(?=[A-Z`])/).map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean);
+// A line is a paragraph or a list item in these pages; a colon ends a sentence only before a code span or capital.
+const sentences = (text) => text.split('\n').flatMap((l) => l.split(/(?<=[.!?:])\s+(?=[A-Z`])/)).map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean);
 
 test('no sentence of running text is longer than 40 words, unless it is mostly a list of identifiers', () => {
   let n = 0;
