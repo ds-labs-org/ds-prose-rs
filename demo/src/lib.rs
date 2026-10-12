@@ -297,7 +297,7 @@ fn profile_section(state: &UseReducerHandle<ProfileState>, policy: &str) -> Html
                     { " Strict validation" }
                 </label>
                 <p class="hint">
-                    { "Reads ODRL and the loaded profile as every term there is: a term that resolves nowhere is an error, and a profile the policy declares but you have not loaded stops the verdict short. The two Strict presets are written to the Research (closed) profile." }
+                    { "Reads ODRL and the loaded profile as every term there is: a term that resolves nowhere is an error, and a profile the policy declares but you have not loaded stops the verdict short. The presets Research agreement (violates the profile), Strict clean and Profile not declared (has a fix) are written to the Research (closed) profile: load it first." }
                 </p>
                 if state.strict {
                     <label>

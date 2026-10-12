@@ -33,7 +33,7 @@ fn the_editor_section_does_not_promise_that_nothing_typed_is_lost() {
         assert!(!s.contains(claim), "still says {claim:?}");
     }
     // What the closed comboboxes do, in the README's words.
-    for fact in ["closed combobox", "Enter", "blur", "reverts"] {
+    for fact in ["closed combobox", "Enter", "Escape", "given up"] {
         assert!(s.contains(fact), "does not say {fact:?}");
     }
 }
@@ -82,7 +82,7 @@ fn the_new_labels_are_real_fields_and_all_are_listed_in_the_readme() {
 #[test]
 fn the_struct_literal_breaks_are_all_listed() {
     let changed = section("Changed in 0.4 (profiles; additive except for struct literals):");
-    assert!(changed.contains("OdrlProseViewProps::refusal"));
+    assert!(changed.contains("`OdrlProseViewProps` gained `refusal`"));
     assert!(changed.contains("refusal: None"));
     assert!(changed.contains("validator: None, violations: false"));
 }
@@ -127,4 +127,53 @@ fn the_reducer_adds_with_the_rules_it_is_given() {
         validator.validate(&base).verdict,
         "an add with cfg.rules leaves the verdict as it was"
     );
+}
+
+// The README's example, as it is printed there (In the editor), compiled and
+// rendered once: `wording` and `POLICY` are the host's.
+const POLICY: &str = include_str!("../../prose-core/tests/strict/clean.json");
+
+#[yew::function_component(ReadmeHost)]
+fn readme_host() -> yew::Html {
+    use prose_yew::{EditMode, OdrlProseView, StrictEdit, use_prose_editor_with};
+    use yew::prelude::*;
+    let wording = Rc::new(research_closed());
+    let cfg = Rc::new(
+        EditConfig::default()
+            .with_wording(wording)
+            .with_strict(Options::strict()),
+    );
+    let editor = use_prose_editor_with(
+        || read_model(POLICY).unwrap_or_default(),
+        Rc::new(cfg.rules.clone()),
+        cfg.validator.clone(),
+        StrictEdit::Flag,
+    );
+    html! {
+        <OdrlProseView doc={editor.editor.doc.clone()} mode={EditMode::Edit} config={cfg}
+                       onedit={editor.editor.onedit.clone()}
+                       refusal={editor.refused.as_ref().and_then(|(ev, err)| err.issue(ev))} />
+    }
+}
+
+#[tokio::test]
+async fn the_readme_host_compiles_and_renders() {
+    let local = tokio::task::LocalSet::new();
+    let html = local
+        .run_until(yew::LocalServerRenderer::<ReadmeHost>::new().render())
+        .await;
+    assert!(html.contains("prose"), "{html}");
+}
+
+#[test]
+fn the_readme_prints_the_example_this_test_compiles() {
+    let s = section("### In the editor");
+    for line in [
+        "Rc::new(cfg.rules.clone()),",
+        "cfg.validator.clone(),",
+        "StrictEdit::Flag,",
+        "refusal={editor.refused.as_ref().and_then(|(ev, err)| err.issue(ev))} />",
+    ] {
+        assert!(s.contains(line), "README lacks {line:?}");
+    }
 }

@@ -474,17 +474,46 @@ binary; the command is a Node script.
 (`EditConfig::validator`, a `Validator`) and marks each finding in place, with
 a problems list; the closed comboboxes offer only the terms the validator
 admits, and `rules.defaults` is rewritten so an add button creates an
-admissible node. By default (`StrictEdit::Flag`) every edit commits and a
-violation is marked as an error: a user never loses typed text and is never
-trapped by partial input. `StrictEdit::RefuseTerms` is opt-in: through
+admissible node. That rewrite lives in `cfg.rules`, and the reducer applies
+the rules it is handed, not the config's: after `with_strict`, give
+`use_prose_editor_with` (or `use_prose_editor`) `Rc::new(cfg.rules.clone())`,
+and `cfg.validator.clone()` for the validator. A host that keeps building its
+own `EditRules::default()`, as in the 0.3 pattern, gets the defaults it set,
+which are admissible only while they are ODRL terms.
+
+```rust
+let cfg = Rc::new(EditConfig::default().with_wording(wording).with_strict(Options::strict()));
+let editor = use_prose_editor_with(
+    || read_model(POLICY).unwrap_or_default(),
+    Rc::new(cfg.rules.clone()),
+    cfg.validator.clone(),
+    StrictEdit::Flag,
+);
+html! {
+    <OdrlProseView doc={editor.editor.doc.clone()} mode={EditMode::Edit} config={cfg}
+                   onedit={editor.editor.onedit.clone()}
+                   refusal={editor.refused.as_ref().and_then(|(ev, err)| err.issue(ev))} />
+}
+```
+
+The policy is the reducer's. By default (`StrictEdit::Flag`) it commits every
+edit the rules allow, and the validator marks a violation as an error. The
+view is the same under both: a closed combobox (a vocabulary slot, or a value
+slot of a closed left operand) takes only what the validator admits. Enter on
+text that names nothing admissible keeps the draft in the slot, with the
+reason and the nearest term; Escape reverts it; and when focus leaves the
+slot the draft is given up, the slot goes back to its value and a polite live
+region says so. So text typed into a closed combobox can be lost, in `Flag`
+mode too. The empty text and the text of any other slot commit as usual.
+`StrictEdit::RefuseTerms` is opt-in: through
 `EditDoc::apply_gated(ev, rules, Some(&validator))` and
 `use_prose_editor_with`, the reducer refuses, as `EditError::OutsideProfile`,
 a term written into a vocabulary slot that a refusable rule reports as an
 error there. The stock view itself never sends such a term: a vocabulary
 slot asks the validator before it commits, with suggestions on or off and
-however large the document, and keeps the draft with the reason. A refusal
-reaches only a host that bypasses the view, and it is dropped when the
-validator or the policy changes. Refusal is slot-local (it looks at the written value only, never
+however large the document, and does not send it. A refusal reaches only a
+host that bypasses the view, and it is dropped when the validator or the
+policy changes. Refusal is slot-local (it looks at the written value only, never
 at what depends on it), never applies to the empty string, to free text, to
 right operands, to structural events or to undo, and a document that already
 violates loads and stays editable. What certifies a policy is
@@ -592,9 +621,16 @@ Changed in 0.4 (profiles; additive except for struct literals):
   of it needs `validator: None`. Code that builds it with
   `..Default::default()` or with the `with_*` methods is unaffected. This
   rides the 0.4 release, with `wording`. `Labels` also gained the strict
-  fields (`not_allowed_option`, `not_allowed_term`, `did_you_mean`,
-  `problems_heading`, `go_to`, `status_conforms`, `status_violations`,
-  `status_incomplete` and `counts`), with the same remedy.
+  fields (`not_in_profile`, `kept_previous`, `kept_empty`, `allowed_group`,
+  `not_allowed_group`, `not_allowed_option`, `not_allowed_term`,
+  `did_you_mean`, `problems_heading`, `go_to`, `status_conforms`,
+  `status_violations`, `status_incomplete` and `counts`), with the same
+  remedy. So did two props: `OdrlProseProps` gained `validator` and
+  `violations` (add `validator: None, violations: false` to a literal), and
+  `OdrlProseViewProps` gained `refusal` (add `refusal: None`); `html!` and
+  `yew::props!` are unaffected. Under strict validation the reducer applies the
+  `EditRules` it is handed, so a host passes `cfg.rules` after `with_strict`
+  (see In the editor).
 - **A new error variant.** `EditError::OutsideProfile` is only produced by
   `apply_gated` under `StrictEdit::RefuseTerms`; `EditError` is
   `#[non_exhaustive]`, so a `match` with a wildcard arm is unaffected.
