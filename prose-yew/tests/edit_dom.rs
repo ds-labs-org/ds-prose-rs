@@ -2418,3 +2418,40 @@ async fn ux4_the_active_option_stays_in_view_in_a_long_closed_list() {
         "the last entry is out of view after wrapping"
     );
 }
+
+/// UX-5: a value slot is closed only as far as the validator makes the rule
+/// an error. A host that switches `prose.value-not-allowed` off, or lowers
+/// it, is not refused by the validator, so the slot takes the value.
+#[wasm_bindgen_test]
+async fn ux5_a_closed_value_slot_follows_the_validators_level_for_the_rule() {
+    use prose_core::validate::{Level, RuleId};
+    let value = "policy[0].permission[0].constraint[0]#rightOperand[0]";
+    for level in [Level::Off, Level::Info, Level::Warning] {
+        let log = Log::default();
+        let opts = Options::strict().level(RuleId::ProseValueNotAllowed, level);
+        let c = mount_tune(tune(STRICT_POLICY, &log, Some(opts), true)).await;
+        assert_eq!(
+            slot(&c, value).get_attribute("data-closed"),
+            None,
+            "{level:?}"
+        );
+        let el = slot(&c, value);
+        type_into(&el, "https://example.org/other");
+        key(&el, "Enter", false, false);
+        settle().await;
+        assert_eq!(
+            set_texts(&log),
+            vec![(value.into(), "https://example.org/other".into())],
+            "{level:?}"
+        );
+        assert!(c.query_selector(".prose-slot-message").unwrap().is_none());
+    }
+    // And as an error it is closed, as before.
+    let log = Log::default();
+    let opts = Options::strict().level(RuleId::ProseValueNotAllowed, Level::Error);
+    let c = mount_tune(tune(STRICT_POLICY, &log, Some(opts), true)).await;
+    assert_eq!(
+        slot(&c, value).get_attribute("data-closed").as_deref(),
+        Some("true")
+    );
+}
