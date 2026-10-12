@@ -81,7 +81,7 @@
     status.setAttribute('role', 'status');
     document.body.appendChild(status);
 
-    function fallback(text) {
+    function fallback(text, back) {
       var ta = document.createElement('textarea');
       ta.value = text;
       ta.setAttribute('readonly', '');
@@ -95,6 +95,7 @@
         ok = false;
       }
       document.body.removeChild(ta);
+      if (back) back.focus();
       return ok ? Promise.resolve() : Promise.reject(new Error('copy failed'));
     }
 
@@ -109,12 +110,21 @@
             btn.textContent = 'Copy';
           }, 2000);
         };
-        var write =
-          navigator.clipboard && navigator.clipboard.writeText
-            ? navigator.clipboard.writeText(text).catch(function () {
-                return fallback(text);
-              })
-            : fallback(text);
+        var write;
+        try {
+          write =
+            navigator.clipboard && navigator.clipboard.writeText
+              ? navigator.clipboard.writeText(text).catch(function () {
+                  return fallback(text, btn);
+                })
+              : fallback(text, btn);
+        } catch (e) {
+          try {
+            write = fallback(text, btn);
+          } catch (e2) {
+            write = Promise.reject(e2);
+          }
+        }
         write.then(
           function () {
             done('Copied');
