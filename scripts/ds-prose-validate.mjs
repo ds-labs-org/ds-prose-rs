@@ -314,5 +314,20 @@ try {
   // Not started from a file (e.g. node -e): nothing to run.
 }
 if (entry === fileURLToPath(import.meta.url)) {
-  process.exitCode = await run(process.argv.slice(2));
+  // Node's own exit code for an uncaught error is 1, which this command
+  // defines as "violations": a fault of the tool must never look like that.
+  // A reader that closes the pipe early (`| head`) is not a fault: the
+  // verdict is still the one computed. Any other failure to write is.
+  let outputFailed = false;
+  process.stdout.on('error', (e) => {
+    if (e?.code !== 'EPIPE') outputFailed = true;
+  });
+  let code;
+  try {
+    code = await run(process.argv.slice(2));
+  } catch (e) {
+    process.stderr.write(`ds-prose-validate: ${safe(e?.message ?? e)}\n`);
+    code = 2;
+  }
+  process.exitCode = outputFailed ? 2 : code;
 }

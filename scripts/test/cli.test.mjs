@@ -325,6 +325,6 @@ test('an uncaught error is exit 2 with a message, never the violations code', ()
   const odd = file('odd.json', '{"uid":"MALFORMED"}');
   const r = spawnSync(process.execPath, [bin, '--strict', odd], { encoding: 'utf8' });
   assert.equal(r.status, 2, r.stderr);
-  assert.match(r.stderr, /^ds-prose-validate: .*iterable/m);
+  assert.match(r.stderr, /^ds-prose-validate: .*not a function/m);
   assert.doesNotMatch(r.stderr, /node:internal|at .*\.mjs/, 'a message, not a stack trace');
 });
