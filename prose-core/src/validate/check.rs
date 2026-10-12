@@ -1330,10 +1330,9 @@ impl<'a> Checker<'a> {
         {
             let op = self.expand(&a.operator);
             let single = op.strip_prefix(ODRL).is_some_and(|l| {
-                matches!(
-                    l,
-                    "eq" | "neq" | "gt" | "gteq" | "lt" | "lteq" | "isA" | "hasPart" | "isPartOf"
-                )
+                // ODRL22.ttl types isA, hasPart and isPartOf, as well as isAnyOf,
+                // isAllOf and isNoneOf, as set-based; only the comparisons are not.
+                matches!(l, "eq" | "neq" | "gt" | "gteq" | "lt" | "lteq")
             });
             if single {
                 let msg = format!(

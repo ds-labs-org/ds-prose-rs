@@ -439,7 +439,7 @@ pub static RULES: &[RuleInfo] = &[
         Odrl,
         Standard,
         "ODRL IM 2.5.1",
-        "Several right operand values with an operator that is not set-based",
+        "Several right operand values with a comparison operator (eq, neq, gt, gteq, lt, lteq); the set-based operators take a list",
         Off,
         Error,
         None,
