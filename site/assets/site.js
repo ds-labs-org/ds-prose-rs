@@ -137,8 +137,42 @@
     });
   }
 
+  // The demos' stylesheet switch. The example stylesheets are found by what
+  // they define, because a bundler renames and merges files: the renderer sheet
+  // declares --ds-fg on :root, the editor sheet starts its selectors with
+  // ":root .ds-prose.prose-edit" (the library's own BASE_CSS does not).
+  function isExampleSheet(sheet) {
+    var rules;
+    try {
+      rules = sheet.cssRules;
+    } catch (e) {
+      return false;
+    }
+    for (var i = 0; i < rules.length; i++) {
+      var r = rules[i];
+      if (r.style && r.selectorText === ':root' && r.style.getPropertyValue('--ds-fg')) return true;
+      if (r.selectorText && r.selectorText.indexOf(':root .ds-prose.prose-edit') === 0) return true;
+    }
+    return false;
+  }
+  function initSheetSwitch() {
+    var radios = document.querySelectorAll('input[name="ds-sheet"]');
+    if (!radios.length) return;
+    function apply(value) {
+      Array.prototype.forEach.call(document.styleSheets, function (sheet) {
+        if (isExampleSheet(sheet)) sheet.disabled = value === 'unstyled';
+      });
+    }
+    Array.prototype.forEach.call(radios, function (radio) {
+      radio.addEventListener('change', function () {
+        if (radio.checked) apply(radio.value);
+      });
+    });
+  }
+
   function init() {
     initTheme();
+    initSheetSwitch();
     initMenu();
     initCopy();
   }

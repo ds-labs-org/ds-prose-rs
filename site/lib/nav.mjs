@@ -82,8 +82,24 @@ function replaceOnce(html, marker, text) {
   return html.replace(marker, () => text);
 }
 
+// The demos switch the example stylesheets (examples/prose.css, and
+// prose-editor.css in the Yew demo) off and on, so the page shows what the
+// library ships and what the documented stylesheet adds. site.js wires it.
+const STYLING = { demo: 'yew/styling/', 'demo-angular': 'angular/styling/' };
+
+export function renderSheetSwitch(active, base) {
+  const b = normaliseBase(base);
+  const docs = STYLING[active] ? ` The sheet is the one on the <a href="${b}${STYLING[active]}">Styling page</a>.` : '';
+  return `<div class="sheet-switch" role="group" aria-labelledby="sheet-switch-label">
+<span id="sheet-switch-label">Example stylesheet</span>
+<label><input type="radio" name="ds-sheet" value="unstyled"> Unstyled</label>
+<label><input type="radio" name="ds-sheet" value="themed" checked> Themed</label>
+<span class="hint">Unstyled shows the markup as the library emits it.${docs}</span>
+</div>`;
+}
+
 export function stampDemo(html, { active, base }) {
   let out = replaceOnce(html, MARKER_HEAD, headAssets(base));
-  out = replaceOnce(out, MARKER_NAV, renderHeader(active, base));
+  out = replaceOnce(out, MARKER_NAV, `${renderHeader(active, base)}\n${renderSheetSwitch(active, base)}`);
   return out;
 }
