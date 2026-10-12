@@ -2,7 +2,7 @@
 //! document order against the loaded profiles.
 use super::inherit;
 use super::lexical::lexical;
-use super::{Expected, Finding, Fix, Level, Mode, Options, RuleId, TermRef};
+use super::{Expected, Finding, Fix, Level, MAX_EXPECTED_VALUES, Mode, Options, RuleId, TermRef};
 use crate::edit::*;
 use crate::profile::{
     OdrlVocab, OperandHints, Prefixes, ProfileVocab, Term, TermKind, Wording, is_odrl_context,
@@ -250,7 +250,7 @@ struct PolicyCtx {
     /// How many profiles the policy lists.
     listed: usize,
     /// The profiles it declares, expanded, without a trailing `#` or `/`.
-    declared: Vec<String>,
+    declared: HashSet<String>,
     /// A declared profile is not loaded.
     incomplete: bool,
     /// The ODRL policy class the policy's type is, or is a subclass of.
@@ -1000,9 +1000,7 @@ impl<'a> Checker<'a> {
     /// Whether the policy being checked names the profile `iri`.
     fn declares(&self, iri: &str) -> bool {
         let want = trim(iri);
-        self.cur
-            .as_ref()
-            .is_some_and(|c| c.declared.iter().any(|d| d == want))
+        self.cur.as_ref().is_some_and(|c| c.declared.contains(want))
     }
 
     /// Adding `iri` to the profile list of the policy being checked.
@@ -1292,6 +1290,39 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// A logical constraint with several of or, xone, and, andSequence
+    /// breaks IM 2.5.2 ("MUST have one operand sub-property"): an
+    /// `odrl.constraint-shape` error when that rule is on, and then the
+    /// constraint is not also reported unchecked. Whether it did so.
+    fn several_operands(&mut self, path: &NodePath, id: NodeId, origin: &Origin) -> bool {
+        if self.options.level_of(RuleId::OdrlConstraintShape, false) == Level::Off {
+            return false;
+        }
+        let Some(o) = origin.value().as_object() else {
+            return false;
+        };
+        let keys: Vec<&str> = LOGICAL_KEYS
+            .into_iter()
+            .filter(|k| o.contains_key(*k))
+            .collect();
+        if keys.len() < 2 {
+            return false;
+        }
+        let msg = format!(
+            "this logical constraint has several operands ({}); it must have exactly one of or, xone, and, andSequence",
+            keys.join(", ")
+        );
+        if let Some(f) = self.emit(
+            RuleId::OdrlConstraintShape,
+            false,
+            IssueTarget::Node(path.clone()),
+            msg,
+        ) {
+            f.node = Some(id);
+        }
+        true
+    }
+
     /// An atomic constraint's shape (IM 2.5.1).
     fn constraint_structure(&mut self, path: &NodePath, a: &AtomicConstraint) {
         if self.options.level_of(RuleId::OdrlConstraintShape, false) == Level::Off
@@ -1453,6 +1484,8 @@ impl<'a> Checker<'a> {
                     );
                     self.unchecked(IssueTarget::Node(path), *id, msg);
                 }
+                ConstraintNode::Opaque { id, origin, .. }
+                    if self.several_operands(&path, *id, origin) => {}
                 ConstraintNode::Opaque { id, reason, .. } => {
                     let msg = format!("this constraint could not be checked: {reason}");
                     self.unchecked(IssueTarget::Node(path), *id, msg);
@@ -1595,7 +1628,17 @@ impl<'a> Checker<'a> {
         }
         let allowed: HashSet<&str> = h.value_tree.iter().map(|(v, _)| v.as_str()).collect();
         let expected = || Expected {
-            values: h.value_tree.iter().map(|(v, _)| v.clone()).collect(),
+            values: h
+                .value_tree
+                .iter()
+                .take(MAX_EXPECTED_VALUES)
+                .map(|(v, _)| v.clone())
+                .collect(),
+            values_total: if h.value_tree.len() > MAX_EXPECTED_VALUES {
+                h.value_tree.len()
+            } else {
+                0
+            },
             closed: h.closed,
             ..Expected::default()
         };

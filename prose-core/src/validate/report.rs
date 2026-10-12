@@ -2,10 +2,11 @@
 //! bytes in every host: no timestamps, findings in document order, object
 //! keys in a fixed order. A later `@1` may only add keys; removing or
 //! renaming one is `@2`.
-use super::{Basis, Expected, Finding, Level, Mode, Options, RULES, Report, Tier, Verdict};
+use super::{Basis, Expected, Finding, Level, Mode, Options, RULES, Report, RuleId, Tier, Verdict};
 use crate::edit::{IssueTarget, Severity};
 use crate::profile::{OdrlVocab, TermKind};
 use serde_json::{Value, json};
+use std::collections::HashSet;
 
 /// The schema the JSON follows.
 pub const SCHEMA: &str = "ds-prose/validation-report@1";
@@ -49,6 +50,23 @@ impl Report {
     /// The report as `ds-prose/validation-report@1` JSON.
     pub fn to_json(&self) -> Value {
         let c = self.counts();
+        // One entry per distinct gap: several profiles may build on the same
+        // missing one.
+        let mut listed: HashSet<(&str, &str)> = HashSet::new();
+        let gaps: Vec<Value> = self
+            .gaps
+            .iter()
+            .map(|f| {
+                (
+                    f.rule.as_str(),
+                    f.term
+                        .as_ref()
+                        .map_or(f.message.as_str(), |t| t.written.as_str()),
+                )
+            })
+            .filter(|g| listed.insert(*g))
+            .map(|(rule, detail)| json!({"rule": rule, "detail": detail}))
+            .collect();
         json!({
             "schema": SCHEMA,
             "tool": {"name": "ds-prose-rs", "version": env!("CARGO_PKG_VERSION")},
@@ -72,10 +90,7 @@ impl Report {
                     "iri": p.iri, "title": p.title, "version": p.version
                 })).collect::<Vec<_>>(),
             },
-            "gaps": self.gaps.iter().map(|f| json!({
-                "rule": f.rule.as_str(),
-                "detail": f.term.as_ref().map_or(f.message.as_str(), |t| t.written.as_str()),
-            })).collect::<Vec<_>>(),
+            "gaps": gaps,
             "counts": {"error": c.error, "warning": c.warning, "info": c.info},
             "findings": self.findings.iter().map(finding).collect::<Vec<_>>(),
         })
@@ -107,6 +122,14 @@ impl Finding {
                 h = fnv_byte(h, 0);
             }
             for &b in *part.1 {
+                h = fnv_byte(h, b);
+            }
+        }
+        // Two loaded profiles may build on the same missing one: the
+        // message is the only place that names the importer.
+        if self.rule == RuleId::ProfileImportNotLoaded {
+            h = fnv_byte(h, 0);
+            for &b in self.message.as_bytes() {
                 h = fnv_byte(h, b);
             }
         }
@@ -193,14 +216,20 @@ fn finding(f: &Finding) -> Value {
 }
 
 fn expected(e: &Expected) -> Value {
-    json!({
+    let mut v = json!({
         "kinds": e.kinds.iter().map(|k| kind_name(*k)).collect::<Vec<_>>(),
         "operators": e.operators,
         "values": e.values,
         "units": e.units,
         "datatype": e.datatype,
         "closed": e.closed,
-    })
+    });
+    // Only when `values` was cut short, so a report that lists every value
+    // reads as before.
+    if e.values_total > 0 {
+        v["valuesTotal"] = json!(e.values_total);
+    }
+    v
 }
 
 /// A kind as the report names it: the ODRL class or property it stands
