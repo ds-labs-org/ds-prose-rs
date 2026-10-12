@@ -176,3 +176,53 @@ fn the_table_matches_odrl22_ttl() {
         "missing {missing:?}, extra {extra:?}"
     );
 }
+
+/// A profile of its own (`urn:prof`) that adopts `cc:Attribution`, as IM 3
+/// allows, and adds `cc:Other` in the same namespace.
+fn adopting() -> Wording {
+    let text = json!({
+        "@context": {"odrl": ODRL, "cc": CC},
+        "@graph": [
+            {"@id": "urn:prof", "@type": "odrl:Profile"},
+            {"@id": "cc:Attribution", "@type": "odrl:Action",
+             "http://www.w3.org/2000/01/rdf-schema#isDefinedBy": {"@id": "urn:prof"}},
+            {"@id": "cc:Other", "@type": "odrl:Action",
+             "http://www.w3.org/2000/01/rdf-schema#isDefinedBy": {"@id": "urn:prof"}}
+        ]
+    });
+    Wording::new().with_profile(ProfileVocab::parse(&text.to_string()).unwrap())
+}
+
+fn declaring(action: &str, profile: &str) -> String {
+    let mut v: Value = serde_json::from_str(&policy(action)).unwrap();
+    v["profile"] = profile.into();
+    v.to_string()
+}
+
+fn rules(r: &Report) -> Vec<RuleId> {
+    r.findings.iter().map(|f| f.rule).collect()
+}
+
+#[test]
+fn a_cc_term_outside_the_common_vocabulary_is_still_the_profile_s() {
+    // Only the cc: actions ODRL lists are its own: a profile's other cc:
+    // term needs the profile declared, and an undeclared one in a namespace
+    // a loaded profile uses is still flagged.
+    let w = adopting();
+    let r = validate_json(&policy("cc:Other"), &w, &Options::strict());
+    assert_eq!(rules(&r), [RuleId::ProfileNotDeclared], "{:?}", r.findings);
+    let r = validate_json(&declaring("cc:Other", "urn:prof"), &w, &Options::strict());
+    assert!(r.findings.is_empty(), "{:?}", r.findings);
+    for opts in [Options::strict(), Options::advisory()] {
+        let r = validate_json(&policy("cc:Bogus"), &w, &opts);
+        assert_eq!(
+            rules(&r),
+            [RuleId::ProfileUndeclaredInNamespace],
+            "{:?}",
+            r.findings
+        );
+    }
+    // The Common Vocabulary action the profile adopts needs no declaration.
+    let r = validate_json(&policy("cc:Attribution"), &w, &Options::strict());
+    assert!(r.findings.is_empty(), "{:?}", r.findings);
+}
