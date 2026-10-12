@@ -328,3 +328,13 @@ test('an uncaught error is exit 2 with a message, never the violations code', ()
   assert.match(r.stderr, /^ds-prose-validate: .*not a function/m);
   assert.doesNotMatch(r.stderr, /node:internal|at .*\.mjs/, 'a message, not a stack trace');
 });
+
+test('- more than once is a usage error: standard input can be read once', async () => {
+  for (const argv of [['--strict', '-', '-'], ['--strict', '-', 'a.json', '--', '-']]) {
+    const r = await cli(argv, { stdin: 'STDIN', files: { 'a.json': 'A' } });
+    assert.equal(r.code, 2, argv.join(' '));
+    assert.match(r.err, /standard input/);
+    assert.equal(r.calls.length, 0);
+    assert.equal(r.out, '');
+  }
+});
