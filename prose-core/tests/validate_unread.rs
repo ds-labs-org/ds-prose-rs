@@ -167,3 +167,105 @@ fn reading_stays_lossless() {
         assert_eq!(write_jsonld(&doc), v);
     }
 }
+
+#[test]
+fn an_inline_context_that_spells_odrl_terms_by_their_own_names_is_read() {
+    // The ODRL context's own shape, inline: every term is its own bare key.
+    let v = json!({
+        "@context": {
+            "odrl": ODRL,
+            "uid": "@id",
+            "Set": "odrl:Set",
+            "permission": {"@id": "odrl:permission", "@type": "@id"},
+            "target": {"@id": "odrl:target", "@type": "@id"},
+            "action": {"@id": "odrl:action", "@type": "@vocab"},
+            "use": "odrl:use"
+        },
+        "@type": "Set",
+        "uid": "urn:p",
+        "permission": [{"target": "urn:a", "action": "use"}]
+    });
+    let r = run(&v, &Options::strict().fail_closed(true));
+    assert_eq!(r.verdict, Verdict::Conforms, "{:?}", r.findings);
+}
+
+#[test]
+fn an_alias_defined_but_not_used_is_not_reported() {
+    let v = json!({
+        "@context": ["http://www.w3.org/ns/odrl.jsonld", {"when": {"@id": "odrl:constraint"}}],
+        "@type": "Set",
+        "uid": "urn:p",
+        "permission": [{"target": "urn:a", "action": "use"}]
+    });
+    let r = run(&v, &Options::strict().fail_closed(true));
+    assert_eq!(r.verdict, Verdict::Conforms, "{:?}", r.findings);
+}
+
+#[test]
+fn an_alias_in_a_scoped_context_is_reported() {
+    let v = json!({
+        "@context": ["http://www.w3.org/ns/odrl.jsonld", {
+            "permission": {"@id": "odrl:permission", "@context": {"when": "odrl:constraint"}}
+        }],
+        "@type": "Set",
+        "uid": "urn:p",
+        "permission": [{
+            "target": "urn:a", "action": "use",
+            "when": {"leftOperand": "notAnOdrlTerm", "operator": "eq", "rightOperand": "x"}
+        }]
+    });
+    let r = run(&v, &Options::strict());
+    assert_eq!(r.verdict, Verdict::Incomplete, "{:?}", r.findings);
+    assert!(unchecked(&r).iter().any(|f| f.message.contains("\"when\"")));
+}
+
+#[test]
+fn a_literal_value_is_data_not_keys() {
+    let v = json!({
+        "@context": ["http://www.w3.org/ns/odrl.jsonld", {"odrl": ODRL}],
+        "@type": "Set",
+        "uid": "urn:p",
+        "dc:description": {"@value": {"odrl:permission": []}, "@type": "@json"},
+        "permission": [{"target": "urn:a", "action": "use"}]
+    });
+    let r = run(&v, &Options::strict().fail_closed(true));
+    assert_eq!(r.verdict, Verdict::Conforms, "{:?}", r.findings);
+}
+
+#[test]
+fn each_skipped_key_is_reported_once() {
+    let v = json!({
+        "@context": {"odrl": ODRL},
+        "@type": "Set",
+        "uid": "urn:p",
+        "permission": [
+            {"target": "urn:a", "action": "use", "odrl:duty": []},
+            {"target": "urn:b", "action": "use", "odrl:duty": []}
+        ]
+    });
+    let r = run(&v, &Options::strict());
+    let u = unchecked(&r);
+    assert_eq!(u.len(), 1, "{:?}", r.findings);
+    assert_eq!(u[0].term.as_ref().unwrap().written, "odrl:duty");
+}
+
+#[test]
+fn many_skipped_keys_are_named_up_to_a_cap_then_counted() {
+    let mut rule = serde_json::Map::new();
+    rule.insert("target".into(), json!("urn:a"));
+    rule.insert("action".into(), json!("use"));
+    for i in 0..25 {
+        rule.insert(format!("odrl:k{i}"), json!("x"));
+    }
+    let v = json!({
+        "@context": {"odrl": ODRL},
+        "@type": "Set",
+        "uid": "urn:p",
+        "permission": [rule]
+    });
+    let r = run(&v, &Options::strict());
+    let u = unchecked(&r);
+    assert_eq!(u.len(), 21, "{:?}", r.findings);
+    assert_eq!(u.iter().filter(|f| f.term.is_some()).count(), 20);
+    assert!(u.iter().any(|f| f.message.starts_with("5 more")), "{u:?}");
+}
