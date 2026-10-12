@@ -1136,11 +1136,10 @@ impl<'a> Checker<'a> {
             );
             self.emit(RuleId::OdrlInheritanceCycle, false, node(), msg);
         }
-        let remote = if self.options.level_of(RuleId::OdrlInheritanceCycle, false) == Level::Off {
-            Vec::new()
-        } else {
-            self.remote.get(path.policy).cloned().unwrap_or_default()
-        };
+        // Filled only when a rule that reads inheritance is on. Whichever it
+        // is, it stays quiet on what the parent may supply, so the gap is
+        // reported whether or not the cycle rule is on.
+        let remote = self.remote.get(path.policy).cloned().unwrap_or_default();
         for parent in remote {
             let msg = format!(
                 "the parent policy <{parent}> is not in this document, so the inheritance could not be checked"
