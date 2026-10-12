@@ -84,3 +84,44 @@ fn a_graph_policy_overrides_the_wrapper_context() {
         ["policy[0].permission[0].action[0]#name"]
     );
 }
+
+#[test]
+fn inheritance_links_read_each_policy_with_its_own_scope() {
+    // With one merged map p1 -> ex:q and p2 -> ex:p close a cycle; read
+    // with their own bindings they name policies elsewhere.
+    let node = |uid: &str, parent: &str, ex: &str| {
+        json!({
+            "@context": [ODRL, {"ex": ex}],
+            "@type": "Set",
+            "uid": uid,
+            "inheritFrom": parent,
+            "permission": [{"target": "urn:a", "action": "use"}]
+        })
+    };
+    let cycle = |doc: Value| {
+        let o = Options::strict().structural(true);
+        validate_json(&doc.to_string(), &wording_of(&["research.jsonld"]), &o)
+            .findings
+            .iter()
+            .filter(|f| f.rule.to_string() == "odrl.inheritance-cycle")
+            .count()
+    };
+    assert_eq!(
+        cycle(
+            json!({"@graph": [node("ex:p", "ex:q", OTHER_NS), node("ex:q", "ex:p", RESEARCH_NS)]})
+        ),
+        0
+    );
+    assert_eq!(
+        cycle(json!({"@graph": [node("ex:p", "ex:q", OTHER_NS), node("ex:q", "ex:p", OTHER_NS)]})),
+        2
+    );
+    // The first policy's link is read with its own binding, not the last
+    // policy's: urn:p1 -> ex:q names <other:q>, which is not urn:p2's uid.
+    assert_eq!(
+        cycle(
+            json!({"@graph": [node("urn:p1", "ex:q", OTHER_NS), node("ex:q", "urn:p1", RESEARCH_NS)]})
+        ),
+        0
+    );
+}
