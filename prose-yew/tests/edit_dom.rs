@@ -2318,3 +2318,54 @@ async fn ux2_picking_the_current_value_after_a_rejection_clears_the_message() {
     assert_eq!(el.get_attribute("aria-invalid"), None);
     assert_eq!(el.get_attribute("aria-describedby"), None);
 }
+
+/// UX-3: applying a fix removes the button that was focused. Focus must not
+/// fall to <body>: it moves to the panel's heading (or a remaining control).
+#[wasm_bindgen_test]
+async fn ux3_focus_stays_in_the_panel_after_a_fix_removes_its_button() {
+    let log = Log::default();
+    let (c, _h) = mount_strict(strict_props(
+        &undeclared_policy(),
+        &log,
+        true,
+        StrictEdit::Flag,
+    ))
+    .await;
+    let fix = q(&c, ".prose-problems .prose-problem-fix")
+        .dyn_into::<HtmlElement>()
+        .unwrap();
+    fix.focus().unwrap();
+    assert!(
+        document()
+            .active_element()
+            .is_some_and(|e| e == *fix.as_ref())
+    );
+    fix.click();
+    settle().await;
+    assert_eq!(state_attr(&c, "data-verdict"), "Conforms");
+    let active = document().active_element().expect("an active element");
+    assert_ne!(active.tag_name(), "BODY", "focus fell to the page");
+    assert!(
+        q(&c, ".prose-problems").contains(Some(&active)),
+        "focus is in the panel, got {}",
+        active.class_name()
+    );
+}
+
+/// UX-3: the panel does not take the focus on its own: a refused or stale
+/// fix leaves it where it was.
+#[wasm_bindgen_test]
+async fn ux3_a_render_of_the_panel_does_not_steal_the_focus() {
+    let log = Log::default();
+    let (c, _h) = mount_strict(strict_props(STRICT_POLICY, &log, true, StrictEdit::Flag)).await;
+    let el = slot(&c, ACTION);
+    el.focus().unwrap();
+    (q(&c, "#toggle").dyn_into::<HtmlElement>().unwrap()).click();
+    settle().await;
+    assert!(
+        document()
+            .active_element()
+            .is_none_or(|a| !q(&c, ".prose-problems").contains(Some(&a))),
+        "the panel took the focus"
+    );
+}
