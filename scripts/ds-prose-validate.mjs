@@ -159,16 +159,23 @@ function optionsOf(a) {
   return o;
 }
 
+// Control characters, and the characters that reorder or end lines, in text a
+// policy supplies (a term, an IRI, a file name): printed as escapes, so a
+// hostile policy cannot forge report lines or move the terminal's cursor.
+const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u2028-\u202e\u2066-\u2069]/g;
+const SHORT = { '\n': '\\n', '\r': '\\r', '\t': '\\t' };
+const safe = (s) => String(s).replace(UNSAFE, (c) => SHORT[c] ?? `\\u{${c.charCodeAt(0).toString(16)}}`);
+
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 function text(file, r) {
   const c = r.counts ?? { error: 0, warning: 0, info: 0 };
   const total = c.error + c.warning + c.info;
-  let out = `${file}: ${r.verdict}`;
+  let out = `${safe(file)}: ${r.verdict}`;
   if (total > 0) out += ` (${plural(c.error, 'error')}, ${plural(c.warning, 'warning')}, ${plural(c.info, 'info')})`;
   out += '\n';
   for (const f of r.findings ?? []) {
-    out += `  ${f.severity.padEnd(7)} ${f.rule}  ${f.target?.path || '(document)'}  ${f.message}\n`;
+    out += `  ${safe(f.severity).padEnd(7)} ${safe(f.rule)}  ${safe(f.target?.path || '(document)')}  ${safe(f.message)}\n`;
   }
   return out;
 }
@@ -253,7 +260,7 @@ export async function run(argv, io = defaultIo()) {
       body = file === '-' ? io.readStdin() : io.readFile(file);
     } catch (e) {
       const error = `cannot read ${name}: ${e.message}`;
-      io.stderr(`ds-prose-validate: ${error}\n`);
+      io.stderr(`ds-prose-validate: ${safe(error)}\n`);
       results.push({ file: name, report: null, error });
       exit = 2;
       continue;
@@ -267,7 +274,7 @@ export async function run(argv, io = defaultIo()) {
       // The engine never throws on a policy; if it does, that is a fault in
       // the tool, which must not look like violations (exit 1).
       const error = `cannot check ${name}: ${e?.message ?? e}`;
-      io.stderr(`ds-prose-validate: ${error}\n`);
+      io.stderr(`ds-prose-validate: ${safe(error)}\n`);
       results.push({ file: name, report: null, error });
       exit = 2;
       continue;
