@@ -31,8 +31,10 @@ Options:
                           With --strict: the ODRL terms defined without a
                           profile (default: common, Core plus Common).
       --ruleset <n>       Check only the rules of ruleset n and earlier.
+                          Works with or without --strict.
       --rule <id>=<level> Set a rule's level: off, info, warning or error.
-                          Repeatable.
+                          Repeatable. Works with or without --strict: in the
+                          advisory reading, a rule set to error can fail.
       --format <text|json>
                           text (default), or a JSON array with one
                           {file, report, error} per policy, each report
@@ -140,8 +142,14 @@ function setValued(a, arg, value) {
 
 /** The options object `ValidateOptions` the wasm module reads. */
 function optionsOf(a) {
-  if (!a.strict) return { strict: false };
-  const o = { strict: true };
+  // Rule levels and the ruleset apply to the advisory reading too: the engine
+  // honours them there, so they are passed on, not dropped.
+  const o = { strict: a.strict };
+  if (!a.strict) {
+    if (a.ruleset) o.ruleset = a.ruleset;
+    if (a.rules) o.rules = a.rules;
+    return o;
+  }
   if (a.structural) o.structural = true;
   if (a.failClosed) o.failClosed = true;
   if (a.denyDeprecated) o.denyDeprecated = true;
