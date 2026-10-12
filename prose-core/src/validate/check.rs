@@ -131,17 +131,32 @@ pub(crate) fn admissible(
     o: &Options,
     ev: &EditEvent,
 ) -> Result<(), Box<Finding>> {
-    if o.mode() != Mode::Strict {
-        return Ok(());
-    }
     let (slot, value) = match ev {
         EditEvent::SetText { slot, value, .. } | EditEvent::SetChoice { slot, value, .. } => {
             (slot, value.as_str())
         }
         _ => return Ok(()),
     };
-    if value.is_empty() {
-        return Ok(());
+    admissible_values(doc, w, index, o, slot, &[value])
+        .pop()
+        .unwrap_or(Ok(()))
+}
+
+/// [`admissible`] for several values written into one slot: the answers, in
+/// order, are those of one call per value. The per-document work (the
+/// prefixes in effect, the contexts the reader does not apply, the policy's
+/// own context) is done once, not once per value.
+pub(crate) fn admissible_values(
+    doc: &EditDoc,
+    w: &Wording,
+    index: &Index,
+    o: &Options,
+    slot: &SlotPath,
+    values: &[&str],
+) -> Vec<Result<(), Box<Finding>>> {
+    let all_ok = || values.iter().map(|_| Ok(())).collect();
+    if o.mode() != Mode::Strict {
+        return all_ok();
     }
     let pos = match slot.field {
         Field::Kind => Pos::PolicyKind,
@@ -150,10 +165,10 @@ pub(crate) fn admissible(
         Field::LeftOperand => Pos::LeftOperand,
         Field::Operator => Pos::Operator,
         Field::Unit => Pos::Unit,
-        _ => return Ok(()),
+        _ => return all_ok(),
     };
     let Some(policy) = doc.policies.get(slot.node.policy) else {
-        return Ok(());
+        return all_ok();
     };
     let atomic = match (pos, doc.node(&slot.node)) {
         (Pos::PolicyKind | Pos::Conflict, Some(NodeRef::Policy(_))) => None,
@@ -162,10 +177,10 @@ pub(crate) fn admissible(
             Pos::LeftOperand | Pos::Operator | Pos::Unit,
             Some(NodeRef::Constraint(ConstraintNode::Atomic(a))),
         ) => Some(a),
-        _ => return Ok(()),
+        _ => return all_ok(),
     };
     if policy.locked.is_some() {
-        return Ok(());
+        return all_ok();
     }
     let mut c = Checker::new(doc, w, index, o);
     c.imports();
@@ -173,36 +188,49 @@ pub(crate) fn admissible(
     c.scope(slot.node.policy);
     c.enter(NodePath::policy(slot.node.policy), policy);
     if c.incomplete() {
-        return Ok(());
+        return all_ok();
     }
-    c.out.clear();
     let id = doc.node(&slot.node).map(|n| n.id()).unwrap_or_default();
-    c.term(&slot.node, id, slot.field, value, pos);
-    // The left operand's hints bind the operator and the unit written
-    // under it; they are read as the constraint stands, with the new value.
-    if let Some(a) = atomic
-        && matches!(pos, Pos::Operator | Pos::Unit)
-        && let Some(h) = c
-            .resolve(&a.left)
-            .filter(|(t, _)| t.kinds.contains(&TermKind::LeftOperand))
-            .map(|(t, _)| &t.hints)
-    {
-        let mut written = a.clone();
-        if pos == Pos::Operator {
-            written.operator = value.to_string();
-            c.hint_operator(&slot.node, &written, h);
-        } else {
-            written.unit = Some(value.to_string());
-            c.hint_unit(&slot.node, &written, h);
-        }
-    }
     let here = IssueTarget::Slot(slot.clone());
-    match c.out.into_iter().find(|f| {
-        f.severity == Severity::Error && !f.gap && f.rule.info().refusable && f.target == here
-    }) {
-        Some(f) => Err(Box::new(f)),
-        None => Ok(()),
-    }
+    values
+        .iter()
+        .map(|&value| {
+            if value.is_empty() {
+                return Ok(());
+            }
+            c.out.clear();
+            c.term(&slot.node, id, slot.field, value, pos);
+            // The left operand's hints bind the operator and the unit
+            // written under it; they are read as the constraint stands,
+            // with the new value.
+            if let Some(a) = atomic
+                && matches!(pos, Pos::Operator | Pos::Unit)
+                && let Some(h) = c
+                    .resolve(&a.left)
+                    .filter(|(t, _)| t.kinds.contains(&TermKind::LeftOperand))
+                    .map(|(t, _)| &t.hints)
+            {
+                let mut written = a.clone();
+                if pos == Pos::Operator {
+                    written.operator = value.to_string();
+                    c.hint_operator(&slot.node, &written, h);
+                } else {
+                    written.unit = Some(value.to_string());
+                    c.hint_unit(&slot.node, &written, h);
+                }
+            }
+            let found = std::mem::take(&mut c.out).into_iter().find(|f| {
+                f.severity == Severity::Error
+                    && !f.gap
+                    && f.rule.info().refusable
+                    && f.target == here
+            });
+            match found {
+                Some(f) => Err(Box::new(f)),
+                None => Ok(()),
+            }
+        })
+        .collect()
 }
 
 struct Checker<'a> {
