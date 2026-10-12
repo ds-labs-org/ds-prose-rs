@@ -177,3 +177,27 @@ fn the_readme_prints_the_example_this_test_compiles() {
         assert!(s.contains(line), "README lacks {line:?}");
     }
 }
+
+/// Every line of the README's example is in the component this file compiles
+/// (a changed line there that was not changed here would print code nobody
+/// compiled).
+#[test]
+fn every_line_of_the_readme_example_is_compiled_here() {
+    let s = section("### In the editor");
+    let at = s.find("```rust").expect("the example");
+    let body = &s[at + 7..];
+    let block = &body[..body.find("```").unwrap()];
+    // Layout and trailing commas are rustfmt's, not the example's.
+    let squash = |t: &str| {
+        t.chars()
+            .filter(|c| !c.is_whitespace() && *c != ',')
+            .collect::<String>()
+    };
+    let this = squash(include_str!("readme_strict.rs"));
+    for line in block.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        assert!(
+            this.contains(&squash(line)),
+            "README example line not compiled: {line:?}"
+        );
+    }
+}

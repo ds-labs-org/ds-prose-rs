@@ -448,7 +448,9 @@ npx ds-prose-validate --strict --structural --format json --profile p.jsonld a.j
 Options: `--profile` (repeatable), `--strict`, `--structural`,
 `--fail-closed`, `--deny-deprecated`, `--odrl common|core`, `--ruleset <n>`,
 `--rule <id>=<off|info|warning|error>` (repeatable), `--format text|json`,
-`--allow-incomplete`. A policy of `-` is read from standard input (once).
+`--allow-incomplete`. `--structural`, `--fail-closed`,
+`--deny-deprecated` and `--odrl` need `--strict` (without it the command
+exits 2 as a usage error). A policy of `-` is read from standard input (once).
 Input must be UTF-8 (a leading byte order mark is ignored). Without
 `--strict` it is the advisory reading, where nothing is an error unless
 `--rule` or `--ruleset` says so: both work with or without `--strict`. In the
