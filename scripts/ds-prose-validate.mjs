@@ -164,7 +164,7 @@ function optionsOf(a) {
 // Control characters, and the characters that reorder or end lines, in text a
 // policy supplies (a term, an IRI, a file name): printed as escapes, so a
 // hostile policy cannot forge report lines or move the terminal's cursor.
-const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u2028-\u202e\u2066-\u2069]/g;
+const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2066-\u2069]/g;
 const SHORT = { '\n': '\\n', '\r': '\\r', '\t': '\\t' };
 const safe = (s) => String(s).replace(UNSAFE, (c) => SHORT[c] ?? `\\u{${c.charCodeAt(0).toString(16)}}`);
 
