@@ -24,7 +24,10 @@ ds-odrl-prose                          the Angular host element
     aside.prose-warnings                 only when something was not rendered
     section.prose-violations             only with validation and showViolations
   article.ds-prose > p.prose-error       instead of the policy, when the JSON cannot be read
+  p.prose-error                          instead of everything above, when the wasm cannot be loaded; outside article.ds-prose
 ```
+
+The load error is a `p.prose-error` that is a direct child of `ds-odrl-prose`, outside `article.ds-prose`. Select it as `ds-odrl-prose > .prose-error`. The rule `.ds-prose .prose-error` does not match it, so `prose.css` has a second rule for it.
 
 {{include hooks-renderer}}
 

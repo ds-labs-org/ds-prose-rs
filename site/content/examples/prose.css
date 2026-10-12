@@ -124,7 +124,8 @@ ds-odrl-prose {
   border: 1px solid var(--ds-warn);
   border-radius: 6px;
 }
-.ds-prose .prose-error {
+.ds-prose .prose-error,
+ds-odrl-prose > .prose-error {
   color: var(--ds-deny);
 }
 

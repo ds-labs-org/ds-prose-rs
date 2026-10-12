@@ -47,7 +47,7 @@ The tables are checked against the code. A test collects every `prose-*` string 
 | `.prose-remove` | `button` | Remove button. |
 | `.prose-reorder` | `button` | Move up and move down. |
 | `.prose-wrap` | `button` | Group and ungroup. |
-| `.prose-live` | `div[role="status"]` | The announcer, visually hidden by `BASE_CSS`. With `base_css` off, hide it yourself. |
+| `.prose-live` | `div[role="status"]`, `span[role="status"]` | The announcer, visually hidden by `BASE_CSS`. The `div` is the last child of the root. A `span` is written inside the wrapper of each closed slot. With `base_css` off, hide both yourself, and select the class, not the tag. |
 | `.prose-slot-wrap` | `span` | Positioning context for a slot, its message and its listbox. |
 | `.prose-slot` | `span[contenteditable]` | An editable slot. Has `data-slot` and `data-placeholder`. |
 | `.prose-slot-empty` | slot | The slot has no text. |
@@ -63,7 +63,7 @@ The tables are checked against the code. A test collects every `prose-*` string 
 | `.prose-suggestion-group` | `li[role="group"]` | A heading and its options, written when some suggestion has a group. |
 | `.prose-suggestion-group-label` | `span` | The group heading. |
 | `.prose-select` | `select` | A closed choice such as an operator. |
-| `.prose-rule-kind` | `select` | The may, must not, must select, next to `.prose-select`. |
+| `.prose-rule-kind` | `select` | The select that sets the kind of a rule: may, must not or must. It is next to `.prose-select`. |
 | `.prose-issue` | `span` | An issue message the host passed in `issues` or `refusal`. |
 | `.prose-issue-error`, `.prose-issue-warning`, `.prose-issue-info` | `span` | The severity of an issue, next to `.prose-issue`. |
 
