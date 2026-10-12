@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  createChangeTracker, parseReport, profileTexts, reportChanged, validationOptions,
+  StandaloneReporter, createChangeTracker, parseReport, profileTexts, reportChanged, validationOptions,
 } from '../src/validation-sync.ts';
 
 const finding = (rule, fingerprint, severity = 'error') => ({ rule, fingerprint, severity, message: `${rule} said so` });
@@ -104,4 +104,60 @@ test('a report is parsed from its text; null stays null', () => {
   assert.equal(parseReport(null), null);
   assert.equal(parseReport(undefined), null);
   assert.deepEqual(parseReport('{"verdict":"conforms","findings":[]}'), { verdict: 'conforms', findings: [] });
+});
+
+// A stand-in for the wasm ProseValidator: it throws on options with `bad`, and
+// reports the policy and the options it was built with.
+function reporter() {
+  const built = [];
+  const freed = [];
+  const r = new StandaloneReporter((profiles, options) => {
+    if (options.bad) throw new Error('unreadable options');
+    const v = {
+      validate: (json) => JSON.stringify({ json, options, profiles }),
+      free: () => freed.push(v),
+    };
+    built.push(v);
+    return v;
+  });
+  return { r, built, freed };
+}
+
+test('a standalone report follows the policy, and the validator is reused until options or profiles change', () => {
+  const { r, built, freed } = reporter();
+  assert.deepEqual(JSON.parse(r.report(['p'], { strict: true }, 'A').report), { json: 'A', options: { strict: true }, profiles: ['p'] });
+  r.report(['p'], { strict: true }, 'B');
+  assert.equal(built.length, 1);
+  r.report(['q'], { strict: true }, 'B');
+  assert.equal(built.length, 2);
+  assert.equal(freed.length, 1, 'the replaced validator is freed');
+});
+
+test('unreadable options: the error is reported and the report is computed with the previous options', () => {
+  const { r } = reporter();
+  r.report([], { strict: true }, 'A');
+  const out = r.report([], { bad: true }, 'B');
+  assert.equal(out.error.message, 'unreadable options');
+  assert.deepEqual(JSON.parse(out.report), { json: 'B', options: { strict: true }, profiles: [] }, 'the new policy, the old options');
+});
+
+test('unreadable options with no previous options: no report, not a stale one', () => {
+  const { r } = reporter();
+  const out = r.report([], { bad: true }, 'A');
+  assert.equal(out.report, null);
+  assert.equal(out.error.message, 'unreadable options');
+});
+
+test('turning validation off forgets the previous options', () => {
+  const { r } = reporter();
+  r.report([], { strict: true }, 'A');
+  r.clear();
+  assert.equal(r.report([], { bad: true }, 'B').report, null);
+});
+
+test('free releases the validator', () => {
+  const { r, freed } = reporter();
+  r.report([], { strict: true }, 'A');
+  r.free();
+  assert.equal(freed.length, 1);
 });
