@@ -218,6 +218,13 @@ export async function runLayoutCheck({ dist, base, chrome = findChrome(), shotDi
     s = await state();
     if (s.expanded !== 'false' || s.open || !s.focusOnButton) failures.push(`menu: Escape did not close it and return focus (${JSON.stringify(s)})`);
 
+    // Just under the breakpoint (48rem = 768 px) the menu must already collapse.
+    await send('Emulation.setDeviceMetricsOverride', { width: 700, height: 800, deviceScaleFactor: 1, mobile: false });
+    await visit(base);
+    const mid = await evaluate(PROBE);
+    if (!mid.menuVisible || mid.listVisible) failures.push(`at 700 px the menu button is ${mid.menuVisible ? 'shown' : 'hidden'} and the links are ${mid.listVisible ? 'open' : 'closed'}`);
+    if (mid.scrollWidth > mid.innerWidth) failures.push(`horizontal overflow at 700 px (${mid.scrollWidth})`);
+
     // Copy button: copies exactly the code text, reports the outcome in a live
     // region, falls back when the async clipboard is missing or refuses, never
     // throws, and leaves keyboard focus on the button.

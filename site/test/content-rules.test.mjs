@@ -129,3 +129,11 @@ test('every interactive control has a visible keyboard focus state of its own or
   assert.doesNotMatch(CSS, /:focus(?!-visible)[^{]*\{[^}]*outline/);
   assert.doesNotMatch(CSS, /outline-color:\s*transparent/);
 });
+
+test('the menu breakpoint in site.js equals the narrow breakpoint in site.css', () => {
+  const js = /matchMedia\('\(max-width:\s*([\d.]+rem)\)'\)/.exec(JS);
+  assert.ok(js, 'site.js has no max-width matchMedia');
+  const cssWidths = [...CSS.matchAll(/@media \(max-width:\s*([\d.]+rem)\)/g)].map((m) => m[1]);
+  assert.ok(cssWidths.length > 0);
+  for (const w of cssWidths) assert.equal(w, js[1]);
+});
