@@ -81,7 +81,7 @@ pub fn demo_app() -> Html {
     html! {
         <main>
             <h1>{ "ds-prose-rs demo" }</h1>
-            <p>{ "PROSE: Prose Renderer for ODRL Semantic Encoding. Paste an ODRL policy as JSON-LD and read it as prose, or edit the prose itself. Nothing leaves this page unless you load a profile from a URL." }</p>
+            <p>{ "PROSE: Prose Rendering for ODRL Semantic Representation. Paste an ODRL policy as JSON-LD and read it as prose, or edit the prose itself. Nothing leaves this page unless you load a profile from a URL." }</p>
             <div class="presets">{ for presets }</div>
             { profile_section(&profile, &json) }
             <div class="tabs" role="tablist">

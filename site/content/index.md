@@ -6,7 +6,7 @@ stylesheet: examples/prose.css
 ---
 # Read an ODRL policy as sentences
 
-ds-prose-rs reads an ODRL JSON-LD policy and writes it as plain-language sentences that say who may, must not or must do what, and under which conditions. It is a Rust library with a Yew component, a WebAssembly bridge, and an Angular component. It does not decide whether an action is allowed, and it ships no stylesheet for the rendered sentences.
+**PROSE: Prose Rendering for ODRL Semantic Representation.** ds-prose-rs reads an ODRL JSON-LD policy and writes it as plain-language sentences that say who may, must not or must do what, and under which conditions. It is a Rust library with a Yew component, a WebAssembly bridge, and an Angular component. It does not decide whether an action is allowed, and it ships no stylesheet for the rendered sentences.
 
 ## A policy and its sentences
 

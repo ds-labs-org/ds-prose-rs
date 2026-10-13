@@ -19,7 +19,7 @@ ${headAssets(b)}${stylesheet ? `\n<link rel="stylesheet" href="${b}${escapeHtml(
 ${renderHeader(active, b, { exact })}
 ${content}
 <footer class="site-footer">
-<p>ds-prose-rs is licensed under Apache-2.0. <a href="${REPO_URL}" rel="noopener">Source on GitHub</a>.</p>
+<p>PROSE: Prose Rendering for ODRL Semantic Representation. ds-prose-rs is licensed under Apache-2.0. <a href="${REPO_URL}" rel="noopener">Source on GitHub</a>.</p>
 </footer>
 </body>
 </html>
