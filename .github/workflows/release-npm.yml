@@ -139,6 +139,7 @@ jobs:
           scripts/smoke-demo.sh demo-angular/dist/demo-angular/browser /
         env:
           SMOKE_TITLE: ds-prose-rs Angular demo
+          SMOKE_EXTRA: 'id="strict" id="findings"'
 
       # The "./" matters: npm reads "dist-npm/x" as the GitHub shorthand
       # "user/repo" and tries to clone it, whether or not the folder exists.
