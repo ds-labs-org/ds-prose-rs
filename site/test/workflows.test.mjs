@@ -177,3 +177,10 @@ test('smoke-demo.sh boots a stamped page under a sub-path and under the old root
     assert.match(bad.stderr, /id="strict"/);
   }
 });
+
+test('release-npm: the Angular boot check names the Angular demo\'s own needles, not the Trunk demo defaults', () => {
+  const release = source('.github/workflows/release-npm.yml');
+  const step = /smoke-demo\.sh demo-angular[\s\S]*?(?=\n\s*\n)/.exec(release)?.[0] ?? '';
+  assert.match(step, /SMOKE_TITLE: ds-prose-rs Angular demo/);
+  assert.match(step, /SMOKE_EXTRA: .*id="strict".*id="findings"/);
+});
