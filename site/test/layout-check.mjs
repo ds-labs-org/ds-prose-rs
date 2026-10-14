@@ -311,7 +311,7 @@ const PROBE = `(() => {
 })()`;
 
 const DEMO_PATH = /\/demo(-angular)?\/$/;
-const EXPECTED_LABELS = ['Home', 'Demo (Yew)', 'Demo (Angular)', 'Yew docs', 'Angular docs'];
+const EXPECTED_LABELS = ['Home', 'Demo (Yew)', 'Demo (Angular)', 'Yew docs', 'Angular docs', 'Catalog'];
 
 export async function runLayoutCheck({ dist, base, chrome = findChrome(), shotDir, demos = false }) {
   if (!chrome) throw new Error('no Chrome found; set CHROME');
@@ -378,7 +378,7 @@ export async function runLayoutCheck({ dist, base, chrome = findChrome(), shotDi
           if (p.mutedRatio !== null && p.mutedRatio < AA) fail(`muted text contrast ${p.mutedRatio.toFixed(2)} < ${AA}`);
           if (vp.width >= 768) {
             if (p.menuVisible) fail('menu button visible on a wide screen');
-            if (!p.listVisible || p.navVisibleLinks !== 5) fail(`wide nav shows ${p.navVisibleLinks} of 5 links`);
+            if (!p.listVisible || p.navVisibleLinks !== EXPECTED_LABELS.length) fail(`wide nav shows ${p.navVisibleLinks} of ${EXPECTED_LABELS.length} links`);
           } else {
             if (!p.menuVisible) fail('menu button not visible on a narrow screen');
             if (p.listVisible) fail('nav links are open before the menu is used');

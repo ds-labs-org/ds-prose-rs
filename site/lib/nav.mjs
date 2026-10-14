@@ -10,6 +10,7 @@ export const NAV = [
   { id: 'demo-angular', label: 'Demo (Angular)', path: 'demo-angular/' },
   { id: 'yew', label: 'Yew docs', path: 'yew/' },
   { id: 'angular', label: 'Angular docs', path: 'angular/' },
+  { id: 'catalog', label: 'Catalog', path: 'catalog/' },
 ];
 
 export const PACKAGES = [

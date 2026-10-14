@@ -7,9 +7,11 @@
 #                ordered rule list, nested condition lists). The host supplies
 #                class names; this crate supplies structure.
 #   demo         the Trunk app: paste an ODRL policy, read it.
+#   catalog      builds the site's catalog of the ds-odrl-compliance-rdf corpus
+#                (fetched at build time, never copied here).
 [workspace]
 resolver = "2"
-members = ["prose-core", "prose-yew", "prose-wasm", "demo"]
+members = ["prose-core", "prose-yew", "prose-wasm", "demo", "catalog"]
 
 [workspace.package]
 version = "0.4.0"

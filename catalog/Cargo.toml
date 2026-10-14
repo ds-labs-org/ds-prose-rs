@@ -1,0 +1,18 @@
+[package]
+name = "compliance-catalog"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Builds the site's catalog of the ds-odrl-compliance-rdf corpus: each case's policies as JSON-LD and as prose"
+publish = false
+
+[dependencies]
+prose-yew = { path = "../prose-yew", features = ["ssr"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+# The corpus is Turtle; the same versions prose-core's turtle feature uses.
+oxttl = { version = "0.2.4", default-features = false }
+oxrdf = { version = "0.3.4", default-features = false }
+tokio = { version = "1", features = ["rt"] }
+yew = { version = "0.23", features = ["ssr"] }

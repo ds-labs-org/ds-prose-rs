@@ -220,6 +220,12 @@ jobs:
         working-directory: demo
         run: trunk build --release --public-url /ds-prose-rs/demo/
 
+      # The catalog of the ds-odrl-compliance-rdf corpus, generated from its
+      # main branch at build time (nothing of it is kept in this repository).
+      # Fails when a case does not translate or does not read.
+      - name: Generate the compliance catalog
+        run: scripts/build-catalog.sh
+
       # The generator, the contract tests that tie the docs to the sources, and
       # the browser tests of the stylesheet switch and the smoke script.
       - name: Site tests
@@ -229,6 +235,7 @@ jobs:
       - name: Assemble the site
         run: node site/build.mjs
         env:
+          SITE_REQUIRE_CATALOG: "1"
           SITE_BASE: /ds-prose-rs/
 
       # Every page and both demos at 1280 and 400 px, light and dark; the

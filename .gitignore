@@ -4,3 +4,5 @@
 /prose-angular/wasm
 /dist-npm
 /site/dist
+# Generated at build time from ds-odrl-compliance-rdf (scripts/build-catalog.sh).
+/site/content/catalog

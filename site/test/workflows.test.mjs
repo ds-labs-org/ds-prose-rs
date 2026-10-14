@@ -69,6 +69,7 @@ test('pages: installs Trunk and wasm-pack, and Node 22', () => {
 test('pages: the steps run in order, test, build, assemble, boot check, upload', () => {
   order(PAGES, [
     'cargo test --workspace --locked',
+    'scripts/build-catalog.sh',
     'node --test "site/test/*.test.mjs"',
     'trunk build --release --public-url /ds-prose-rs/demo/',
     'scripts/build-npm-packages.sh',
@@ -98,6 +99,13 @@ test('pages: the Angular boot check names its title and checks the stamped navig
 test('pages: the Yew boot check keeps its own needles and adds the stamped navigation', () => {
   const step = /smoke-demo\.sh site\/dist\/demo \/ds-prose-rs\/demo\/[\s\S]*?(?=\n\s*- |\n\s*\n)/.exec(PAGES)?.[0] ?? '';
   assert.match(step, /SMOKE_EXTRA: .*id="profile-json".*id="profile-strict".*class="topnav"/);
+});
+
+test('pages and ci: the site is assembled only with the compliance catalog generated', () => {
+  for (const wf of [PAGES, jobs(CI).angular]) {
+    const step = /- name: Assemble the site[\s\S]*?(?=\n\s*- |\n\s*\n)/.exec(wf)?.[0] ?? '';
+    assert.match(step, /SITE_REQUIRE_CATALOG:\s*"1"/);
+  }
 });
 
 test('pages: the layout check demands a browser rather than skipping', () => {
@@ -136,6 +144,7 @@ test('ci: the angular job builds under /demo-angular/, boots it there, and runs 
     'scripts/build-npm-packages.sh',
     'npx ng build --base-href /ds-prose-rs/demo-angular/',
     'trunk build --release --public-url /ds-prose-rs/demo/',
+    'scripts/build-catalog.sh',
     'node --test --test-reporter=spec --test-timeout=240000 "site/test/*.test.mjs"',
     'node site/build.mjs',
     'node site/test/layout-check.mjs site/dist /ds-prose-rs/',
