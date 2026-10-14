@@ -22,6 +22,10 @@ on:
       - "scripts/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
+  # The compliance catalog is generated from ds-odrl-compliance-rdf at build
+  # time; a daily rebuild publishes the corpus's changes.
+  schedule:
+    - cron: "41 4 * * *"
 
 permissions:
   contents: read

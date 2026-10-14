@@ -101,6 +101,10 @@ test('pages: the Yew boot check keeps its own needles and adds the stamped navig
   assert.match(step, /SMOKE_EXTRA: .*id="profile-json".*id="profile-strict".*class="topnav"/);
 });
 
+test('pages: a daily rebuild picks up changes of the compliance corpus', () => {
+  assert.match(PAGES, /schedule:\s*\n\s*- cron: "\d+ \d+ \* \* \*"/);
+});
+
 test('pages and ci: the site is assembled only with the compliance catalog generated', () => {
   for (const wf of [PAGES, jobs(CI).angular]) {
     const step = /- name: Assemble the site[\s\S]*?(?=\n\s*- |\n\s*\n)/.exec(wf)?.[0] ?? '';
