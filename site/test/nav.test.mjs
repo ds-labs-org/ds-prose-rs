@@ -10,10 +10,10 @@ const files = htmlFiles(site.out).map((f) => ({ url: urlOf(site.out, B, f), html
 const normalise = (nav) => nav.replace(/ aria-current="[^"]*"/g, '');
 const topLinks = (nav) => [...nav.matchAll(/<li><a href="([^"]+)"( aria-current="(\w+)")?>([^<]+)<\/a><\/li>/g)].map((m) => ({ href: m[1], current: m[3], label: m[4] }));
 
-test('the top entries are Home, Demo (Yew), Demo (Angular), Yew docs, Angular docs, in that order', () => {
-  assert.deepEqual(NAV.map((n) => n.label), ['Home', 'Demo (Yew)', 'Demo (Angular)', 'Yew docs', 'Angular docs']);
+test('the top entries are Home, Demo (Yew), Demo (Angular), Yew docs, Angular docs, Catalog, in that order', () => {
+  assert.deepEqual(NAV.map((n) => n.label), ['Home', 'Demo (Yew)', 'Demo (Angular)', 'Yew docs', 'Angular docs', 'Catalog']);
   const links = topLinks(renderNav('home', B));
-  assert.deepEqual(links.map((l) => l.href), [B, B + 'demo/', B + 'demo-angular/', B + 'yew/', B + 'angular/']);
+  assert.deepEqual(links.map((l) => l.href), [B, B + 'demo/', B + 'demo-angular/', B + 'yew/', B + 'angular/', B + 'catalog/']);
 });
 
 test('a Packages group lists GitHub, crates.io and npm, as external links', () => {
@@ -55,6 +55,7 @@ const expectCurrent = {
   [B + 'yew/']: ['Yew docs', 'page'],
   [B + 'angular/']: ['Angular docs', 'page'],
   [B + 'yew/interface/']: ['Yew docs', 'true'],
+  [B + 'catalog/']: ['Catalog', 'page'],
 };
 
 test('the nav is the same on every page and both demos, apart from aria-current', () => {

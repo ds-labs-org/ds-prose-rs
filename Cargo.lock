@@ -89,6 +89,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 
 [[package]]
+name = "compliance-catalog"
+version = "0.4.0"
+dependencies = [
+ "oxrdf",
+ "oxttl",
+ "prose-yew",
+ "serde_json",
+ "tokio",
+ "yew",
+]
+
+[[package]]
 name = "console_error_panic_hook"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"

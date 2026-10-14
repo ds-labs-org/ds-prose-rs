@@ -5,7 +5,8 @@
 // Environment: SITE_BASE (default /), SITE_OUT (default site/dist),
 // SITE_DEMO_DIST (default demo/dist), SITE_ANGULAR_DIST (default
 // demo-angular/dist/demo-angular/browser), SITE_SKIP_DEMOS=1 to build without
-// the demos (local work only; CI must not set it).
+// the demos (local work only; CI must not set it), SITE_REQUIRE_CATALOG=1 to
+// fail when content/catalog/ was not generated (scripts/build-catalog.sh).
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,7 +15,20 @@ import { normaliseBase, renderSubnav, stampDemo } from './lib/nav.mjs';
 import { renderPage } from './lib/shell.mjs';
 
 const SITE_DIR = path.dirname(fileURLToPath(import.meta.url));
-const SECTIONS = new Set(['yew', 'angular']);
+const SECTIONS = new Set(['yew', 'angular', 'catalog']);
+
+const CATALOG_FALLBACK = path.join('catalog', 'index.md');
+const CATALOG_FALLBACK_MD = `---
+title: Compliance corpus catalog
+label: All cases
+description: The catalog of the ds-odrl-compliance-rdf corpus is generated when the site is built; this build has none.
+nav: catalog
+order: 0
+---
+# Compliance corpus catalog
+
+This build of the site has no catalog. The catalog is generated from [ds-odrl-compliance-rdf](https://github.com/ds-labs-org/ds-odrl-compliance-rdf) when the site is built. Run \`scripts/build-catalog.sh\` before \`node site/build.mjs\` to generate it.
+`;
 
 function walk(dir) {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
@@ -46,6 +60,7 @@ export function build({
   repoDir = path.resolve(SITE_DIR, '..'),
   base = '/',
   demos = {},
+  requireCatalog = false,
 } = {}) {
   base = normaliseBase(base);
   fs.rmSync(outDir, { recursive: true, force: true });
@@ -55,8 +70,16 @@ export function build({
     .map((f) => path.relative(contentDir, f))
     .filter((r) => r.endsWith('.md') && !r.split(path.sep).some((s) => s.startsWith('_')));
 
+  // The catalog is generated at build time from ds-odrl-compliance-rdf. A
+  // build without it gets a page that says how to generate it.
+  if (!sources.includes(path.join('catalog', 'index.md'))) {
+    if (requireCatalog) throw new Error('content/catalog/ is not generated: run scripts/build-catalog.sh');
+    sources.push(CATALOG_FALLBACK);
+  }
+
   const pages = sources.map((rel) => {
-    const { data, body } = parseFrontMatter(fs.readFileSync(path.join(contentDir, rel), 'utf8'));
+    const src = rel === CATALOG_FALLBACK ? CATALOG_FALLBACK_MD : fs.readFileSync(path.join(contentDir, rel), 'utf8');
+    const { data, body } = parseFrontMatter(src);
     for (const k of ['title', 'description', 'nav']) if (!data[k]) throw new Error(`${rel}: front matter needs ${k}`);
     const { html } = renderMarkdown(body, { contentDir, repoDir });
     return { rel, data, html: prefixLinks(html, base), url: urlFor(base, rel) };
@@ -122,6 +145,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     for (const [n, d] of Object.entries(demos)) if (!fs.existsSync(d)) throw new Error(`demo "${n}" not built: ${d} (SITE_SKIP_DEMOS=1 to build without)`);
   }
   const out = path.resolve(process.env.SITE_OUT ?? path.join(SITE_DIR, 'dist'));
-  const { pages } = build({ outDir: out, base: process.env.SITE_BASE ?? '/', demos });
+  const { pages } = build({ outDir: out, base: process.env.SITE_BASE ?? '/', demos, requireCatalog: process.env.SITE_REQUIRE_CATALOG === '1' });
   console.log(`built ${pages.length} pages into ${out}`);
 }

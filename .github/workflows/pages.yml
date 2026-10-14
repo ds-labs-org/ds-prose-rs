@@ -22,6 +22,10 @@ on:
       - "scripts/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
+  # The compliance catalog is generated from ds-odrl-compliance-rdf at build
+  # time; a daily rebuild publishes the corpus's changes.
+  schedule:
+    - cron: "41 4 * * *"
 
 permissions:
   contents: read
@@ -52,6 +56,12 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
+      # The catalog of the ds-odrl-compliance-rdf corpus, generated from its
+      # main branch at build time (nothing of it is kept in this repository).
+      # Fails when a case does not translate or does not read.
+      - name: Generate the compliance catalog
+        run: scripts/build-catalog.sh
+
       # The generator, the contract tests that tie the docs to the sources,
       # and the browser tests of the switch. No network, no build output.
       - name: Site tests
@@ -77,6 +87,7 @@ jobs:
       # Pages, the two demos, and the navigation stamped into the demos.
       - name: Assemble the site
         env:
+          SITE_REQUIRE_CATALOG: "1"
           SITE_BASE: /ds-prose-rs/
         run: node site/build.mjs
 
