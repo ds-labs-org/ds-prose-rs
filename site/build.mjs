@@ -19,15 +19,15 @@ const SECTIONS = new Set(['yew', 'angular', 'catalog']);
 
 const CATALOG_FALLBACK = path.join('catalog', 'index.md');
 const CATALOG_FALLBACK_MD = `---
-title: Compliance corpus catalog
-label: All cases
-description: The catalog of the ds-odrl-compliance-rdf corpus is generated when the site is built; this build has none.
+title: Policy catalog
+label: Overview
+description: The catalog of real-world ODRL policies is generated when the site is built; this build has none.
 nav: catalog
 order: 0
 ---
-# Compliance corpus catalog
+# Policy catalog
 
-This build of the site has no catalog. The catalog is generated from [ds-odrl-compliance-rdf](https://github.com/ds-labs-org/ds-odrl-compliance-rdf) when the site is built. Run \`scripts/build-catalog.sh\` before \`node site/build.mjs\` to generate it.
+This build of the site has no catalog. The catalog is generated when the site is built, from [ds-odrl-compliance-rdf](https://github.com/ds-labs-org/ds-odrl-compliance-rdf) and from the W3C, EDC and Dataspace Protocol examples. Run \`scripts/build-catalog.sh\` before \`node site/build.mjs\` to generate it.
 `;
 
 function walk(dir) {
@@ -91,7 +91,7 @@ export function build({
     let subnav = '';
     if (section) {
       const siblings = pages
-        .filter((q) => q.data.nav === section)
+        .filter((q) => q.data.nav === section && q.data.subnav !== 'no')
         .sort((a, b) => Number(a.data.order ?? 99) - Number(b.data.order ?? 99))
         .map((q) => ({ url: q.url, label: q.data.label ?? q.data.title }));
       subnav = renderSubnav({ section, pages: siblings, currentUrl: p.url });

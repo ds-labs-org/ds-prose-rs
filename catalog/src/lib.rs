@@ -1,70 +1,68 @@
-//! The site's catalog of the [ds-odrl-compliance-rdf] corpus.
+//! The site's catalog of real-world ODRL policies, read as prose.
 //!
-//! The corpus is not copied into this repository: CI checks it out at build
-//! time and runs `compliance-catalog <cases-dir> site/content/catalog`. Each
-//! case's policies are translated from Turtle to ODRL JSON-LD
-//! ([`translate`]), rendered by `OdrlProse`, and written as one site page
-//! with its fragments; an index page lists the cases.
+//! Nothing of the sources is copied into this repository: the build fetches
+//! them (`scripts/build-catalog.sh`) and runs `compliance-catalog`, which
+//! reads each source's policies, renders them with `OdrlProse` and writes
+//! `site/content/catalog/`: an overview with a coverage table, one index per
+//! source, one page per policy.
 //!
-//! The build fails when a case does not translate, when the renderer refuses
-//! its policies, or when a sentence holds "an incomplete constraint" (a term
-//! of the corpus the translation does not map). Renderer warnings do not
-//! fail it: they are listed on the case's page.
+//! - The [ds-odrl-compliance-rdf] corpus, in Turtle: each case's policies are
+//!   translated to ODRL JSON-LD ([`translate`]). The build fails when a case
+//!   does not translate, the renderer refuses it, or a condition reads as
+//!   incomplete (a term the translation does not map).
+//! - Reference policies ([`sources`]): the examples of the W3C ODRL
+//!   Information Model, the EDC samples, the Dataspace Protocol examples.
+//!   They are shown as written; what the renderer cannot read in them is a
+//!   finding, listed on their page, not a build failure.
 //!
 //! [ds-odrl-compliance-rdf]: https://github.com/ds-labs-org/ds-odrl-compliance-rdf
+pub mod features;
+pub mod sources;
 pub mod translate;
 
 use prose_yew::OdrlProse;
+use sources::Found;
+use std::collections::BTreeSet;
 use std::path::Path;
-use translate::Case;
 use yew::AttrValue;
 
-/// Where a case's Turtle file is linked from, without the trailing `/`.
-pub const DEFAULT_SOURCE: &str =
-    "https://github.com/ds-labs-org/ds-odrl-compliance-rdf/blob/main/cases";
-
-/// One case as the catalog shows it.
+/// One policy document as the catalog shows it.
 pub struct Entry {
-    pub case: Case,
+    pub slug: String,
+    pub title: String,
+    pub about: String,
+    pub link: String,
     pub json: String,
     pub html: String,
     pub warnings: Vec<String>,
+    /// A condition reads as "an incomplete constraint".
+    pub incomplete: bool,
+    pub features: BTreeSet<&'static str>,
 }
 
-/// Reads every `*.ttl` in `cases_dir`, in name order, and reads it as prose.
-pub fn read_corpus(cases_dir: &Path) -> Result<Vec<Entry>, String> {
-    let mut names: Vec<String> = std::fs::read_dir(cases_dir)
-        .map_err(|e| format!("{}: {e}", cases_dir.display()))?
-        .filter_map(|e| e.ok()?.file_name().into_string().ok())
-        .filter(|n| n.ends_with(".ttl"))
-        .collect();
-    names.sort();
-    if names.is_empty() {
-        return Err(format!("{}: no .ttl case", cases_dir.display()));
-    }
-    names
-        .iter()
-        .map(|n| {
-            let text =
-                std::fs::read_to_string(cases_dir.join(n)).map_err(|e| format!("{n}: {e}"))?;
-            entry(translate::translate(n.trim_end_matches(".ttl"), &text)?)
-        })
-        .collect()
+/// One source of policies, with its own index page.
+pub struct Source {
+    /// The directory and URL segment of its pages.
+    pub id: &'static str,
+    pub name: &'static str,
+    /// Markdown: what the source is and how its policies were read.
+    pub intro: String,
+    pub license: &'static str,
+    pub entries: Vec<Entry>,
 }
 
-/// Renders a translated case and checks its reading.
-pub fn entry(case: Case) -> Result<Entry, String> {
-    let json = serde_json::to_string_pretty(&case.policies).expect("JSON") + "\n";
-    let doc = prose_yew::prose_core::render(&json).map_err(|e| format!("{}: {e:?}", case.slug))?;
+/// Renders one policy document and checks its reading.
+pub fn entry(found: Found) -> Result<Entry, String> {
+    let json = serde_json::to_string_pretty(&found.policy).expect("JSON") + "\n";
+    let doc = prose_yew::prose_core::render(&json).map_err(|e| format!("{}: {e:?}", found.slug))?;
     let html = without_markers(&ssr(&json));
-    if html.contains("incomplete constraint") {
-        return Err(format!(
-            "{}: a constraint reads as incomplete; the translation misses a term",
-            case.slug
-        ));
-    }
     Ok(Entry {
-        case,
+        incomplete: html.contains("incomplete constraint"),
+        features: features::of(&found.policy),
+        slug: found.slug,
+        title: found.title,
+        about: found.about,
+        link: found.link,
         json,
         html,
         warnings: doc.warnings,
@@ -98,21 +96,78 @@ fn without_markers(html: &str) -> String {
     out
 }
 
-/// Writes the catalog: `index.md`, and per case `<slug>.md`, `.jsonld` and
-/// `.html`. `out_dir` is emptied first.
-pub fn write_site(entries: &[Entry], out_dir: &Path, source: &str) -> Result<(), String> {
-    let io = |e: std::io::Error| format!("{}: {e}", out_dir.display());
-    if out_dir.exists() {
-        std::fs::remove_dir_all(out_dir).map_err(io)?;
+/// The ds-odrl-compliance-rdf corpus: every `*.ttl` in `cases_dir`, in name
+/// order. `link` is where the case files are linked under.
+pub fn compliance(cases_dir: &Path, link: &str) -> Result<Source, String> {
+    let mut names: Vec<String> = std::fs::read_dir(cases_dir)
+        .map_err(|e| format!("{}: {e}", cases_dir.display()))?
+        .filter_map(|e| e.ok()?.file_name().into_string().ok())
+        .filter(|n| n.ends_with(".ttl"))
+        .collect();
+    names.sort();
+    if names.is_empty() {
+        return Err(format!("{}: no .ttl case", cases_dir.display()));
     }
-    std::fs::create_dir_all(out_dir).map_err(io)?;
-    for (i, e) in entries.iter().enumerate() {
-        let slug = &e.case.slug;
-        std::fs::write(out_dir.join(format!("{slug}.jsonld")), &e.json).map_err(io)?;
-        std::fs::write(out_dir.join(format!("{slug}.html")), &e.html).map_err(io)?;
-        std::fs::write(out_dir.join(format!("{slug}.md")), page(i + 1, e, source)).map_err(io)?;
+    let mut entries = Vec::new();
+    for n in &names {
+        let text = std::fs::read_to_string(cases_dir.join(n)).map_err(|e| format!("{n}: {e}"))?;
+        let case = translate::translate(n.trim_end_matches(".ttl"), &text)?;
+        let e = entry(Found {
+            link: format!("{link}/{}.ttl", case.slug),
+            title: label(&case.slug),
+            about: case.title,
+            slug: case.slug,
+            policy: case.policies,
+        })?;
+        if e.incomplete {
+            return Err(format!(
+                "{}: a constraint reads as incomplete; the translation misses a term",
+                e.slug
+            ));
+        }
+        entries.push(e);
     }
-    std::fs::write(out_dir.join("index.md"), index(entries)).map_err(io)
+    Ok(Source {
+        id: "compliance",
+        name: "Compliance corpus",
+        intro: "[ds-odrl-compliance-rdf](https://github.com/ds-labs-org/ds-odrl-compliance-rdf) \
+is a corpus of ODRL test cases for policy engines, written in Turtle. Each case pairs a request \
+with the compliance report an engine must produce. The pages show the policies of each case, \
+translated to ODRL JSON-LD. The claims, the profile and the expected report are left out: they \
+are inputs of an engine, not of a reader.\n\n\
+Some terms of the corpus are not ODRL. A claim key (`dsc:ClaimKey`) is a blank node in Turtle. \
+The translation gives it an IRI of the case, so it reads as \"the claim\" followed by its key. \
+Inheritance (`dsc:inheritsFrom`) becomes ODRL's `inheritFrom`.\n"
+            .into(),
+        license: "Apache-2.0",
+        entries,
+    })
+}
+
+/// Renders the policies of a reference source. A document the renderer
+/// refuses is reported on stderr and left out.
+pub fn reference(
+    id: &'static str,
+    name: &'static str,
+    intro: &str,
+    license: &'static str,
+    found: Vec<Found>,
+) -> Source {
+    let entries = found
+        .into_iter()
+        .filter_map(|f| {
+            entry(f)
+                .map_err(|e| eprintln!("warning: {id}: left out: {e}"))
+                .ok()
+        })
+        .collect();
+    Source {
+        id,
+        name,
+        intro: intro.to_string(),
+        license,
+        entries,
+    }
 }
 
 /// "xone-exactly-one-factor-01" reads as "Xone exactly one factor 01".
@@ -133,92 +188,213 @@ fn cell(text: &str) -> String {
     one_line(text).replace('|', "/")
 }
 
-fn page(order: usize, e: &Entry, source: &str) -> String {
-    let slug = &e.case.slug;
-    let name = label(slug);
+fn reading(e: &Entry) -> String {
+    match (e.incomplete, e.warnings.len()) {
+        (true, _) => "incomplete condition".into(),
+        (false, 0) => "complete".into(),
+        (false, 1) => "1 warning".into(),
+        (false, n) => format!("{n} warnings"),
+    }
+}
+
+/// Writes the catalog under `out_dir`, which is emptied first.
+pub fn write_site(sources: &[Source], out_dir: &Path) -> Result<(), String> {
+    let io = |e: std::io::Error| format!("{}: {e}", out_dir.display());
+    if out_dir.exists() {
+        std::fs::remove_dir_all(out_dir).map_err(io)?;
+    }
+    for (i, s) in sources.iter().enumerate() {
+        let dir = out_dir.join(s.id);
+        std::fs::create_dir_all(&dir).map_err(io)?;
+        for e in &s.entries {
+            std::fs::write(dir.join(format!("{}.jsonld", e.slug)), &e.json).map_err(io)?;
+            std::fs::write(dir.join(format!("{}.html", e.slug)), &e.html).map_err(io)?;
+            std::fs::write(dir.join(format!("{}.md", e.slug)), page(s, e)).map_err(io)?;
+        }
+        std::fs::write(dir.join("index.md"), source_index(i + 1, s)).map_err(io)?;
+    }
+    std::fs::write(out_dir.join("index.md"), overview(sources)).map_err(io)
+}
+
+fn page(s: &Source, e: &Entry) -> String {
+    let (id, slug, title) = (s.id, &e.slug, one_line(&e.title));
     let desc = one_line(&format!(
-        "Compliance test case {slug}, read as prose: {}",
-        e.case.title
+        "{} policy {title}, read as prose. {}",
+        s.name, e.about
     ));
-    let what = cell(&e.case.title);
-    let warnings = if e.warnings.is_empty() {
-        "The renderer raised no warning for these policies.\n".to_string()
+    let mut notes = String::new();
+    if e.incomplete {
+        notes.push_str("A condition of this policy reads as \"an incomplete constraint\": the renderer could not read it.\n\n");
+    }
+    if e.warnings.is_empty() {
+        notes.push_str("The renderer raised no warning for this policy.\n");
     } else {
         let rows: String = e
             .warnings
             .iter()
             .map(|w| format!("| {} |\n", cell(w)))
             .collect();
-        format!(
-            "The renderer raised these warnings for these policies.\n\n| Warning |\n|---|\n{rows}"
-        )
+        notes.push_str(&format!(
+            "The renderer raised these warnings.\n\n| Warning |\n|---|\n{rows}"
+        ));
+    }
+    let about = if e.about.is_empty() {
+        "No description.".into()
+    } else {
+        cell(&e.about)
     };
+    format!(
+        "---
+title: {title}
+description: {desc}
+nav: catalog
+subnav: no
+stylesheet: examples/prose.css
+---
+# {title}
+
+A policy from the {name}. The table gives the source and what the policy shows, in the source's words.
+
+| Source | What it shows |
+|---|---|
+| [{link_text}]({link}) | {about} |
+
+## Policy
+
+{{{{file catalog/{id}/{slug}.jsonld}}}}
+
+## Reading
+
+The sentences `OdrlProse` writes for this policy, without a profile.
+
+{{{{rendered catalog/{id}/{slug}.html}}}}
+
+{notes}
+Back to the [{name}](/catalog/{id}/) or the [catalog](/catalog/).
+",
+        name = s.name,
+        link = e.link,
+        link_text = cell(e.link.rsplit('/').next().unwrap_or(&e.link)),
+    )
+}
+
+fn source_index(order: usize, s: &Source) -> String {
+    let rows: String = s
+        .entries
+        .iter()
+        .map(|e| {
+            format!(
+                "| [{}](/catalog/{}/{}/) | {} | {} |\n",
+                cell(&e.title),
+                s.id,
+                e.slug,
+                cell(&e.about),
+                reading(e)
+            )
+        })
+        .collect();
     format!(
         "---
 title: {name}
 label: {name}
-description: {desc}
+description: The policies of the {name}, as JSON-LD and as the sentences the renderer writes for them.
 nav: catalog
 order: {order}
 stylesheet: examples/prose.css
 ---
 # {name}
 
-A test case of the ds-odrl-compliance-rdf corpus. The table gives what the case tests, in the words of its authors.
+{intro}
+The Reading column says whether every condition of a policy reads, and how many warnings the renderer raised. License of the source: {license}.
 
-| Case | What it tests |
-|---|---|
-| [{slug}.ttl]({source}/{slug}.ttl) | {what} |
-
-## Policies
-
-The policies the case's request names, translated from Turtle to ODRL JSON-LD. The claims, the profile and the expected compliance report of the case are left out: they are inputs of an engine, not of a reader.
-
-{{{{file catalog/{slug}.jsonld}}}}
-
-## Reading
-
-The sentences `OdrlProse` writes for these policies, without a profile.
-
-{{{{rendered catalog/{slug}.html}}}}
-
-{warnings}
-Back to the [catalog](/catalog/).
-"
+| Policy | What it shows | Reading |
+|---|---|---|
+{rows}",
+        name = s.name,
+        intro = s.intro,
+        license = s.license,
     )
 }
 
-fn index(entries: &[Entry]) -> String {
-    let rows: String = entries
-        .iter()
-        .map(|e| {
-            format!(
-                "| [{}](/catalog/{}/) | {} |\n",
-                label(&e.case.slug),
-                e.case.slug,
-                cell(&e.case.title)
-            )
-        })
-        .collect();
+fn overview(sources: &[Source]) -> String {
+    let mut src_rows = String::new();
+    for s in sources {
+        let n = s.entries.len();
+        let complete = s
+            .entries
+            .iter()
+            .filter(|e| !e.incomplete && e.warnings.is_empty())
+            .count();
+        let incomplete = s.entries.iter().filter(|e| e.incomplete).count();
+        src_rows.push_str(&format!(
+            "| [{}](/catalog/{}/) | {n} | {complete} | {} | {incomplete} | {} |\n",
+            s.name,
+            s.id,
+            n - complete - incomplete,
+            s.license
+        ));
+    }
+    let head: String = sources.iter().map(|s| format!(" {} |", s.name)).collect();
+    let rule: String = sources.iter().map(|_| "---|").collect();
+    let mut cov = String::new();
+    let mut gaps = String::new();
+    for (group, f) in features::FEATURES {
+        let counts: Vec<usize> = sources
+            .iter()
+            .map(|s| s.entries.iter().filter(|e| e.features.contains(f)).count())
+            .collect();
+        let cells: String = counts.iter().map(|c| format!(" {c} |")).collect();
+        cov.push_str(&format!("| {group} | `{f}` |{cells}\n"));
+        let in_corpus = sources
+            .iter()
+            .zip(&counts)
+            .any(|(s, c)| s.id == "compliance" && *c > 0);
+        let users: Vec<&str> = sources
+            .iter()
+            .zip(&counts)
+            .filter(|(s, c)| s.id != "compliance" && **c > 0)
+            .map(|(s, _)| s.name)
+            .collect();
+        if !in_corpus && !users.is_empty() {
+            gaps.push_str(&format!("| `{f}` | {} |\n", users.join(", ")));
+        }
+    }
+    let gaps = if gaps.is_empty() {
+        "Every feature the reference policies use is also used by a case of the compliance corpus.\n".to_string()
+    } else {
+        format!(
+            "These features are used by reference policies and by no case of the compliance corpus. The corpus is measured on its policies as translated: an asset or party it describes outside a policy is not counted.\n\n| Feature | Used by |\n|---|---|\n{gaps}"
+        )
+    };
     format!(
         "---
-title: Compliance corpus catalog
-label: All cases
-description: Every test case of the ds-odrl-compliance-rdf corpus, its policies as ODRL JSON-LD and the sentences the renderer writes for them.
+title: Policy catalog
+label: Overview
+description: Real-world ODRL policies, from the ds-odrl-compliance-rdf corpus and from W3C, EDC and the Dataspace Protocol, as JSON-LD and as the sentences the renderer writes for them.
 nav: catalog
 order: 0
 ---
-# Compliance corpus catalog
+# Policy catalog
 
-[ds-odrl-compliance-rdf](https://github.com/ds-labs-org/ds-odrl-compliance-rdf) is a corpus of ODRL test cases for policy engines, written in Turtle. Each page below shows the policies of one case and the sentences ds-prose-rs writes for them.
+Each page of the catalog shows one ODRL policy and the sentences ds-prose-rs writes for it. The policies come from a test corpus for policy engines and from published references. None of them is kept in this repository. The pages are generated from the sources when the site is built.
 
-The pages are built from the corpus at the time the site is built. The build fails when a case does not translate, when the renderer refuses its policies, or when a condition reads as incomplete.
+## Sources
 
-Some terms of the corpus are not ODRL. A claim key (`dsc:ClaimKey`) is a blank node in Turtle. The translation gives it an IRI of the case, so it reads as \"the claim\" followed by its key. Inheritance (`dsc:inheritsFrom`) becomes ODRL's `inheritFrom`.
+A policy reads completely when every condition reads and the renderer raises no warning.
 
-| Case | What it tests |
-|---|---|
-{rows}"
+| Source | Policies | Complete | With warnings | Incomplete condition | License |
+|---|---|---|---|---|---|
+{src_rows}
+## Coverage
+
+The number of policies of each source that use a part of ODRL.
+
+| Group | Feature |{head}
+|---|---|{rule}
+{cov}
+## Gaps in the compliance corpus
+
+{gaps}"
     )
 }
 
@@ -259,7 +435,7 @@ mod tests {
 :request a dsc:Request ; dsc:policy :child .
 "#;
 
-    fn sample() -> Case {
+    fn sample() -> translate::Case {
         translate::translate("sample-01", CASE).unwrap()
     }
 
@@ -292,8 +468,25 @@ mod tests {
     }
 
     #[test]
-    fn the_sample_reads_as_complete_sentences() {
-        let e = entry(sample()).unwrap();
+    fn a_case_without_a_policy_is_an_error() {
+        let ttl = CASE.replace(":request a dsc:Request ; dsc:policy :child .", "");
+        assert!(translate::translate("sample-01", &ttl).is_err());
+    }
+
+    fn temp(name: &str) -> std::path::PathBuf {
+        let d =
+            std::env::temp_dir().join(format!("compliance-catalog-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn the_corpus_reads_as_complete_sentences() {
+        let cases = temp("cases");
+        std::fs::write(cases.join("sample-01.ttl"), CASE).unwrap();
+        let s = compliance(&cases, "https://example.org/cases").unwrap();
+        let e = &s.entries[0];
         assert!(
             e.html.contains("the claim mfa verified is equal to"),
             "{}",
@@ -301,19 +494,46 @@ mod tests {
         );
         assert!(!e.html.contains("<!--"));
         assert!(e.warnings.is_empty(), "{:?}", e.warnings);
+        assert_eq!(e.link, "https://example.org/cases/sample-01.ttl");
+        assert!(e.features.contains("xone") && e.features.contains("inheritFrom"));
+        std::fs::remove_dir_all(cases).unwrap();
     }
 
     #[test]
-    fn a_case_without_a_policy_is_an_error() {
-        let ttl = CASE.replace(":request a dsc:Request ; dsc:policy :child .", "");
-        assert!(translate::translate("sample-01", &ttl).is_err());
+    fn a_corpus_condition_that_reads_as_incomplete_fails_the_build() {
+        let cases = temp("incomplete");
+        let ttl = CASE.replace("dsc:key \"mfaVerified\"", "dsc:other \"x\"");
+        std::fs::write(cases.join("sample-01.ttl"), ttl).unwrap();
+        let err = compliance(&cases, "https://example.org/cases")
+            .err()
+            .unwrap();
+        assert!(err.contains("incomplete"), "{err}");
+        std::fs::remove_dir_all(cases).unwrap();
     }
 
     #[test]
-    fn the_site_has_an_index_and_three_files_per_case() {
-        let dir = std::env::temp_dir().join(format!("compliance-catalog-{}", std::process::id()));
-        write_site(&[entry(sample()).unwrap()], &dir, DEFAULT_SOURCE).unwrap();
-        let mut names: Vec<_> = std::fs::read_dir(&dir)
+    fn a_reference_keeps_an_incomplete_reading_as_a_finding() {
+        let found = sources::Found {
+            slug: "eg1".into(),
+            title: "Constraint references (eg1)".into(),
+            about: String::new(),
+            link: "https://w3c.github.io/poe/model/#x".into(),
+            policy: serde_json::json!({ "@type": "Set", "uid": "http://x/p",
+                "permission": [{ "target": "http://x/a", "action": "use",
+                                 "constraint": [{ "@id": "http://x/c1" }] }] }),
+        };
+        let s = reference("w3c", "W3C ODRL examples", "", "W3C", vec![found]);
+        assert!(s.entries[0].incomplete);
+    }
+
+    #[test]
+    fn the_site_has_an_overview_and_per_source_an_index_and_three_files_per_policy() {
+        let cases = temp("site-cases");
+        std::fs::write(cases.join("sample-01.ttl"), CASE).unwrap();
+        let s = compliance(&cases, "https://example.org/cases").unwrap();
+        let dir = temp("site");
+        write_site(&[s], &dir).unwrap();
+        let mut names: Vec<_> = std::fs::read_dir(dir.join("compliance"))
             .unwrap()
             .map(|e| e.unwrap().file_name().into_string().unwrap())
             .collect();
@@ -327,9 +547,13 @@ mod tests {
                 "sample-01.md"
             ]
         );
-        let page = std::fs::read_to_string(dir.join("sample-01.md")).unwrap();
-        assert!(page.contains("{{file catalog/sample-01.jsonld}}"));
-        assert!(page.contains("{{rendered catalog/sample-01.html}}"));
+        let page = std::fs::read_to_string(dir.join("compliance/sample-01.md")).unwrap();
+        assert!(page.contains("{{file catalog/compliance/sample-01.jsonld}}"));
+        assert!(page.contains("{{rendered catalog/compliance/sample-01.html}}"));
+        assert!(page.contains("\nsubnav: no\n"));
+        let overview = std::fs::read_to_string(dir.join("index.md")).unwrap();
+        assert!(overview.contains("| `xone` | 1 |"), "{overview}");
         std::fs::remove_dir_all(dir).unwrap();
+        std::fs::remove_dir_all(cases).unwrap();
     }
 }

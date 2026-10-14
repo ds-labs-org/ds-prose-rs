@@ -56,9 +56,10 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
-      # The catalog of the ds-odrl-compliance-rdf corpus, generated from its
-      # main branch at build time (nothing of it is kept in this repository).
-      # Fails when a case does not translate or does not read.
+      # The policy catalog, generated at build time from ds-odrl-compliance-rdf
+      # and the W3C, EDC and Dataspace Protocol examples (nothing of them is
+      # kept in this repository). Fails when a corpus case does not translate
+      # or does not read.
       - name: Generate the compliance catalog
         run: scripts/build-catalog.sh
 
