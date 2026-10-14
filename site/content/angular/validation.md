@@ -30,7 +30,7 @@ Each row is evaluated against `validationOptions` in `prose-angular/src/validati
 
 ## Profiles
 
-A profile is the text of an ODRL profile, JSON-LD or Turtle. The component does no network access. The `profile` input takes one text and `profiles` takes a list; a list wins, an empty list clears, and blank texts are dropped.
+A profile is the text of an ODRL profile, JSON-LD, or Turtle with the [Turtle build](/angular/interface/#prose-wasm-module). The component does no network access. The `profile` input takes one text and `profiles` takes a list; a list wins, an empty list clears, and blank texts are dropped.
 
 Each row is evaluated against `profileTexts` in the same file.
 

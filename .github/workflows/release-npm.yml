@@ -86,7 +86,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
-          tool: wasm-pack
+          tool: wasm-pack@0.15.0
       - uses: actions/setup-node@v4
         with:
           node-version: 24

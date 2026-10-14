@@ -49,14 +49,26 @@ async fn set_profile_renders_glossary() {
     assert!(text(&c).contains("may fine-tune"), "{}", text(&c));
 }
 
+#[cfg(feature = "turtle")]
 #[wasm_bindgen_test]
 async fn turtle_profile_reads_the_same() {
     let (c, mut h) = mount().await;
     h.set_profile(Some(RESEARCH_TTL.to_string()))
-        .expect("Turtle is read in the npm build");
+        .expect("Turtle is read in the Turtle build");
     settle().await;
     assert!(has_glossary(&c));
     assert!(text(&c).contains("may fine-tune"));
+}
+
+/// The default build has no Turtle reader: the profile is refused and the
+/// rendering keeps no glossary.
+#[cfg(not(feature = "turtle"))]
+#[wasm_bindgen_test]
+async fn turtle_profile_is_refused_without_the_turtle_build() {
+    let (c, mut h) = mount().await;
+    assert!(h.set_profile(Some(RESEARCH_TTL.to_string())).is_err());
+    settle().await;
+    assert!(!has_glossary(&c));
 }
 
 #[wasm_bindgen_test]

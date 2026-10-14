@@ -46,9 +46,16 @@ for (const file of files) {
 
   if (pkg.name === '@ds-labs/prose-wasm') {
     need(has('prose_wasm_bg.wasm'), `${tag}: no wasm`);
+    need(['prose_wasm_turtle.js', 'prose_wasm_turtle.d.ts', 'prose_wasm_turtle_bg.wasm'].every(has), `${tag}: no Turtle build (prose_wasm_turtle.js, .d.ts, _bg.wasm)`);
+    need(pkg.exports?.['./turtle']?.default === './prose_wasm_turtle.js', `${tag}: no ./turtle entry in package.json exports`);
     need(has('prose_wasm.js') && has('prose_wasm.d.ts'), `${tag}: no JS glue or types`);
-    const wasmBytes = Number(execFileSync('sh', ['-c', `tar -xzOf '${join(dir, file)}' package/prose_wasm_bg.wasm 2>/dev/null | wc -c`], { encoding: 'utf8' }));
+    const bytesOf = (name) => Number(execFileSync('sh', ['-c', `tar -xzOf '${join(dir, file)}' package/${name} 2>/dev/null | wc -c`], { encoding: 'utf8' }));
+    const wasmBytes = bytesOf('prose_wasm_bg.wasm');
+    const turtleBytes = bytesOf('prose_wasm_turtle_bg.wasm');
     need(wasmBytes > 100_000, `${tag}: wasm is only ${wasmBytes} bytes`);
+    // The default file leaves the Turtle reader out; the other has it.
+    need(turtleBytes > wasmBytes + 50_000, `${tag}: the Turtle build (${turtleBytes} bytes) is not larger than the default one (${wasmBytes} bytes)`);
+    need((pkg.files ?? []).includes('prose_wasm_turtle_bg.wasm'), `${tag}: package.json files does not list prose_wasm_turtle_bg.wasm`);
     need(pkg.dsProse?.['prose-yew'], `${tag}: dsProse.prose-yew not recorded`);
     // The public API a host relies on is in the types, not just the wasm.
     const dts = tar(file, ['-xzO', 'package/prose_wasm.d.ts']);

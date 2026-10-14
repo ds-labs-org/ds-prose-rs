@@ -18,3 +18,13 @@ edition = "2024"
 rust-version = "1.88"
 license = "Apache-2.0"
 repository = "https://github.com/ds-labs-org/ds-prose-rs"
+
+# The wasm that ships (npm package, demo): about 30% smaller over the wire
+# than `release`, with no measurable change in render time (measured
+# 2026-10-14). Native builds keep `release`.
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

@@ -21,6 +21,17 @@
   "type": "module",
   "main": "prose_wasm.js",
   "types": "prose_wasm.d.ts",
+  "exports": {
+    ".": {
+      "types": "./prose_wasm.d.ts",
+      "default": "./prose_wasm.js"
+    },
+    "./turtle": {
+      "types": "./prose_wasm_turtle.d.ts",
+      "default": "./prose_wasm_turtle.js"
+    },
+    "./*": "./*"
+  },
   "bin": {
     "ds-prose-validate": "ds-prose-validate.mjs"
   },
@@ -28,6 +39,10 @@
     "prose_wasm.js",
     "prose_wasm.d.ts",
     "prose_wasm_bg.wasm",
+    "prose_wasm_turtle.js",
+    "prose_wasm_turtle.d.ts",
+    "prose_wasm_turtle_bg.wasm",
+    "prose_wasm_turtle_bg.wasm.d.ts",
     "prose_wasm_bg.wasm.d.ts",
     "ds-prose-validate.mjs",
     "README.md",

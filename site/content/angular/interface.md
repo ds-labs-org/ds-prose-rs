@@ -17,7 +17,7 @@ The component is `ds-odrl-prose`, a standalone component with an empty template 
 |---|---|---|---|
 | `json` | `string` | required | The ODRL policy as JSON-LD text. A policy that cannot be read renders a `p.prose-error` with `role="alert"` inside the article, and the next valid input recovers. |
 | `articleClass` | `string` | `undefined` | Extra classes, separated by spaces, for the rendered `article.ds-prose`. Nothing else receives them. |
-| `profile` | `string \| null` | `null` | One ODRL profile as JSON-LD or Turtle text. Blank text means no profile. The component does no network access: fetch the text yourself. |
+| `profile` | `string \| null` | `null` | One ODRL profile as JSON-LD text, or Turtle with the [Turtle build](#prose-wasm-module). Blank text means no profile. The component does no network access: fetch the text yourself. |
 | `profiles` | `string[] \| null` | `null` | Several profiles. A list wins over `profile`, and an empty list clears the profile. |
 | `strict` | `boolean` | `false` | Validate with a closed vocabulary: ODRL plus the loaded profiles. |
 | `validation` | `ValidateOptions \| null` | `null` | The full validation options. They win over `strict`. |
@@ -55,6 +55,16 @@ To serve the file from another place, provide the token:
 
 {{source prose-angular/test/docs-examples.ts#wasm_url}}
 
+## `PROSE_WASM_MODULE`
+
+`PROSE_WASM_MODULE` is an `InjectionToken<() => Promise<ProseWasmModule>>` provided in root: the function that imports the build of `@ds-labs/prose-wasm` the component and the service run. The default, `() => import('@ds-labs/prose-wasm')`, reads profiles written in JSON-LD. The bundler puts that module in its own chunk, loaded on first render.
+
+To read Turtle profiles as well, provide the Turtle build and its wasm file. That file is about 30 KiB larger over the wire (brotli), so it is opt-in:
+
+{{source prose-angular/test/docs-examples.ts#turtle}}
+
+Copy `prose_wasm_turtle_bg.wasm` into your assets with the same kind of entry as below, with that file name in `glob`. Without the Turtle build, a Turtle profile emits `profileError` with a message that names the Turtle build.
+
 ## `ProseValidatorService`
 
 `ProseValidatorService` is provided in root. It validates a policy against profiles without rendering anything: a submit guard, a list of policies. It runs the same engine as `[strict]` and as the `ds-prose-validate` command, so the report is the same.
@@ -89,6 +99,8 @@ The package exports exactly these names from its entry point. Nothing else is pu
 |---|---|---|
 | `OdrlProseComponent` | class | The component. |
 | `PROSE_WASM_URL` | token | Where the wasm file is fetched from. |
+| `PROSE_WASM_MODULE` | token | Which build of `@ds-labs/prose-wasm` runs: JSON-LD only (default) or with Turtle. |
+| `ProseWasmModule` | type | The JavaScript module of `@ds-labs/prose-wasm`, either build. |
 | `ProseValidatorService` | class | Validation without rendering. |
 | `ProfileSummary` | type | What `profileLoaded` emits. |
 | `reportChanged` | function | Whether a report differs from the previous one in verdict or findings. This is the rule behind `validationChange`. |

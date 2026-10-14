@@ -128,7 +128,7 @@ profile.
 |---|---|---|
 | JSON-LD, compacted (`{"@context": ..., "@graph": [...]}` or one node) | always | no JSON-LD processor: string prefixes, `@vocab`, `@base`, `@language` and simple term definitions (`{"@id": ..., "@type": "@id"}`) in an inline `@context` are followed; a remote, scoped or `@import` context is not, with one warning naming it |
 | JSON-LD, expanded (a top-level array, like W3C's `ODRL22.json` or DPV's `.jsonld`) | always | |
-| Turtle | the `turtle` cargo feature (off by default; on in the npm build and the demo) | parsed by [oxttl](https://crates.io/crates/oxttl) into the same triples as JSON-LD, so a Turtle profile and its JSON-LD twin read as equal `ProfileVocab`s, in whatever order a tool wrote them |
+| Turtle | the `turtle` cargo feature (off by default; on in the demo and in the npm package's Turtle build, `@ds-labs/prose-wasm/turtle`) | parsed by [oxttl](https://crates.io/crates/oxttl) into the same triples as JSON-LD, so a Turtle profile and its JSON-LD twin read as equal `ProfileVocab`s, in whatever order a tool wrote them |
 | N-Triples | with the `turtle` feature | N-Triples is a subset of Turtle, so it is read as Turtle |
 | RDF/XML, others | no | RDF/XML is refused with `ProfileError::UnsupportedFormat`; with the `turtle` feature any other non-JSON text is tried as Turtle and fails with `ProfileError::Turtle`, without it with `UnsupportedFormat` |
 
@@ -963,12 +963,19 @@ to vendor or build. There is no edit mode in either.
 Both take a profile as text: `ProseHandle.setProfile(text | null)` returns
 the profile's summary as JSON and throws on a text that is not a profile,
 keeping the previous one; the Angular component has a `profile` input and
-`profileLoaded` and `profileError` outputs. The wasm is built with the
-`turtle` feature, so a profile can be JSON-LD or Turtle. The packages never
-fetch it; the host does.
+`profileLoaded` and `profileError` outputs. A profile is JSON-LD; Turtle is
+opt-in, because the Turtle reader costs about 30 KiB over the wire. The wasm
+package ships two builds of the same API: `@ds-labs/prose-wasm` with
+`prose_wasm_bg.wasm` (JSON-LD), and `@ds-labs/prose-wasm/turtle` with
+`prose_wasm_turtle_bg.wasm` (JSON-LD and Turtle; the `ds-prose-validate`
+command uses it). The Angular component takes the Turtle build through the
+`PROSE_WASM_MODULE` token. The packages never fetch a profile; the host does.
 
-The wasm grew in 0.4 for profiles (wasm-pack release build, `wasm-opt` off, measured on
-2026-10-11):
+Both builds use the `wasm-release` profile of the workspace `Cargo.toml`
+(`opt-level = "z"`, LTO, one codegen unit, symbols stripped), as does the
+demo's release build; native builds keep `release`. The wasm grew in 0.4 for
+profiles (wasm-pack, `wasm-opt` off; the earlier rows are the `release`
+profile, measured on 2026-10-11):
 
 | `prose_wasm_bg.wasm` | bytes | gzip -9 |
 |---|---|---|
@@ -976,6 +983,9 @@ The wasm grew in 0.4 for profiles (wasm-pack release build, `wasm-opt` off, meas
 | 0.4.0 without `turtle` | 774,473 | 260,984 |
 | 0.4.0 with `turtle`, before strict validation | 957,764 | 323,480 |
 | 0.4.0 with `turtle` and strict validation (as built by `scripts/build-npm-packages.sh`, 2026-10-12) | 1,226,818 | 409,877 |
+| the same, `release` profile, 2026-10-14 | 1,398,514 | 419,457 |
+| `prose_wasm_bg.wasm`, `wasm-release` profile, without `turtle` (2026-10-14) | 603,775 | 223,926 |
+| `prose_wasm_turtle_bg.wasm`, `wasm-release` profile, with `turtle` (2026-10-14) | 715,793 | 261,071 |
 
 The two npm packages and the Rust crates share one version number (0.4.0
 at the time of writing), so a number says which reader and renderer you have.
@@ -995,7 +1005,7 @@ node scripts/check-npm-packages.mjs  # check the tarballs
 ## Develop
 
 ```bash
-cargo test --workspace      # prose-core with turtle (prose-wasm turns it on)
+cargo test --workspace      # prose-core with turtle (prose-wasm turns it on by default)
 cargo test -p prose-core   # prose-core alone, without turtle
 cargo test -p prose-core --release --test validate_perf -- --ignored  # a time budget; ignored in debug
 node --test scripts/test/*.test.mjs   # the ds-prose-validate command, with a fake engine

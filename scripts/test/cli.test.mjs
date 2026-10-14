@@ -272,14 +272,14 @@ test('ordinary non-ASCII text is printed as it is', async () => {
 });
 
 // The command as a process, with a stub in place of the wasm module (a copy
-// of the script next to a prose_wasm.js that reads every policy as conforming
+// of the script next to a prose_wasm_turtle.js that reads every policy as conforming
 // unless it contains "VIOLATION"), for what only a real process shows: how
 // bytes are decoded, what a closed pipe does, what an uncaught error exits with.
 const scratch = mkdtempSync(join(tmpdir(), 'ds-prose-cli-test-'));
 after(() => rmSync(scratch, { recursive: true, force: true }));
 copyFileSync(new URL('../ds-prose-validate.mjs', import.meta.url), join(scratch, 'ds-prose-validate.mjs'));
-writeFileSync(join(scratch, 'prose_wasm_bg.wasm'), '');
-writeFileSync(join(scratch, 'prose_wasm.js'), `
+writeFileSync(join(scratch, 'prose_wasm_turtle_bg.wasm'), '');
+writeFileSync(join(scratch, 'prose_wasm_turtle.js'), `
 export function initSync() {}
 export class ProseValidator {
   validate(json) {

@@ -32,7 +32,7 @@ The build does not copy `prose_wasm_bg.wasm`, and the bundler does not either: t
 
 {{file examples/angular-assets.json}}
 
-The demo, `demo-angular`, builds with exactly this entry; a test compares the entry above with its `angular.json`. The component fetches `prose_wasm_bg.wasm` relative to the page's base href. To serve it from another place, provide `PROSE_WASM_URL`; see [Interface](/angular/interface/#prose-wasm-url).
+The demo, `demo-angular`, builds with exactly this entry; a test compares the entry above with its `angular.json`. The component fetches `prose_wasm_bg.wasm` relative to the page's base href. To serve it from another place, provide `PROSE_WASM_URL`; see [Interface](/angular/interface/#prose-wasm-url). To read Turtle profiles, use the Turtle build and its file, `prose_wasm_turtle_bg.wasm`; see [`PROSE_WASM_MODULE`](/angular/interface/#prose-wasm-module).
 
 The entry belongs to the `build` target only. A `test` target that renders the component needs the same entry, or the component shows its load error.
 

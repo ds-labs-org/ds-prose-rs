@@ -5,7 +5,7 @@
 //! `lib.rs` exposes these through wasm-bindgen as `validate`, `rules`,
 //! `ProseValidator` and the `ProseHandle` methods; everything here is plain
 //! Rust and tested on the host.
-use prose_core::profile::{OdrlVocab, ProfileVocab, Wording};
+use prose_core::profile::{OdrlVocab, ProfileError, ProfileVocab, Wording};
 use prose_core::validate::{
     Basis, Level, Options, RULES, RULESET, RuleId, RuleInfo, Tier, Validator,
 };
@@ -134,12 +134,27 @@ pub fn profile_list(v: &Value) -> Result<Vec<String>, String> {
     }
 }
 
-/// Reads each text as a profile (JSON-LD, or Turtle) into one wording. The
-/// error names the position of the text that is not a profile.
+/// The message a host sees for a profile that cannot be read. Without the
+/// `turtle` feature, a text that is not JSON-LD also names the build of the
+/// npm package that reads Turtle.
+pub fn profile_error(e: &ProfileError) -> String {
+    match e {
+        #[cfg(not(feature = "turtle"))]
+        ProfileError::UnsupportedFormat => format!(
+            "{e}; or use the build that reads Turtle, @ds-labs/prose-wasm/turtle (prose_wasm_turtle_bg.wasm)"
+        ),
+        _ => e.to_string(),
+    }
+}
+
+/// Reads each text as a profile (JSON-LD, or Turtle with the `turtle`
+/// feature) into one wording. The error names the position of the text that
+/// is not a profile.
 pub fn wording(texts: &[String]) -> Result<Wording, String> {
     let mut w = Wording::new();
     for (i, t) in texts.iter().enumerate() {
-        let p = ProfileVocab::parse(t).map_err(|e| format!("profile {}: {e}", i + 1))?;
+        let p = ProfileVocab::parse(t)
+            .map_err(|e| format!("profile {}: {}", i + 1, profile_error(&e)))?;
         w = w.with_profile(p);
     }
     Ok(w)

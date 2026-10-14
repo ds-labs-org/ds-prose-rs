@@ -19,6 +19,11 @@ handle.update(otherPolicyJsonText, 'my-class'); // re-render
 handle.destroy();                               // unmount
 ```
 
+Profiles written in Turtle need the Turtle build: import
+`@ds-labs/prose-wasm/turtle` instead, and serve `prose_wasm_turtle_bg.wasm`.
+It has the same API and is about 30 KiB larger over the wire (brotli), so it
+is opt-in. See Profiles and Serving the wasm.
+
 ## Documentation
 
 The [Angular docs](https://ds-labs-org.github.io/ds-prose-rs/angular/) describe the component that wraps this package, including how it loads the wasm file. The [site](https://ds-labs-org.github.io/ds-prose-rs/) has a demo of each side.
@@ -27,8 +32,16 @@ The [Angular docs](https://ds-labs-org.github.io/ds-prose-rs/angular/) describe 
 
 `setProfile(text)` loads the ODRL profile the prose is worded with: its
 labels replace local names in the sentences, and a glossary of the profile
-terms follows each policy. The text is JSON-LD or Turtle, as you fetched it
-(the package does no network access).
+terms follows each policy. The text is JSON-LD as you fetched it (the
+package does no network access), or Turtle with the Turtle build:
+
+```js
+import init, { ProseHandle } from '@ds-labs/prose-wasm/turtle';
+
+await init({ module_or_path: new URL('/prose_wasm_turtle_bg.wasm', document.baseURI) });
+```
+
+Without it, a Turtle text throws, and the message names the Turtle build.
 
 ```js
 const summary = JSON.parse(handle.setProfile(profileText));
@@ -101,7 +114,7 @@ The package installs `ds-prose-validate`, for CI:
 npx ds-prose-validate --strict --profile research.ttl policy.json
 ```
 
-Options: `--profile` (repeatable; JSON-LD or Turtle), `--strict`,
+The command runs the Turtle build. Options: `--profile` (repeatable; JSON-LD or Turtle), `--strict`,
 `--structural`, `--fail-closed`, `--deny-deprecated`, `--odrl common|core`,
 `--ruleset <n>`, `--rule <id>=<level>`, `--format text|json`,
 `--allow-incomplete`. A policy of `-` is read from standard input (once);
@@ -118,9 +131,12 @@ renders. Style it through the `prose-*` classes (`.ds-prose`, `.prose-policy`,
 
 ## Serving the wasm
 
-The package ships `prose_wasm_bg.wasm` next to the JavaScript. Your bundler
-does not copy it for you: serve it as a static asset and pass its URL to
-`init`. With the Angular CLI, one `angular.json` asset entry does it:
+The package ships `prose_wasm_bg.wasm` next to the JavaScript, and
+`prose_wasm_turtle_bg.wasm` next to `prose_wasm_turtle.js` (the `./turtle`
+entry). Each JavaScript file works only with its own wasm file. Your bundler
+does not copy the wasm for you: serve the one you use as a static asset and
+pass its URL to `init`. With the Angular CLI, one `angular.json` asset entry
+does it:
 
 ```json
 { "glob": "prose_wasm_bg.wasm", "input": "node_modules/@ds-labs/prose-wasm", "output": "/" }

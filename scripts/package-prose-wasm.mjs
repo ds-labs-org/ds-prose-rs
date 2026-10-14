@@ -4,6 +4,14 @@
 // README and LICENSE written here, so the package is not at the mercy of
 // wasm-pack's defaults, and the ds-prose-validate command copied in.
 //
+// Two builds of the same API, with the size-tuned `wasm-release` profile:
+//   prose_wasm.js, prose_wasm_bg.wasm                 JSON-LD profiles only
+//                                                     (the package's main entry)
+//   prose_wasm_turtle.js, prose_wasm_turtle_bg.wasm   JSON-LD and Turtle
+//                                                     (the `./turtle` entry)
+// Each glue file goes with its own wasm: wasm-bindgen numbers the exports it
+// generates, so the two are not interchangeable.
+//
 //   node scripts/package-prose-wasm.mjs [version]
 //
 // The version normally equals the Rust workspace's (they are released
@@ -31,13 +39,32 @@ if (!workspaceVersion) {
   process.exit(2);
 }
 
-rmSync(out, { recursive: true, force: true });
-mkdirSync(out, { recursive: true });
-execFileSync(
-  'wasm-pack',
-  ['build', join(root, 'prose-wasm'), '--release', '--target', 'web', '--out-dir', out, '--out-name', 'prose_wasm'],
-  { stdio: 'inherit' },
-);
+const turtleOut = join(root, 'dist-npm', 'prose-wasm-turtle');
+const wasmPack = (dir, name, ...cargoArgs) =>
+  execFileSync(
+    'wasm-pack',
+    ['build', join(root, 'prose-wasm'), '--profile', 'wasm-release', '--no-opt', '--target', 'web',
+      '--out-dir', dir, '--out-name', name, ...(cargoArgs.length ? ['--', ...cargoArgs] : [])],
+    { stdio: 'inherit' },
+  );
+for (const dir of [out, turtleOut]) {
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+}
+wasmPack(out, 'prose_wasm', '--no-default-features');
+wasmPack(turtleOut, 'prose_wasm_turtle');
+
+// Both entries declare the same API (up to the numbered internal exports).
+const types = (dir, name) =>
+  readFileSync(join(dir, `${name}.d.ts`), 'utf8').replaceAll(name, 'NAME').replace(/__wasm_bindgen_func_elem_\d+/g, 'ELEM');
+if (types(out, 'prose_wasm') !== types(turtleOut, 'prose_wasm_turtle')) {
+  console.error('prose_wasm.d.ts and prose_wasm_turtle.d.ts declare different APIs');
+  process.exit(1);
+}
+for (const f of ['prose_wasm_turtle.js', 'prose_wasm_turtle.d.ts', 'prose_wasm_turtle_bg.wasm', 'prose_wasm_turtle_bg.wasm.d.ts']) {
+  copyFileSync(join(turtleOut, f), join(out, f));
+}
+rmSync(turtleOut, { recursive: true, force: true });
 // wasm-pack writes a .gitignore of "*", which makes npm leave everything out.
 rmSync(join(out, '.gitignore'), { force: true });
 rmSync(join(out, 'package.json'), { force: true });
