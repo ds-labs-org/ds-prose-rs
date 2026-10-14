@@ -348,6 +348,9 @@ main ol,
 main blockquote {
   max-width: 65ch;
 }
+main h1,
+main h2,
+main h3,
 main p,
 main li,
 main blockquote {
