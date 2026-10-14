@@ -3,7 +3,7 @@
 Static site for ds-prose-rs. Node 22 or later, no dependencies.
 
 - `build.mjs` builds `content/*.md` into `dist/` and stamps the top navigation into the two demos. Environment: `SITE_BASE`, `SITE_OUT`, `SITE_DEMO_DIST`, `SITE_ANGULAR_DIST`, `SITE_SKIP_DEMOS=1`, `SITE_REQUIRE_CATALOG=1`.
-- `content/catalog/` is not in the repository: `scripts/build-catalog.sh` generates it from ds-odrl-compliance-rdf at build time. Without it the build writes a catalog page that says so; with `SITE_REQUIRE_CATALOG=1` (CI) it fails instead.
+- `content/catalog/` is not in the repository: `scripts/build-catalog.sh` generates it at build time from ds-odrl-compliance-rdf and the W3C, EDC and Dataspace Protocol examples. Without it the build writes a catalog page that says so; with `SITE_REQUIRE_CATALOG=1` (CI) it fails instead.
 - `lib/markdown.mjs` is the markdown renderer. Anything outside its grammar is escaped.
 - `lib/nav.mjs` is the only source of the top navigation. A demo `index.html` carries the markers `<!--ds-topnav-css-->` in its head and `<!--ds-topnav-->` in its body. A missing or repeated marker fails the build.
 - `assets/site.css` and `assets/site.js` hold the theme tokens, layout and behaviour.

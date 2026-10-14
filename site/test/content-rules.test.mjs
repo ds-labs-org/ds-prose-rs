@@ -71,6 +71,8 @@ test('the skip link is hidden until focused', () => {
 
 test('long tokens wrap rather than widen the page', () => {
   assert.match(CSS, /overflow-wrap:\s*anywhere/);
+  // A heading taken from a source (the catalog's) can hold a long token, such as "Permission/Obligation".
+  assert.match(CSS, /main h1,\s*main h2,\s*main h3,[^{]*\{[^}]*overflow-wrap:\s*anywhere/);
   assert.match(CSS, /\.code pre\s*\{[^}]*overflow:\s*auto/);
   assert.match(CSS, /\.table-scroll\s*\{[^}]*overflow-x:\s*auto/);
   assert.doesNotMatch(CSS, /overflow-x:\s*(clip|hidden)\s*;?\s*\}\s*\n*\s*body/);
