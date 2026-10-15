@@ -139,6 +139,67 @@ fn odrl_local(term: &str) -> Option<&str> {
         .or_else(|| (!term.contains(':')).then_some(term))
 }
 
+/// The policy metadata the reader reads, `timestamp` (the Dataspace
+/// Protocol's, on an agreement) and `summary`, if `key` spells one: bare,
+/// `odrl:` or `dspace:` prefixed, or as an ODRL or Dataspace Protocol IRI.
+fn metadata_term(key: &str) -> Option<&'static str> {
+    let local = key
+        .strip_prefix(ODRL_NS)
+        .or_else(|| key.strip_prefix("odrl:"))
+        .or_else(|| key.strip_prefix("dspace:"))
+        .or_else(|| {
+            key.strip_prefix("https://w3id.org/dspace/")
+                .and_then(|k| k.rsplit_once('/'))
+                .map(|(_, local)| local)
+        })
+        .unwrap_or(key);
+    ["timestamp", "summary"].into_iter().find(|t| *t == local)
+}
+
+/// When, as a note says it: "on 2026-10-15 at 10:00 UTC" for an
+/// `xsd:dateTime` or `xsd:date`; any other text "at" it, as written.
+fn when(s: &str) -> String {
+    let (date, time) = s.split_once('T').unwrap_or((s, ""));
+    let digits =
+        |b: &[u8], at: &[usize]| at.iter().all(|i| b.get(*i).is_some_and(u8::is_ascii_digit));
+    let d = date.as_bytes();
+    if d.len() != 10 || d[4] != b'-' || d[7] != b'-' || !digits(d, &[0, 1, 2, 3, 5, 6, 8, 9]) {
+        return format!("at {}", fmt_str(s));
+    }
+    if time.is_empty() {
+        return format!("on {date}");
+    }
+    let (clock, zone) = match time.strip_suffix('Z') {
+        Some(clock) => (clock, " UTC".to_string()),
+        None => match time
+            .len()
+            .checked_sub(6)
+            .filter(|i| time.is_char_boundary(*i))
+        {
+            Some(i) if time[i..].starts_with(['+', '-']) => {
+                (&time[..i], format!(" UTC{}", &time[i..]))
+            }
+            _ => (time, String::new()),
+        },
+    };
+    let c = clock.as_bytes();
+    let hh_mm = c.len() >= 5 && c[2] == b':' && digits(c, &[0, 1, 3, 4]);
+    let seconds = c.len() == 5
+        || (c.len() >= 8
+            && c[5] == b':'
+            && digits(c, &[6, 7])
+            && (c.len() == 8
+                || (c[8] == b'.' && c.len() > 9 && c[9..].iter().all(u8::is_ascii_digit))));
+    if !hh_mm || !seconds {
+        return format!("at {}", fmt_str(s));
+    }
+    let clock = match clock.len() {
+        8 => clock.strip_suffix(":00").unwrap_or(clock),
+        _ => clock,
+    };
+    format!("on {date} at {clock}{zone}")
+}
+
 /// The most constraint references one document's reading follows.
 const MAX_FOLLOWED: usize = 1000;
 
@@ -629,11 +690,8 @@ impl<'a> Reader<'a> {
         }
     }
 
-    fn unknown_keys(&mut self, o: &Obj, known: &[&str], what: &str) {
-        self.unknown_keys_but(o, known, &[], what);
-    }
-
-    /// As `unknown_keys`, with `also` known too.
+    /// Warns of each key of `o` that is not in `known` or `also`, nor in a
+    /// metadata vocabulary.
     fn unknown_keys_but(&mut self, o: &Obj, known: &[&str], also: &[String], what: &str) {
         // Sorted, not in document order: `serde_json` keeps document order when
         // its `preserve_order` feature is on (the edit module needs it), and
@@ -652,7 +710,14 @@ impl<'a> Reader<'a> {
     }
 
     fn policy(&mut self, o: &Obj) -> Policy {
-        self.unknown_keys(o, POLICY_KEYS, "a policy");
+        let mut metadata: Vec<(&'static str, &String)> = o
+            .keys()
+            .filter_map(|k| metadata_term(k).map(|t| (t, k)))
+            .collect();
+        // Timestamps first, then summaries, each in key order.
+        metadata.sort_by_key(|(t, k)| (*t != "timestamp", *k));
+        let read: Vec<String> = metadata.iter().map(|(_, k)| (*k).clone()).collect();
+        self.unknown_keys_but(o, POLICY_KEYS, &read, "a policy");
         let kind = match types(o)
             .iter()
             .map(|t| local_name(t))
@@ -703,6 +768,14 @@ impl<'a> Reader<'a> {
         intro.push('.');
 
         let mut notes = Vec::new();
+        for (term, key) in metadata {
+            for v in items(&o[key]) {
+                match self.metadata(term, &kind, v) {
+                    Some(note) => notes.push(note),
+                    None => self.warn(format!("skipped an unreadable {term}")),
+                }
+            }
+        }
         if let Some(p) = o.get("profile") {
             let ids: Vec<String> = items(p).into_iter().filter_map(ident).collect();
             for id in &ids {
@@ -771,6 +844,43 @@ impl<'a> Reader<'a> {
             notes,
             rules,
         }
+    }
+
+    /// The note one value of the metadata `term` reads as: "Agreed on ..." or
+    /// "Issued on ..." for a timestamp, "Summary (en): ..." for a summary.
+    /// `None` when the value is not a string, a number or a literal, or is
+    /// blank.
+    fn metadata(&self, term: &str, kind: &PolicyKind, v: &Value) -> Option<String> {
+        let (text, language) = match v {
+            Value::String(s) => (s.clone(), None),
+            Value::Number(n) if term == "timestamp" => (n.to_string(), None),
+            Value::Object(o) => (
+                o.get("@value")?.as_str()?.to_string(),
+                o.get("@language").and_then(Value::as_str),
+            ),
+            _ => return None,
+        };
+        let text = text.trim();
+        if text.is_empty() {
+            return None;
+        }
+        Some(match term {
+            "timestamp" => match kind {
+                PolicyKind::Agreement => format!("Agreed {}.", when(text)),
+                _ => format!("Issued {}.", when(text)),
+            },
+            _ => {
+                let label = match language {
+                    Some(l) => format!("Summary ({l})"),
+                    None => "Summary".to_string(),
+                };
+                let stop = match text.ends_with(['.', '!', '?']) {
+                    true => "",
+                    false => ".",
+                };
+                format!("{label}: {text}{stop}")
+            }
+        })
     }
 
     fn rule(&mut self, v: &Value, kind: RuleKind, inh: &Inherited) -> Rule {

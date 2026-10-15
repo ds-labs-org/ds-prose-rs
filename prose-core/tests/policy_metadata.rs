@@ -195,3 +195,17 @@ fn a_summary_on_a_rule_is_not_policy_metadata() {
         ["ignored unknown property \"summary\" on a rule"]
     );
 }
+
+#[test]
+fn a_timestamp_with_odd_characters_is_kept_as_written() {
+    for odd in [
+        "2026-10-15T\u{e9}00000",
+        "2026-10-15T10:00\u{e9}",
+        "2026-10-1\u{e9}T10:00Z",
+        "2026-10-15T1\u{e9}0000",
+        "T10:00",
+    ] {
+        let doc = read(agreement_at("timestamp", json!(odd)));
+        assert_eq!(notes(&doc), [format!("Agreed at {odd}.")], "{odd}");
+    }
+}
