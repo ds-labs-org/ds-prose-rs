@@ -144,5 +144,29 @@ Ok(
                 ],
             },
         ],
+        mentions: [
+            [
+                Mention {
+                    written: "http://example.com/party:alice",
+                    iri: "http://example.com/party:alice",
+                    label: None,
+                },
+                Mention {
+                    written: "http://example.com/party:bob",
+                    iri: "http://example.com/party:bob",
+                    label: None,
+                },
+                Mention {
+                    written: "http://example.com/data:set1",
+                    iri: "http://example.com/data:set1",
+                    label: None,
+                },
+                Mention {
+                    written: "https://example.com/geo/EU",
+                    iri: "https://example.com/geo/EU",
+                    label: None,
+                },
+            ],
+        ],
     },
 )

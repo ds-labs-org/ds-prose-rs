@@ -1,7 +1,9 @@
 #![cfg(not(target_arch = "wasm32"))]
 //! A reference in a target's or a party's refinement reads inside the
 //! rule's sentence; when the host found its IRI dereferences, it is a link
-//! there too. Only the reference is linked, never the asset or the party.
+//! there too. Only the reference is a `prose-reference` link and keeps its
+//! IRI in full; the asset or the party of the same IRI is a name, shown short
+//! (#45).
 use prose_yew::{OdrlProse, OdrlProseProps};
 use std::collections::BTreeSet;
 use std::rc::Rc;
@@ -34,11 +36,11 @@ async fn a_reference_in_the_sentence_is_a_link_when_checked() {
     assert_eq!(
         html.matches(&link("https://example.com/c/9")).count(),
         1,
-        "the reference is linked, the asset of the same IRI is not: {html}"
+        "the reference is a reference link, the asset of the same IRI is not: {html}"
     );
     assert!(
         html.contains(&format!(
-            "https://example.com/c/9 where the constraint defined at {} holds",
+            ">c/9</a> where the constraint defined at {} holds",
             link("https://example.com/c/9")
         )),
         "{html}"

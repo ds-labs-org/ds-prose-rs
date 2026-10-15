@@ -226,5 +226,24 @@ Ok(
                 ],
             },
         ],
+        mentions: [
+            [
+                Mention {
+                    written: "http://example.com/org:hospital",
+                    iri: "http://example.com/org:hospital",
+                    label: None,
+                },
+                Mention {
+                    written: "http://example.com/org:university",
+                    iri: "http://example.com/org:university",
+                    label: None,
+                },
+                Mention {
+                    written: "http://example.com/data:cohort-2026",
+                    iri: "http://example.com/data:cohort-2026",
+                    label: None,
+                },
+            ],
+        ],
     },
 )

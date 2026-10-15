@@ -38,7 +38,9 @@ mod words_ctx;
 /// The wording helpers the reader uses, public so an editor can show the
 /// same phrases for the same terms.
 pub mod wording {
-    pub use crate::words::{action, humanise, join, local_name, operand, operator, operator_for};
+    pub use crate::words::{
+        action, humanise, join, local_name, operand, operator, operator_for, short_iri,
+    };
 
     /// The (term, phrase) table [`operand`] draws on.
     pub fn known_left_operands() -> &'static [(&'static str, &'static str)] {
@@ -70,8 +72,8 @@ pub mod wording {
 }
 
 pub use model::{
-    Condition, Document, FollowUp, Gloss, Policy, PolicyGlossary, PolicyKind, Reading, Rule,
-    RuleKind,
+    Condition, Document, FollowUp, Gloss, Mention, Policy, PolicyGlossary, PolicyKind, Reading,
+    Rule, RuleKind,
 };
 
 /// Why a document could not be read at all.

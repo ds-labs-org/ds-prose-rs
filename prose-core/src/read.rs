@@ -248,6 +248,25 @@ fn when(s: &str) -> String {
     format!("on {date} at {clock}{zone}")
 }
 
+/// The properties that declare a node's label, as IRIs, in the order one
+/// is preferred to another on the same node.
+const LABEL_IRIS: &[&str] = &[
+    "http://www.w3.org/2000/01/rdf-schema#label",
+    "http://www.w3.org/2004/02/skos/core#prefLabel",
+    "http://purl.org/dc/terms/title",
+    "http://schema.org/name",
+];
+
+/// The prefixes a label property is usually written with, for a document
+/// that uses them without binding them.
+const LABEL_PREFIXES: &[(&str, &str)] = &[
+    ("rdfs", "http://www.w3.org/2000/01/rdf-schema#"),
+    ("skos", "http://www.w3.org/2004/02/skos/core#"),
+    ("dct", "http://purl.org/dc/terms/"),
+    ("dcterms", "http://purl.org/dc/terms/"),
+    ("schema", "http://schema.org/"),
+];
+
 /// The most constraint references one document's reading follows.
 const MAX_FOLLOWED: usize = 1000;
 
@@ -281,8 +300,10 @@ pub fn document_with(value: &Value, wording: &Wording) -> Result<Reading, ProseE
     };
     let mut doc = Document::default();
     let mut glossary = Vec::new();
+    let mut mentions = Vec::new();
     let nodes = policy_nodes(value);
     r.iris = Prefixes::of_document(value);
+    r.labels = declared_labels(value, &r.iris, r.ctx.langs());
     for v in declared_constraints(value) {
         if let Some(id) = ident(v) {
             let id = r.iri(&id);
@@ -335,9 +356,13 @@ pub fn document_with(value: &Value, wording: &Wording) -> Result<Reading, ProseE
                 glossary.push(PolicyGlossary {
                     terms: std::mem::take(&mut r.glossary),
                 });
+                r.mentioned.clear();
+                mentions.push(std::mem::take(&mut r.mentions));
             }
             // Read where a rule refers to it.
             Value::Object(o) if looks_like_constraint(o) && ident(v).is_some() => {}
+            // Read where the policy names it.
+            Value::Object(o) if label_of(o, &r.iris, &[]).is_some() && ident(v).is_some() => {}
             _ => r.warn("skipped a node that is not an ODRL policy"),
         }
     }
@@ -348,7 +373,99 @@ pub fn document_with(value: &Value, wording: &Wording) -> Result<Reading, ProseE
     Ok(Reading {
         document: doc,
         glossary,
+        mentions,
     })
+}
+
+/// The label each node of `v` declares for its identifier (expanded with
+/// `iris`), unless another identifier declares the same: that label would
+/// not tell them apart. The first node that labels an identifier wins.
+/// Contexts are not looked into. Iterative, as [`declared_constraints`].
+fn declared_labels(
+    v: &Value,
+    iris: &Prefixes,
+    langs: &[String],
+) -> std::collections::HashMap<String, String> {
+    let mut labels = std::collections::HashMap::new();
+    let mut stack = vec![v];
+    while let Some(x) = stack.pop() {
+        match x {
+            Value::Array(a) => stack.extend(a.iter().rev()),
+            Value::Object(o) => {
+                if let (Some(id), Some(label)) = (
+                    get(o, &["uid", "@id", "id"]).and_then(Value::as_str),
+                    label_of(o, iris, langs),
+                ) {
+                    let id = match id.contains(':') {
+                        true => iris.expand(id),
+                        false => id.to_string(),
+                    };
+                    labels.entry(id).or_insert(label);
+                }
+                let kids: Vec<&Value> = o
+                    .iter()
+                    .filter(|(k, _)| *k != "@context")
+                    .map(|(_, x)| x)
+                    .collect();
+                stack.extend(kids.into_iter().rev());
+            }
+            _ => {}
+        }
+    }
+    let mut uses: std::collections::HashMap<String, usize> = Default::default();
+    for l in labels.values() {
+        *uses.entry(l.clone()).or_default() += 1;
+    }
+    labels.retain(|_, l| uses[l] == 1);
+    labels
+}
+
+/// The label `o` declares: of its most preferred label property, the value
+/// in the first of `langs`, else untagged, else in English, else the first.
+fn label_of(o: &Obj, iris: &Prefixes, langs: &[String]) -> Option<String> {
+    let rank = |key: &str| {
+        let (prefix, local) = key.split_once(':')?;
+        let iri = iris.try_expand(key).or_else(|| {
+            LABEL_PREFIXES
+                .iter()
+                .find(|(p, _)| *p == prefix)
+                .map(|(_, ns)| format!("{ns}{local}"))
+        })?;
+        let iri = iri.replacen("https://schema.org/", "http://schema.org/", 1);
+        LABEL_IRIS.iter().position(|l| *l == iri)
+    };
+    let (_, value) = o
+        .iter()
+        .filter_map(|(k, v)| Some((rank(k)?, v)))
+        .min_by_key(|(r, _)| *r)?;
+    let values: Vec<(Option<&str>, &str)> = items(value)
+        .into_iter()
+        .filter_map(|x| match x {
+            Value::String(s) => Some((None, s.as_str())),
+            Value::Object(o) => Some((
+                o.get("@language").and_then(Value::as_str),
+                o.get("@value")?.as_str()?,
+            )),
+            _ => None,
+        })
+        .filter(|(_, s)| !s.trim().is_empty())
+        .collect();
+    let in_lang = |want: &str| {
+        values.iter().find(|(l, _)| {
+            l.is_some_and(|l| {
+                l.eq_ignore_ascii_case(want)
+                    || l.to_ascii_lowercase()
+                        .starts_with(&format!("{}-", want.to_ascii_lowercase()))
+            })
+        })
+    };
+    langs
+        .iter()
+        .find_map(|l| in_lang(l))
+        .or_else(|| values.iter().find(|(l, _)| l.is_none()))
+        .or_else(|| in_lang("en"))
+        .or(values.first())
+        .map(|(_, s)| s.trim().to_string())
 }
 
 /// The policies `o` inherits from, as written.
@@ -805,6 +922,12 @@ struct Reader<'a> {
     /// The document's prefixes, to tell two spellings of one constraint
     /// identifier (`ex:c1`, `http://ex.com/c1`) for the same IRI.
     iris: Prefixes,
+    /// The labels the document declares, by IRI ([`declared_labels`]).
+    labels: std::collections::HashMap<String, String>,
+    /// The IRIs the current policy's text names, and the same IRIs, for
+    /// de-duplication.
+    mentions: Vec<Mention>,
+    mentioned: std::collections::HashSet<String>,
 }
 
 /// What a rule inherits from its policy when it states none of its own.
@@ -849,6 +972,9 @@ impl<'a> Reader<'a> {
             inherited: 0,
             nesting: 0,
             iris: Prefixes::default(),
+            labels: Default::default(),
+            mentions: Vec::new(),
+            mentioned: Default::default(),
         }
     }
 
@@ -880,6 +1006,22 @@ impl<'a> Reader<'a> {
                 profile_name(p)
             ));
         }
+    }
+
+    /// An identifier the text names, as it reads: with the label the
+    /// document declares for it, else as written. An IRI (or a labelled
+    /// identifier) is noted among the policy's mentions.
+    fn named(&mut self, written: &str) -> String {
+        let iri = self.iri(written);
+        let label = self.labels.get(&iri).cloned();
+        if (label.is_some() || written.contains(':')) && self.mentioned.insert(iri.clone()) {
+            self.mentions.push(Mention {
+                written: written.to_string(),
+                iri,
+                label: label.clone(),
+            });
+        }
+        label.unwrap_or_else(|| written.to_string())
     }
 
     fn warn(&mut self, msg: impl Into<String>) {
@@ -1378,12 +1520,14 @@ impl<'a> Reader<'a> {
         let names = items(v)
             .into_iter()
             .filter_map(|e| match e {
-                Value::String(s) => Some(s.clone()),
+                Value::String(s) => Some(self.named(s)),
                 Value::Object(o) => {
                     let id = get(o, &["uid", "@id", "id"]).and_then(Value::as_str);
+                    let id = id.map(|id| self.named(id));
                     let collection = o.get("source").or_else(|| o.get("partOf")).and_then(ident);
+                    let collection = collection.map(|c| self.named(&c));
                     let mut text = match (id, collection) {
-                        (Some(id), None) => id.to_string(),
+                        (Some(id), None) => id,
                         (Some(id), Some(c)) => format!("{id} (a member of {c})"),
                         (None, Some(c)) => format!("any {noun} in the collection {c}"),
                         (None, None) => {
@@ -1604,7 +1748,10 @@ impl<'a> Reader<'a> {
                     // `id` and `uid` are the ODRL context's aliases of `@id`.
                     Some(id) => {
                         self.term(&id, TermKind::RightOperand, Some("right operand"));
-                        self.ctx.value(&id).unwrap_or(id)
+                        match self.ctx.value(&id) {
+                            Some(label) => label,
+                            None => self.named(&id),
+                        }
                     }
                     None => {
                         self.warn("skipped an unreadable right operand");

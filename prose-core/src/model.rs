@@ -102,6 +102,41 @@ pub struct Reading {
     /// `glossary[i]` explains the terms of `document.policies[i]`. Empty
     /// glossaries when no profile is loaded.
     pub glossary: Vec<PolicyGlossary>,
+    /// `mentions[i]` lists the IRIs the text of `document.policies[i]`
+    /// names, each once, in reading order: so a host can show each as a
+    /// short label and keep the IRI, without parsing the text.
+    pub mentions: Vec<Vec<Mention>>,
+}
+
+/// An IRI the prose names: a party, an asset or a collection of either, or
+/// a right operand.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Mention {
+    /// As the policy writes it: the text reads so where no label is declared.
+    pub written: String,
+    /// Expanded with the document's prefixes.
+    pub iri: String,
+    /// The label the document declares for it (`rdfs:label`, `dct:title`,
+    /// `skos:prefLabel` or `schema:name` on a node with that identifier),
+    /// which the text reads instead of the IRI.
+    pub label: Option<String>,
+}
+
+impl Mention {
+    /// How the text names it: its label, else the IRI as written.
+    pub fn text(&self) -> &str {
+        self.label.as_deref().unwrap_or(&self.written)
+    }
+
+    /// A short name to show for it: its label, else the IRI's last segment
+    /// ([`crate::wording::short_iri`]).
+    pub fn short_label(&self) -> &str {
+        match &self.label {
+            Some(l) => l,
+            None => crate::words::short_iri(&self.iri),
+        }
+    }
 }
 
 /// The profile terms one policy uses, each once, in reading order.
