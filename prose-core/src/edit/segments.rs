@@ -5,7 +5,7 @@ use super::model::*;
 use super::path::*;
 use super::rules::odrl_position;
 use crate::read::join_with;
-use crate::words::local_name;
+use crate::words::{self, local_name};
 use crate::words_ctx::WordCtx;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -273,17 +273,13 @@ impl SlotList {
 
 /// Sentences for every policy of the document.
 pub fn sentences(doc: &EditDoc) -> Vec<PolicyProse> {
-    sentences_in(doc, &WordCtx::plain())
+    sentences_with(doc, &crate::profile::Wording::default())
 }
 
 /// As [`sentences`], worded with the profiles `wording` holds.
 pub fn sentences_with(doc: &EditDoc, wording: &crate::profile::Wording) -> Vec<PolicyProse> {
-    // Without a profile no term is expanded, so the prefixes are not read.
-    let prefixes = match wording.is_empty() {
-        true => crate::profile::Prefixes::default(),
-        false => super::prefixes(doc),
-    };
-    sentences_in(doc, &WordCtx::new(wording, prefixes))
+    // Read even without a profile: a literal's datatype is expanded.
+    sentences_in(doc, &WordCtx::new(wording, super::prefixes(doc)))
 }
 
 fn sentences_in(doc: &EditDoc, ctx: &WordCtx) -> Vec<PolicyProse> {
@@ -1222,12 +1218,17 @@ fn cond_prose(
 }
 
 /// A right-operand value as it reads: an IRI a loaded profile declares as
-/// a value reads as its label, anything else as before.
+/// a value reads as its label, a duration in words, anything else as before.
 fn literal_display(ctx: &WordCtx, l: &Literal) -> String {
-    match l {
-        Literal::Iri(i) => ctx.value(i).unwrap_or_else(|| l.display()),
-        _ => l.display(),
-    }
+    let worded = match l {
+        Literal::Iri(i) => ctx.value(i),
+        Literal::Str(s) => words::duration(s),
+        Literal::Typed { value, datatype } if words::is_duration_type(&ctx.expand(datatype)) => {
+            words::duration(value)
+        }
+        _ => None,
+    };
+    worded.unwrap_or_else(|| l.display())
 }
 
 /// A condition on one line, for places a nested list does not fit.

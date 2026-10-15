@@ -22,15 +22,6 @@ pub(crate) struct WordCtx<'a> {
 }
 
 impl<'a> WordCtx<'a> {
-    /// The built-in wording.
-    pub(crate) fn plain() -> WordCtx<'static> {
-        WordCtx {
-            wording: None,
-            prefixes: Cow::Owned(Prefixes::default()),
-            namespaces: HashMap::new(),
-        }
-    }
-
     /// `w`, with a policy's compact terms expanded by `prefixes`.
     pub(crate) fn new(w: &'a Wording, prefixes: Prefixes) -> WordCtx<'a> {
         let mut namespaces = HashMap::new();

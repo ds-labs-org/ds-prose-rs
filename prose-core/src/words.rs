@@ -157,3 +157,94 @@ pub fn join(items: &[String]) -> String {
         [init @ .., last] => format!("{} and {}", init.join(", "), last),
     }
 }
+
+const XSD_DURATION: &str = "http://www.w3.org/2001/XMLSchema#duration";
+
+/// Whether a literal's datatype, expanded as far as the policy's prefixes
+/// go, is xsd:duration: the full IRI, or `xsd:`/`xs:` left unbound.
+pub(crate) fn is_duration_type(datatype: &str) -> bool {
+    matches!(datatype, XSD_DURATION | "xsd:duration" | "xs:duration")
+}
+
+/// An ISO 8601 / xsd:duration in words: `PT24H` gives "24 hours",
+/// `P1Y6M` "1 year and 6 months", `-P3D` "minus 3 days". Zero parts are
+/// left out unless all are zero (`P0D` gives "0 days"); only seconds may
+/// be fractional, and are kept as written. `None` unless `s` is strictly
+/// `-?P(nY)?(nM)?(nW)?(nD)?(T(nH)?(nM)?(n(.n)?S)?)?` with at least one
+/// part, and one after a `T`.
+pub(crate) fn duration(s: &str) -> Option<String> {
+    let (minus, body) = match s.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, s),
+    };
+    let body = body.strip_prefix('P')?;
+    let (date, time) = match body.split_once('T') {
+        Some((d, t)) => (d, Some(t)),
+        None => (body, None),
+    };
+    let mut parts = duration_parts(
+        date,
+        &[('Y', "year"), ('M', "month"), ('W', "week"), ('D', "day")],
+    )?;
+    if let Some(t) = time {
+        let time_parts = duration_parts(t, &[('H', "hour"), ('M', "minute"), ('S', "second")])?;
+        if time_parts.is_empty() {
+            return None;
+        }
+        parts.extend(time_parts);
+    }
+    let last = parts.last()?.clone();
+    let nonzero: Vec<String> = parts
+        .into_iter()
+        .filter(|(n, _)| n.bytes().any(|b| b.is_ascii_digit() && b != b'0'))
+        .map(|(n, unit)| match n.as_str() {
+            "1" => format!("1 {unit}"),
+            _ => format!("{n} {unit}s"),
+        })
+        .collect();
+    if nonzero.is_empty() {
+        return Some(format!("{} {}s", last.0, last.1));
+    }
+    let words = join(&nonzero);
+    Some(if minus {
+        format!("minus {words}")
+    } else {
+        words
+    })
+}
+
+/// The `<number><designator>` parts of `s`, designators in the order given,
+/// each at most once, as (number without leading zeros, unit); the number
+/// before `S` may have a fraction. `None` when `s` is not such a list.
+fn duration_parts(s: &str, units: &[(char, &'static str)]) -> Option<Vec<(String, &'static str)>> {
+    let mut out = Vec::new();
+    let mut rest = s;
+    let mut next = 0;
+    while !rest.is_empty() {
+        let end = rest.find(|c: char| !c.is_ascii_digit() && c != '.')?;
+        let (num, after) = rest.split_at(end);
+        let d = after.chars().next()?;
+        let at = units[next..].iter().position(|(x, _)| *x == d)? + next;
+        let (int, frac) = match num.split_once('.') {
+            Some((i, f)) if d == 'S' => (i, Some(f)),
+            Some(_) => return None,
+            None => (num, None),
+        };
+        let digits = |x: &str| !x.is_empty() && x.bytes().all(|b| b.is_ascii_digit());
+        if !digits(int) || frac.is_some_and(|f| !digits(f)) {
+            return None;
+        }
+        let int = match int.trim_start_matches('0') {
+            "" => "0",
+            n => n,
+        };
+        let n = match frac {
+            Some(f) => format!("{int}.{f}"),
+            None => int.to_string(),
+        };
+        out.push((n, units[at].1));
+        next = at + 1;
+        rest = &after[1..];
+    }
+    Some(out)
+}

@@ -97,7 +97,7 @@ fn left_operand_label_with_article() {
     );
     assert_eq!(
         rule.conditions[1].text,
-        "the retention period is at most P2Y"
+        "the retention period is at most 2 years"
     );
     // A label that already starts with an article gets no second one.
     let w = Wording::new().with_profile(vocab(json!({
