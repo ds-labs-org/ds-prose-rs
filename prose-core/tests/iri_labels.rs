@@ -258,3 +258,32 @@ fn the_short_label_is_the_last_meaningful_segment() {
     assert_eq!(short_iri("urn:"), "urn");
     assert_eq!(short_iri("plain"), "plain");
 }
+
+/// A node that does more than label an IRI is not read as a label only: a
+/// labelled rule, or a dataset holding a policy, left out of the reading
+/// is still reported (#45 review).
+#[test]
+fn a_labelled_node_with_more_than_a_label_is_still_reported_as_skipped() {
+    let rule = read(&graph(
+        json!({"action": "play", "target": "http://ex.com/a1"}),
+        vec![json!({"@id": "http://ex.com/r2", "@type": "Prohibition",
+            "rdfs:label": "No sharing", "action": "distribute", "target": "http://ex.com/a1"})],
+    ));
+    assert_eq!(
+        rule.document.warnings,
+        ["skipped a node that is not an ODRL policy"]
+    );
+    let dataset = read(&graph(
+        json!({"action": "play", "target": "http://ex.com/a1"}),
+        vec![
+            json!({"@id": "http://ex.com/ds", "@type": "http://www.w3.org/ns/dcat#Dataset",
+            "dct:title": "A dataset",
+            "http://www.w3.org/ns/odrl/2/hasPolicy": {"@type": "Offer", "uid": "urn:q",
+                "permission": [{"action": "play", "target": "http://ex.com/a2"}]}}),
+        ],
+    ));
+    assert_eq!(
+        dataset.document.warnings,
+        ["skipped a node that is not an ODRL policy"]
+    );
+}
