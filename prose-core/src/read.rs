@@ -558,6 +558,9 @@ struct Act {
 struct Named {
     names: Vec<String>,
     refs: Vec<String>,
+    /// Whether a name ends in a refinement ("X where a; b"), which nothing
+    /// may follow in the same clause without reading as part of it.
+    refined: bool,
 }
 
 impl<'a> Reader<'a> {
@@ -846,7 +849,9 @@ impl<'a> Reader<'a> {
 
         // Party functions: as the verb's object or after the target when
         // the rule's one action has a phrasing for them, else in a
-        // parenthesis after the target.
+        // parenthesis after the target. A refined object party goes after
+        // the target, so its refinement ends the clause instead of running
+        // into the target: "compensate, for T, X where a; b".
         let one_action = match actions.as_slice() {
             [a] => odrl_local(&a.term),
             _ => None,
@@ -869,8 +874,12 @@ impl<'a> Reader<'a> {
             let names = join(&parties.names);
             match one_action.and_then(|a| phrase(function, a)) {
                 Some(Phrase::Object(prep)) => {
-                    action = format!("{action} {names}");
-                    if !target_text.is_empty() {
+                    if target_text.is_empty() {
+                        action = format!("{action} {names}");
+                    } else if parties.refined {
+                        target_text = format!(", {prep}{target_text}, {names}");
+                    } else {
+                        action = format!("{action} {names}");
                         target_text = format!(" {prep}{target_text}");
                     }
                 }
@@ -1016,6 +1025,7 @@ impl<'a> Reader<'a> {
             return Named::default();
         };
         let mut refs = Vec::new();
+        let mut refined = false;
         let names = items(v)
             .into_iter()
             .filter_map(|e| match e {
@@ -1042,6 +1052,7 @@ impl<'a> Reader<'a> {
                             })
                             .collect();
                         text.push_str(&format!(" where {}", parts.join("; ")));
+                        refined = true;
                     }
                     Some(text)
                 }
@@ -1051,7 +1062,11 @@ impl<'a> Reader<'a> {
                 }
             })
             .collect();
-        Named { names, refs }
+        Named {
+            names,
+            refs,
+            refined,
+        }
     }
 
     // --- actions ----------------------------------------------------------
