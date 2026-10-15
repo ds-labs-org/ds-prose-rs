@@ -233,6 +233,11 @@ pub struct PolicyNode {
     /// Raw; `None` = key absent.
     pub conflict: Option<String>,
     pub inherit_from: Vec<String>,
+    /// The policy's metadata as read, one `(term, value)` per value:
+    /// `("timestamp", ..)` and `("summary", ..)`, whatever their key's
+    /// spelling. Shown as notes, never edited: the writer keeps the keys as
+    /// they were written.
+    pub metadata: Vec<(String, serde_json::Value)>,
     pub permission: Vec<RuleNode>,
     pub prohibition: Vec<RuleNode>,
     pub obligation: Vec<RuleNode>,

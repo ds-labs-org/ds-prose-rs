@@ -650,7 +650,16 @@ fn policy_prose(ctx: &WordCtx, i: usize, p: &PolicyNode) -> PolicyProse {
             other => format!("resolved by the strategy {other}"),
         },
     };
-    out.notes = vec![
+    let agreement = local_name(&p.kind) == "Agreement";
+    out.notes = p
+        .metadata
+        .iter()
+        .filter_map(|(term, v)| crate::read::metadata_note(term, agreement, v))
+        .map(|note| Sentence {
+            segments: vec![text(&note)],
+        })
+        .collect();
+    out.notes.extend([
         Sentence {
             segments: vec![
                 text("Applies to "),
@@ -741,7 +750,7 @@ fn policy_prose(ctx: &WordCtx, i: usize, p: &PolicyNode) -> PolicyProse {
                 text("."),
             ],
         },
-    ];
+    ]);
     out.refinements = refinement_groups(ctx, &path, &p.action);
 
     let inh = Inh {

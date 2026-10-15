@@ -6,7 +6,7 @@ use super::model::*;
 use crate::ProseError;
 use crate::read::{
     MAX_DEPTH, ODRL_NS, POLICY_KEYS, QUIET_PREFIXES, RULE_KEYS, bare_reference, get, ident, items,
-    looks_like_policy, policy_nodes, types,
+    looks_like_policy, metadata_keys, metadata_note, policy_nodes, types,
 };
 use crate::words::local_name;
 
@@ -59,7 +59,11 @@ pub fn read_model_value(value: &Value) -> Result<EditDoc, ProseError> {
     doc.shape = shape;
     doc.origin = origin;
     doc.warnings = r.warnings;
-    doc.unread = unread_odrl_keys(value);
+    // A metadata key the reader read is not unread, however it is spelled.
+    doc.unread = unread_odrl_keys(value)
+        .into_iter()
+        .filter(|k| !r.metadata_read.contains(k))
+        .collect();
     Ok(doc)
 }
 
@@ -68,6 +72,8 @@ pub(crate) struct Reader {
     pub warnings: Vec<String>,
     /// The same messages, for de-duplication in constant time.
     seen: std::collections::HashSet<String>,
+    /// The keys read as a policy's metadata.
+    metadata_read: std::collections::HashSet<String>,
 }
 
 fn locked_origin(v: &Value) -> Option<Origin> {
@@ -83,8 +89,16 @@ impl Reader {
     }
 
     fn unknown_keys(&mut self, o: &Obj, known: &[&str], what: &str) {
+        self.unknown_keys_but(o, known, &[], what);
+    }
+
+    /// As `unknown_keys`, with `also` known too.
+    fn unknown_keys_but(&mut self, o: &Obj, known: &[&str], also: &[&String], what: &str) {
         for k in o.keys() {
-            if known.contains(&k.as_str()) || QUIET_PREFIXES.iter().any(|p| k.starts_with(p)) {
+            if known.contains(&k.as_str())
+                || also.contains(&k)
+                || QUIET_PREFIXES.iter().any(|p| k.starts_with(p))
+            {
                 continue;
             }
             self.warn(format!("ignored unknown property \"{k}\" on {what}"));
@@ -99,7 +113,20 @@ impl Reader {
                 ..PolicyNode::default()
             };
         };
-        self.unknown_keys(o, POLICY_KEYS, "a policy");
+        let keys = metadata_keys(o);
+        let read: Vec<&String> = keys.iter().map(|(_, k)| *k).collect();
+        self.unknown_keys_but(o, POLICY_KEYS, &read, "a policy");
+        let mut metadata = Vec::new();
+        for (term, key) in keys {
+            self.metadata_read.insert(key.clone());
+            for v in items(&o[key]) {
+                // Agreement or not, a value reads or it does not.
+                match metadata_note(term, false, v) {
+                    Some(_) => metadata.push((term.to_string(), v.clone())),
+                    None => self.warn(format!("skipped an unreadable {term}")),
+                }
+            }
+        }
         let ts = types(o);
         let kind = ts
             .iter()
@@ -120,6 +147,7 @@ impl Reader {
             profile: strings(o.get("profile")),
             conflict: o.get("conflict").and_then(ident),
             inherit_from: strings(o.get("inheritFrom")),
+            metadata,
             permission: self.rules(o.get("permission")),
             prohibition: self.rules(o.get("prohibition")),
             obligation: self.rules(o.get("obligation")),

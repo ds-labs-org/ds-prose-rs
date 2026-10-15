@@ -24,7 +24,8 @@ pub struct Policy {
     pub heading: String,
     /// One sentence on what the policy is and who it is between.
     pub intro: String,
-    /// Profile, conflict strategy and inheritance, one clause each.
+    /// When it was made (`timestamp`), its summary, then profile, conflict
+    /// strategy and inheritance, one sentence each.
     pub notes: Vec<String>,
     pub rules: Vec<Rule>,
 }
