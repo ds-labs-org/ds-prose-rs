@@ -1916,7 +1916,9 @@ impl<'a> Reader<'a> {
                             duration(s).unwrap_or_else(|| s.clone())
                         }
                         Value::String(s) if datatype.is_some() => s.clone(),
-                        Value::String(s) => fmt_str(s),
+                        // No datatype (perhaps a language tag): the same plain
+                        // string literal as a bare `"P30D"`, so read alike.
+                        Value::String(s) => duration(s).unwrap_or_else(|| fmt_str(s)),
                         // Sorted keys, as v0.1 printed them (it had no `preserve_order`).
                         other => sorted(other).to_string(),
                     };
