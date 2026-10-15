@@ -136,12 +136,13 @@ fn slot_display_uses_label_raw_unchanged() {
         (academic.1.as_str(), academic.2.as_str()),
         ("ex:academic", "academic research")
     );
-    // A typed literal is not a profile term and reads as before.
+    // A typed literal is not a profile term; a duration reads in words
+    // (#47), its raw text as written.
     let period = slot_at(
         &all,
         "policy[0].permission[0].constraint[1]#rightOperand[0]",
     );
-    assert_eq!((period.1.as_str(), period.2.as_str()), ("P2Y", "P2Y"));
+    assert_eq!((period.1.as_str(), period.2.as_str()), ("P2Y", "2 years"));
     // An undeclared term and an ODRL term keep the built-in wording.
     let distill = slot_at(&all, "policy[0].permission[1].action[0]#name");
     assert_eq!(distill.2, "distill");

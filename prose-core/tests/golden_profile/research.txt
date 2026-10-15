@@ -37,7 +37,7 @@ Ok(
                                     reference: None,
                                 },
                                 Condition {
-                                    text: "the retention period is at most P2Y",
+                                    text: "the retention period is at most 2 years",
                                     children: [],
                                     reference: None,
                                 },
