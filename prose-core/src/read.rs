@@ -473,6 +473,8 @@ struct Reader<'a> {
     declared: std::collections::HashMap<String, Value>,
     following: Vec<String>,
     followed: usize,
+    /// How deep the constraint being read is nested, references included.
+    nesting: usize,
     /// The document's prefixes, to tell two spellings of one constraint
     /// identifier (`ex:c1`, `http://ex.com/c1`) for the same IRI.
     iris: Prefixes,
@@ -498,6 +500,7 @@ impl<'a> Reader<'a> {
             declared: Default::default(),
             following: Vec::new(),
             followed: 0,
+            nesting: 0,
             iris: Prefixes::default(),
         }
     }
@@ -948,7 +951,24 @@ impl<'a> Reader<'a> {
 
     // --- constraints ------------------------------------------------------
 
+    /// The reading of one constraint, nested no deeper than [`MAX_DEPTH`]
+    /// levels in all: references followed nest it as deep as JSON nesting
+    /// does, and a chain of them in a flat `@graph` is not bounded by the
+    /// parser's depth limit.
     fn constraint(&mut self, v: &Value) -> Condition {
+        if self.nesting >= MAX_DEPTH {
+            self.warn(format!(
+                "constraints nested deeper than {MAX_DEPTH} levels are not read"
+            ));
+            return Condition::leaf("a constraint nested too deep to read holds");
+        }
+        self.nesting += 1;
+        let read = self.constraint_here(v);
+        self.nesting -= 1;
+        read
+    }
+
+    fn constraint_here(&mut self, v: &Value) -> Condition {
         let reference = match v {
             Value::String(id) => Some(id.clone()),
             Value::Object(o) => bare_reference(o),
