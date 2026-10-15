@@ -1246,7 +1246,9 @@ impl<'a> Reader<'a> {
             Some("Offer") => PolicyKind::Offer,
             Some("Agreement") => PolicyKind::Agreement,
             Some(other) => PolicyKind::Other(other.to_string()),
-            None => PolicyKind::Other("Policy".into()),
+            // ODRL IM 2.1.1: a policy with no subclass, typed only as
+            // `Policy` or not at all, is a Set.
+            None => PolicyKind::Set,
         };
         let uid = get(o, &["uid", "@id", "id"]).and_then(ident);
         let class = types(o).iter().find_map(|t| self.ctx.policy_class(t));
