@@ -440,3 +440,57 @@ fn a_long_inheritance_cycle_is_cut_short_and_says_so() {
         "Inherited from urn:policy:1: Anyone may use urn:asset:1."
     );
 }
+
+#[test]
+fn a_policy_that_inherits_only_from_itself_still_warns() {
+    let doc = read(json!({ "@type": "Set", "uid": "urn:c", "inheritFrom": "urn:c" }));
+    assert_eq!(doc.warnings, [NO_RULES]);
+    let p = &doc.policies[0];
+    assert!(p.rules.is_empty());
+    assert_eq!(
+        p.notes,
+        ["Inherits the rules of urn:c, but no rule comes from there."]
+    );
+}
+
+#[test]
+fn a_child_of_a_parent_without_rules_says_it_has_none() {
+    let doc = read(json!({ "@graph": [
+        { "@type": "Set", "uid": "urn:p", "assigner": "urn:party:a" },
+        { "@type": "Set", "uid": "urn:c", "inheritFrom": "urn:p" }
+    ]}));
+    assert_eq!(doc.warnings, [NO_RULES]);
+    let child = policy(&doc, "urn:c");
+    assert!(child.rules.is_empty());
+    assert_eq!(
+        child.notes,
+        ["Inherits the rules of urn:p, but no rule comes from there."]
+    );
+}
+
+#[test]
+fn policies_that_inherit_only_from_each_other_warn() {
+    // Neither lacks a parent, so only the inheritance can raise the warning.
+    let doc = read(json!({ "@graph": [
+        { "@type": "Set", "uid": "urn:p", "inheritFrom": "urn:c" },
+        { "@type": "Set", "uid": "urn:c", "inheritFrom": "urn:p" }
+    ]}));
+    assert_eq!(doc.warnings, [NO_RULES]);
+    assert_eq!(
+        policy(&doc, "urn:c").notes,
+        ["Inherits the rules of urn:p, but no rule comes from there."]
+    );
+}
+
+#[test]
+fn a_grandparent_elsewhere_is_named_through_a_parent_without_rules() {
+    let doc = read(json!({ "@graph": [
+        { "@type": "Set", "uid": "urn:p", "inheritFrom": "urn:g" },
+        { "@type": "Set", "uid": "urn:c", "inheritFrom": "urn:p" }
+    ]}));
+    assert_eq!(doc.warnings, Vec::<String>::new());
+    assert_eq!(
+        policy(&doc, "urn:c").notes,
+        ["All of its rules come from the ancestor policy urn:g, which is not in this document."]
+    );
+}
