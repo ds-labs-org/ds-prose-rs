@@ -50,7 +50,7 @@ function checkProps(heading, text, struct) {
   return fields.length;
 }
 
-test('OdrlProse: the property table is the OdrlProseProps struct', () => assert.equal(checkProps('OdrlProse', LIB, 'OdrlProseProps'), 6));
+test('OdrlProse: the property table is the OdrlProseProps struct', () => assert.equal(checkProps('OdrlProse', LIB, 'OdrlProseProps'), 7));
 test('OdrlProseView: the property table is the OdrlProseViewProps struct', () => assert.equal(checkProps('OdrlProseView', VIEW, 'OdrlProseViewProps'), 9));
 test('ProseGlossary: the property table is the GlossaryProps struct', () => checkProps('ProseGlossary', LIB, 'GlossaryProps'));
 test('ProseProblems: the property table is the ProseProblemsProps struct', () => checkProps('ProseProblems', PROBLEMS, 'ProseProblemsProps'));

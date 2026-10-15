@@ -19,6 +19,7 @@ Ok(
                         refinements: [],
                         conditions: [],
                         follow_ups: [],
+                        references: [],
                     },
                     Rule {
                         kind: Permission,
@@ -27,6 +28,7 @@ Ok(
                         refinements: [],
                         conditions: [],
                         follow_ups: [],
+                        references: [],
                     },
                 ],
             },

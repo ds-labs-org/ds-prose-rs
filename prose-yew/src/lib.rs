@@ -6,7 +6,8 @@
 //! Classes: `ds-prose` (root), `prose-policy`, `prose-rules`, `prose-rule`
 //! plus `prose-permission` / `prose-prohibition` / `prose-obligation`,
 //! `prose-rule-sentence`, `prose-label`, `prose-notes`, `prose-warnings`,
-//! `prose-error`, and in the glossary of profile terms ([`ProseGlossary`])
+//! `prose-error`, `prose-reference` (a link to a constraint declared outside
+//! the document, see [`OdrlProseProps::links`]), and in the glossary of profile terms ([`ProseGlossary`])
 //! `prose-glossary`, `prose-note`, `prose-kind-of`, `prose-implies`,
 //! `prose-deprecated`, `prose-from`.
 //!
@@ -35,6 +36,7 @@ pub use prose_core;
 use prose_core::profile::Wording;
 use prose_core::validate::{Report, Validator};
 use prose_core::{Condition, Document, Policy, PolicyGlossary, ProseError, Rule, RuleKind};
+use std::collections::BTreeSet;
 use std::rc::Rc;
 use yew::prelude::*;
 
@@ -77,6 +79,12 @@ pub struct OdrlProseProps {
     /// before.
     #[prop_or(false)]
     pub violations: bool,
+    /// IRIs the host found to dereference (the catalog: those that answer
+    /// HTTP 200). A condition that refers to a constraint declared at one
+    /// of them shows the IRI as a link; any other IRI stays plain text. The
+    /// component fetches nothing. Empty by default: no link.
+    #[prop_or_default]
+    pub links: Rc<BTreeSet<String>>,
 }
 
 #[derive(Properties, PartialEq, Clone)]
@@ -161,7 +169,7 @@ pub fn odrl_prose(props: &OdrlProseProps) -> Html {
             let glossary = if props.glossary { &r.glossary[..] } else { &[] };
             html! {
                 <article class={class}>
-                    { document(&r.document, glossary) }
+                    { document(&r.document, glossary, &props.links) }
                     if let Some(report) = &*report { { violations_section(report) } }
                 </article>
             }
@@ -206,10 +214,13 @@ fn error(e: &ProseError) -> Html {
     html! { <p class="prose-error" role="alert">{ e.to_string() }</p> }
 }
 
-fn document(doc: &Document, glossary: &[PolicyGlossary]) -> Html {
+/// The IRIs a reference may link to.
+type Links = BTreeSet<String>;
+
+fn document(doc: &Document, glossary: &[PolicyGlossary], links: &Links) -> Html {
     html! {
         <>
-            { for doc.policies.iter().enumerate().map(|(i, p)| policy(p, glossary.get(i))) }
+            { for doc.policies.iter().enumerate().map(|(i, p)| policy(p, glossary.get(i), links)) }
             if !doc.warnings.is_empty() {
                 <aside class="prose-warnings">
                     <p class="prose-label">{ "Not rendered" }</p>
@@ -220,17 +231,19 @@ fn document(doc: &Document, glossary: &[PolicyGlossary]) -> Html {
     }
 }
 
-fn policy(p: &Policy, glossary: Option<&PolicyGlossary>) -> Html {
+fn policy(p: &Policy, glossary: Option<&PolicyGlossary>, links: &Links) -> Html {
     let glossary = glossary.filter(|g| !g.terms.is_empty());
     html! {
         <section class="prose-policy">
             <h3>{ &p.heading }</h3>
-            <p>{ &p.intro }</p>
+            // The policy's parties are the ones its rules inherit, so their
+            // references are among the rules'.
+            <p>{ linked_text(&p.intro, p.rules.iter().flat_map(|r| &r.references), links) }</p>
             if !p.notes.is_empty() {
                 <ul class="prose-notes">{ for p.notes.iter().map(|n| html! { <li>{ n }</li> }) }</ul>
             }
             if !p.rules.is_empty() {
-                <ol class="prose-rules">{ for p.rules.iter().map(rule) }</ol>
+                <ol class="prose-rules">{ for p.rules.iter().map(|r| rule(r, links)) }</ol>
             }
             if let Some(g) = glossary {
                 <ProseGlossary glossary={g.clone()} />
@@ -239,7 +252,7 @@ fn policy(p: &Policy, glossary: Option<&PolicyGlossary>) -> Html {
     }
 }
 
-fn rule(r: &Rule) -> Html {
+fn rule(r: &Rule, links: &Links) -> Html {
     let kind = match r.kind {
         RuleKind::Permission => "prose-permission",
         RuleKind::Prohibition => "prose-prohibition",
@@ -247,42 +260,82 @@ fn rule(r: &Rule) -> Html {
     };
     html! {
         <li class={classes!("prose-rule", kind)}>
-            <p class="prose-rule-sentence">{ &r.sentence }</p>
-            { conditions("Limits on the action", &r.refinements) }
-            { conditions("Applies only if", &r.conditions) }
+            <p class="prose-rule-sentence">{ linked_text(&r.sentence, &r.references, links) }</p>
+            { conditions("Limits on the action", &r.refinements, links) }
+            { conditions("Applies only if", &r.conditions, links) }
             { for r.follow_ups.iter().map(|f| html! {
                 <>
                     <p class="prose-label">{ format!("{}:", f.label) }</p>
-                    <ul>{ for f.rules.iter().map(rule) }</ul>
+                    <ul>{ for f.rules.iter().map(|r| rule(r, links)) }</ul>
                 </>
             }) }
         </li>
     }
 }
 
-fn conditions(label: &str, list: &[Condition]) -> Html {
+fn conditions(label: &str, list: &[Condition], links: &Links) -> Html {
     if list.is_empty() {
         return html! {};
     }
     html! {
         <>
             <p class="prose-label">{ format!("{label}:") }</p>
-            { condition_list(list) }
+            { condition_list(list, links) }
         </>
     }
 }
 
-fn condition_list(list: &[Condition]) -> Html {
+fn condition_list(list: &[Condition], links: &Links) -> Html {
     html! {
         <ul>
             { for list.iter().map(|c| html! {
                 <li>
-                    { &c.text }
-                    if !c.children.is_empty() { { ":" } { condition_list(&c.children) } }
+                    { condition_text(c, links) }
+                    if !c.children.is_empty() { { ":" } { condition_list(&c.children, links) } }
                 </li>
             }) }
         </ul>
     }
+}
+
+/// A condition's text, with the IRI of the constraint it refers to as a
+/// link when the host found that IRI dereferences.
+fn condition_text(c: &Condition, links: &Links) -> Html {
+    linked_text(&c.text, &c.reference, links)
+}
+
+/// `text`, in which each "the constraint defined at {IRI} holds" whose IRI
+/// is one of `iris` and one of `links` shows the IRI as a link. Only that
+/// clause is linked: the same IRI elsewhere in the text (an asset named by
+/// it) stays plain text.
+fn linked_text<'i>(text: &str, iris: impl IntoIterator<Item = &'i String>, links: &Links) -> Html {
+    const BEFORE: &str = "the constraint defined at ";
+    let iris: Vec<&str> = iris
+        .into_iter()
+        .map(String::as_str)
+        .filter(|iri| links.contains(*iri))
+        .collect();
+    let mut parts: Vec<Html> = Vec::new();
+    let mut rest = text;
+    loop {
+        let next = iris
+            .iter()
+            .filter_map(|iri| {
+                let at = rest.find(&format!("{BEFORE}{iri} holds"))?;
+                Some((at, *iri))
+            })
+            .min();
+        let Some((at, iri)) = next else { break };
+        let start = at + BEFORE.len();
+        parts.push(html! { { &rest[..start] } });
+        parts.push(html! { <a class="prose-reference" href={iri.to_string()}>{ iri }</a> });
+        rest = &rest[start + iri.len()..];
+    }
+    if parts.is_empty() {
+        return html! { { text } };
+    }
+    parts.push(html! { { rest } });
+    html! { <>{ for parts }</> }
 }
 
 #[cfg(doctest)]

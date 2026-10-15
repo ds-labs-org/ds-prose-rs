@@ -72,6 +72,23 @@ with prefixed keys renders in `OdrlProse` but reads there as no rules.
 Example: `{"leftOperand":"dateTime","operator":"lt","rightOperand":{"@value":"2026-12-31","@type":"xsd:date"}}`
 reads as "the date and time is before 2026-12-31".
 
+A constraint can be declared once, as a node of its own with an identifier,
+and referred to by that identifier (`"constraint": [{"@id": "urn:c:1"}]`, or
+the bare string), from a rule, a refinement or a logical constraint (ODRL
+Information Model, Example 19). A constraint is declared by a top-level or
+`@graph` node, or by any constraint object with an identifier, wherever it
+sits; identifiers are compared as IRIs, so `ex:c1` finds the constraint
+declared as `http://ex.com/c1` when the document binds `ex`. A reference to
+a constraint the document declares reads as that constraint. A reference to
+one it does not declare reads as "the constraint defined at urn:c:1 holds",
+and the `Condition` carries the (expanded) IRI in `reference`; in a target's
+or a party's refinement, which reads inside the rule's sentence, the `Rule`
+carries it in `references`. References are followed at most 1000 times per
+document, and a reading nests at most 256 levels deep, references included. The reader fetches nothing: `OdrlProse`
+shows the IRI as a link only when the host lists it in `links`, the IRIs it
+found to dereference (the site's catalog checks each over HTTP at build time
+and lists those that answer 200).
+
 ## Profiles
 
 An ODRL profile ([ODRL IM §3.3](https://www.w3.org/TR/odrl-model/#profile-mechanism))
@@ -614,6 +631,14 @@ The profile types can grow too: `ProfileVocab`, `Wording`, `Prefixes` and
 `OperandHints`, `ProfileSummary`, `ProfileLimits`, `Reading`,
 `PolicyGlossary` and `Gloss` are `#[non_exhaustive]` structs: read their
 fields, and start from `ProfileLimits::default()` to change a limit.
+
+Changed after 0.4.0 (additive except for struct literals): `Condition`
+gained `reference` (the IRI of a constraint referred to and not declared),
+`Rule` gained `references` (the same, for the refinements of its target and
+parties) and `OdrlProseProps` gained `links`; add `reference: None`,
+`references: vec![]` and `links: Default::default()` to a literal. `html!`
+and `yew::props!` are unaffected. The v0.1 and profile goldens print the
+new fields (`reference: None`, `references: []`); their text is unchanged.
 
 Changed in 0.4 (profiles; additive except for struct literals):
 

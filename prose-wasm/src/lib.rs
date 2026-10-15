@@ -45,6 +45,7 @@ fn props(
         glossary: true,
         violations: validator.is_some(),
         validator,
+        links: Default::default(),
     }
 }
 

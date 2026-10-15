@@ -19,13 +19,16 @@ Ok(
                             Condition {
                                 text: "the payment amount is at least 10.50 euro",
                                 children: [],
+                                reference: None,
                             },
                             Condition {
                                 text: "the number of times used is less than the value at urn:ref:limit",
                                 children: [],
+                                reference: None,
                             },
                         ],
                         follow_ups: [],
+                        references: [],
                     },
                 ],
             },

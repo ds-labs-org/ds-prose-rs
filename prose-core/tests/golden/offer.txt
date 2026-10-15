@@ -21,6 +21,7 @@ Ok(
                             Condition {
                                 text: "the date and time is before 2026-12-31",
                                 children: [],
+                                reference: None,
                             },
                         ],
                         follow_ups: [
@@ -34,10 +35,12 @@ Ok(
                                         refinements: [],
                                         conditions: [],
                                         follow_ups: [],
+                                        references: [],
                                     },
                                 ],
                             },
                         ],
+                        references: [],
                     },
                 ],
             },

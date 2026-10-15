@@ -90,6 +90,9 @@ const ODRL_PROPERTIES: &[&str] = &[
     "partOf",
 ];
 
+/// The most constraint references one document's reading follows.
+const MAX_FOLLOWED: usize = 1000;
+
 /// The most terms one policy's glossary lists.
 const MAX_GLOSSARY: usize = 30;
 
@@ -115,7 +118,15 @@ pub fn document_with(value: &Value, wording: &Wording) -> Result<Reading, ProseE
     };
     let mut doc = Document::default();
     let mut glossary = Vec::new();
-    for (i, v) in policy_nodes(value).into_iter().enumerate() {
+    let nodes = policy_nodes(value);
+    r.iris = Prefixes::of_document(value);
+    for v in declared_constraints(value) {
+        if let Some(id) = ident(v) {
+            let id = r.iri(&id);
+            r.declared.entry(id).or_insert_with(|| v.clone());
+        }
+    }
+    for (i, v) in nodes.into_iter().enumerate() {
         match v {
             Value::Object(o) if looks_like_policy(o) => {
                 if let Some(p) = scopes.get(i) {
@@ -127,6 +138,8 @@ pub fn document_with(value: &Value, wording: &Wording) -> Result<Reading, ProseE
                     terms: std::mem::take(&mut r.glossary),
                 });
             }
+            // Read where a rule refers to it.
+            Value::Object(o) if looks_like_constraint(o) && ident(v).is_some() => {}
             _ => r.warn("skipped a node that is not an ODRL policy"),
         }
     }
@@ -347,6 +360,58 @@ pub(crate) fn looks_like_policy(o: &Obj) -> bool {
         .any(|k| o.contains_key(*k))
 }
 
+/// The constraints `v` declares with an identifier, for rules to refer to
+/// by it (ODRL Information Model, Example 19): the top-level and `@graph`
+/// nodes first, then any constraint object with an identifier wherever it
+/// sits (a node object with `@id` declares that node where it appears), in
+/// document order. Contexts are not looked into. Iterative: a hostile value
+/// cannot overflow the stack.
+fn declared_constraints(v: &Value) -> Vec<&Value> {
+    let declares = |x: &Value| match x {
+        Value::Object(o) => {
+            !looks_like_policy(o)
+                && looks_like_constraint(o)
+                && bare_reference(o).is_none()
+                && ident(x).is_some()
+        }
+        _ => false,
+    };
+    let mut out: Vec<&Value> = policy_nodes(v)
+        .into_iter()
+        .filter(|x| declares(x))
+        .collect();
+    let mut stack = vec![v];
+    while let Some(x) = stack.pop() {
+        match x {
+            Value::Array(a) => stack.extend(a.iter().rev()),
+            Value::Object(o) => {
+                if declares(x) {
+                    out.push(x);
+                }
+                let kids: Vec<&Value> = o
+                    .iter()
+                    .filter(|(k, _)| *k != "@context")
+                    .map(|(_, x)| x)
+                    .collect();
+                stack.extend(kids.into_iter().rev());
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// A constraint declared as a node of its own, for rules to refer to by
+/// its identifier (ODRL Information Model, Example 19).
+fn looks_like_constraint(o: &Obj) -> bool {
+    types(o)
+        .iter()
+        .any(|t| matches!(local_name(t), "Constraint" | "LogicalConstraint"))
+        || ["leftOperand", "and", "or", "xone", "andSequence"]
+            .iter()
+            .any(|k| o.contains_key(*k))
+}
+
 pub(crate) fn types(o: &Obj) -> Vec<&str> {
     ["@type", "type"]
         .iter()
@@ -402,15 +467,34 @@ struct Reader<'a> {
     /// The current policy's glossary, and the IRIs already in it.
     glossary: Vec<Gloss>,
     glossed: std::collections::HashSet<String>,
+    /// The constraints the document declares as nodes of their own, by
+    /// identifier; the ones being read now; how many references were
+    /// followed.
+    declared: std::collections::HashMap<String, Value>,
+    following: Vec<String>,
+    followed: usize,
+    /// How deep the constraint being read is nested, references included.
+    nesting: usize,
+    /// The document's prefixes, to tell two spellings of one constraint
+    /// identifier (`ex:c1`, `http://ex.com/c1`) for the same IRI.
+    iris: Prefixes,
 }
 
 /// What a rule inherits from its policy when it states none of its own.
 #[derive(Default, Clone)]
 struct Inherited {
-    assigner: Vec<String>,
-    assignee: Vec<String>,
-    target: Vec<String>,
+    assigner: Named,
+    assignee: Named,
+    target: Named,
     actions: Vec<(String, Vec<Condition>)>,
+}
+
+/// Parties or assets as a sentence names them, and the IRIs of the
+/// undeclared constraints their refinements refer to.
+#[derive(Default, Clone)]
+struct Named {
+    names: Vec<String>,
+    refs: Vec<String>,
 }
 
 impl<'a> Reader<'a> {
@@ -421,6 +505,11 @@ impl<'a> Reader<'a> {
             ctx,
             glossary: Vec::new(),
             glossed: Default::default(),
+            declared: Default::default(),
+            following: Vec::new(),
+            followed: 0,
+            nesting: 0,
+            iris: Prefixes::default(),
         }
     }
 
@@ -514,8 +603,9 @@ impl<'a> Reader<'a> {
         for t in types(o) {
             self.term(t, TermKind::PolicyClass, None);
         }
-        let assigner = self.parties(o.get("assigner"));
-        let assignee = self.parties(o.get("assignee"));
+        let assigner_named = self.parties(o.get("assigner"));
+        let assignee_named = self.parties(o.get("assignee"));
+        let (assigner, assignee) = (&assigner_named.names, &assignee_named.names);
 
         let (label, intro) = match &kind {
             PolicyKind::Set => ("Policy set", "A set of rules".to_string()),
@@ -523,7 +613,7 @@ impl<'a> Reader<'a> {
                 "Offer",
                 match assigner.is_empty() {
                     true => "An offer".to_string(),
-                    false => format!("An offer made by {}", join(&assigner)),
+                    false => format!("An offer made by {}", join(assigner)),
                 },
             ),
             PolicyKind::Agreement => ("Agreement", "An agreement".to_string()),
@@ -532,16 +622,16 @@ impl<'a> Reader<'a> {
         let mut intro = intro;
         match (&kind, assigner.is_empty(), assignee.is_empty()) {
             (PolicyKind::Offer, _, false) => {
-                intro.push_str(&format!(", addressed to {}", join(&assignee)))
+                intro.push_str(&format!(", addressed to {}", join(assignee)))
             }
             (PolicyKind::Offer, _, true) => {}
             (_, false, false) => intro.push_str(&format!(
                 " between {} (assigner) and {} (assignee)",
-                join(&assigner),
-                join(&assignee)
+                join(assigner),
+                join(assignee)
             )),
-            (_, false, true) => intro.push_str(&format!(" from {} (assigner)", join(&assigner))),
-            (_, true, false) => intro.push_str(&format!(" for {} (assignee)", join(&assignee))),
+            (_, false, true) => intro.push_str(&format!(" from {} (assigner)", join(assigner))),
+            (_, true, false) => intro.push_str(&format!(" for {} (assignee)", join(assignee))),
             (_, true, true) => {}
         }
         intro.push('.');
@@ -582,8 +672,8 @@ impl<'a> Reader<'a> {
         }
 
         let inherited = Inherited {
-            assigner,
-            assignee,
+            assigner: assigner_named.clone(),
+            assignee: assignee_named.clone(),
             target: self.assets(o.get("target")),
             actions: self.actions(o.get("action")),
         };
@@ -629,6 +719,7 @@ impl<'a> Reader<'a> {
                     refinements: vec![],
                     conditions: vec![],
                     follow_ups: vec![],
+                    references: vec![],
                 };
             }
         };
@@ -645,21 +736,29 @@ impl<'a> Reader<'a> {
         let own_assignee = self.parties(o.get("assignee"));
         let own_target = self.assets(o.get("target"));
         let own_actions = self.actions(o.get("action"));
-        let assigner = if own_assigner.is_empty() {
-            &inh.assigner
-        } else {
-            &own_assigner
+        let own = |own: &'_ Named, inherited: &'_ Named| -> Named {
+            match own.names.is_empty() {
+                true => inherited.clone(),
+                false => own.clone(),
+            }
         };
-        let assignee = if own_assignee.is_empty() {
-            &inh.assignee
-        } else {
-            &own_assignee
-        };
-        let target = if own_target.is_empty() {
-            &inh.target
-        } else {
-            &own_target
-        };
+        let assigner_named = own(&own_assigner, &inh.assigner);
+        let assignee_named = own(&own_assignee, &inh.assignee);
+        let target_named = own(&own_target, &inh.target);
+        let mut references = Vec::new();
+        for r in [&assigner_named, &assignee_named, &target_named]
+            .into_iter()
+            .flat_map(|n| &n.refs)
+        {
+            if !references.contains(r) {
+                references.push(r.clone());
+            }
+        }
+        let (assigner, assignee, target) = (
+            &assigner_named.names,
+            &assignee_named.names,
+            &target_named.names,
+        );
         let actions = if own_actions.is_empty() {
             &inh.actions
         } else {
@@ -713,8 +812,13 @@ impl<'a> Reader<'a> {
         for (key, label) in &functions {
             self.term(key, TermKind::PartyFunction, None);
             let parties = self.parties(o.get(key));
-            if !parties.is_empty() {
-                sentence.push_str(&format!(" {label}: {}.", join(&parties)));
+            if !parties.names.is_empty() {
+                sentence.push_str(&format!(" {label}: {}.", join(&parties.names)));
+            }
+            for r in parties.refs {
+                if !references.contains(&r) {
+                    references.push(r);
+                }
             }
         }
 
@@ -724,6 +828,7 @@ impl<'a> Reader<'a> {
             .map(|(a, c)| Condition {
                 text: format!("The action \"{a}\" is limited to cases where"),
                 children: c.clone(),
+                reference: None,
             })
             .collect();
         let conditions = o
@@ -734,8 +839,8 @@ impl<'a> Reader<'a> {
         // Duties of an obligation or follow-ups of a duty inherit nothing:
         // the parties are re-stated by the author or read as "the assignee".
         let child_inh = Inherited {
-            assigner: assigner.clone(),
-            assignee: assignee.clone(),
+            assigner: assigner_named.clone(),
+            assignee: assignee_named.clone(),
             ..Default::default()
         };
         let mut follow_ups = Vec::new();
@@ -785,22 +890,26 @@ impl<'a> Reader<'a> {
             refinements,
             conditions,
             follow_ups,
+            references,
         }
     }
 
     // --- parties and assets ---------------------------------------------
 
-    fn parties(&mut self, v: Option<&Value>) -> Vec<String> {
+    fn parties(&mut self, v: Option<&Value>) -> Named {
         self.entities(v, "party")
     }
 
-    fn assets(&mut self, v: Option<&Value>) -> Vec<String> {
+    fn assets(&mut self, v: Option<&Value>) -> Named {
         self.entities(v, "asset")
     }
 
-    fn entities(&mut self, v: Option<&Value>, noun: &str) -> Vec<String> {
-        let Some(v) = v else { return vec![] };
-        items(v)
+    fn entities(&mut self, v: Option<&Value>, noun: &str) -> Named {
+        let Some(v) = v else {
+            return Named::default();
+        };
+        let mut refs = Vec::new();
+        let names = items(v)
             .into_iter()
             .filter_map(|e| match e {
                 Value::String(s) => Some(s.clone()),
@@ -819,7 +928,11 @@ impl<'a> Reader<'a> {
                     if let Some(r) = o.get("refinement") {
                         let parts: Vec<String> = items(r)
                             .into_iter()
-                            .map(|c| inline(&self.constraint(c)))
+                            .map(|c| {
+                                let c = self.constraint(c);
+                                references_in(&c, &mut refs);
+                                inline(&c)
+                            })
                             .collect();
                         text.push_str(&format!(" where {}", parts.join("; ")));
                     }
@@ -830,7 +943,8 @@ impl<'a> Reader<'a> {
                     None
                 }
             })
-            .collect()
+            .collect();
+        Named { names, refs }
     }
 
     // --- actions ----------------------------------------------------------
@@ -869,15 +983,35 @@ impl<'a> Reader<'a> {
 
     // --- constraints ------------------------------------------------------
 
+    /// The reading of one constraint, nested no deeper than [`MAX_DEPTH`]
+    /// levels in all: references followed nest it as deep as JSON nesting
+    /// does, and a chain of them in a flat `@graph` is not bounded by the
+    /// parser's depth limit.
     fn constraint(&mut self, v: &Value) -> Condition {
+        if self.nesting >= MAX_DEPTH {
+            self.warn(format!(
+                "constraints nested deeper than {MAX_DEPTH} levels are not read"
+            ));
+            return Condition::leaf("a constraint nested too deep to read holds");
+        }
+        self.nesting += 1;
+        let read = self.constraint_here(v);
+        self.nesting -= 1;
+        read
+    }
+
+    fn constraint_here(&mut self, v: &Value) -> Condition {
+        let reference = match v {
+            Value::String(id) => Some(id.clone()),
+            Value::Object(o) => bare_reference(o),
+            _ => None,
+        };
+        if let Some(id) = reference {
+            return self.referred(id);
+        }
         let Value::Object(o) = v else {
-            return Condition::leaf(match ident(v) {
-                Some(id) => format!("the constraint {id} holds"),
-                None => {
-                    self.warn("skipped an unreadable constraint");
-                    "an unreadable constraint holds".to_string()
-                }
-            });
+            self.warn("skipped an unreadable constraint");
+            return Condition::leaf("an unreadable constraint holds");
         };
         for (key, text) in [
             ("and", "all of the following hold"),
@@ -892,6 +1026,7 @@ impl<'a> Reader<'a> {
                         .into_iter()
                         .map(|c| self.constraint(c))
                         .collect(),
+                    reference: None,
                 };
             }
         }
@@ -928,6 +1063,47 @@ impl<'a> Reader<'a> {
             self.ctx.operator_for(&left, &op),
             right
         ))
+    }
+
+    /// A constraint referred to by `id`: the one the document declares,
+    /// read in its place, else a clause that names where it is defined.
+    /// One that refers to itself, or one past the bound on references,
+    /// reads by its identifier.
+    fn referred(&mut self, id: String) -> Condition {
+        let id = self.iri(&id);
+        let Some(declared) = self.declared.get(&id) else {
+            return Condition {
+                text: format!("the constraint defined at {id} holds"),
+                children: Vec::new(),
+                reference: Some(id),
+            };
+        };
+        if self.following.contains(&id) {
+            self.warn(format!("the constraint {id} refers to itself"));
+            return Condition::leaf(format!("the constraint {id} holds"));
+        }
+        if self.followed >= MAX_FOLLOWED {
+            self.warn(format!(
+                "stopped following constraint references after {MAX_FOLLOWED}"
+            ));
+            return Condition::leaf(format!("the constraint {id} holds"));
+        }
+        self.followed += 1;
+        let declared = declared.clone();
+        self.following.push(id);
+        let read = self.constraint(&declared);
+        self.following.pop();
+        read
+    }
+
+    /// A constraint identifier as an IRI: a compact IRI whose prefix the
+    /// document binds is expanded; anything else (a full IRI, a URN, a
+    /// relative reference) is kept as written.
+    fn iri(&self, id: &str) -> String {
+        match id.contains(':') {
+            true => self.iris.expand(id),
+            false => id.to_string(),
+        }
     }
 
     fn literal(&mut self, v: &Value) -> String {
@@ -999,6 +1175,20 @@ pub(crate) fn join_with(items: &[String], conj: &str) -> String {
         [] => String::new(),
         [one] => one.clone(),
         [init @ .., last] => format!("{} {conj} {last}", init.join(", ")),
+    }
+}
+
+/// The IRIs `c` and its sub-clauses refer to, each once, in reading order.
+/// Iterative: the depth of a reading is bounded, but not by much.
+fn references_in(c: &Condition, out: &mut Vec<String>) {
+    let mut stack = vec![c];
+    while let Some(c) = stack.pop() {
+        if let Some(r) = &c.reference
+            && !out.contains(r)
+        {
+            out.push(r.clone());
+        }
+        stack.extend(c.children.iter().rev());
     }
 }
 
