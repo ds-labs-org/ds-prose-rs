@@ -106,6 +106,52 @@ pub struct Reading {
     /// names, each once, in reading order: so a host can show each as a
     /// short label and keep the IRI, without parsing the text.
     pub mentions: Vec<Vec<Mention>>,
+    /// `names[i]` says where the text of `document.policies[i]` names each
+    /// of `mentions[i]`, so a host marks those places and no others: a
+    /// literal or a word that reads like a label is not the IRI.
+    pub names: Vec<PolicyNames>,
+}
+
+/// Where a text names an IRI: bytes `start..end` of the text read
+/// `mentions[i][mention]` of its policy ([`Reading::mentions`]), as its
+/// label or as the policy writes it there.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NameSpan {
+    pub start: usize,
+    pub end: usize,
+    pub mention: usize,
+}
+
+/// The [`NameSpan`]s of one [`Policy`]'s texts, shaped as the policy is.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PolicyNames {
+    /// In [`Policy::intro`].
+    pub intro: Vec<NameSpan>,
+    /// `rules[j]` for `rules[j]` of the policy.
+    pub rules: Vec<RuleNames>,
+}
+
+/// The [`NameSpan`]s of one [`Rule`]'s texts, shaped as the rule is.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RuleNames {
+    /// In [`Rule::sentence`].
+    pub sentence: Vec<NameSpan>,
+    pub refinements: Vec<ConditionNames>,
+    pub conditions: Vec<ConditionNames>,
+    /// `follow_ups[k][l]` for `follow_ups[k].rules[l]` of the rule.
+    pub follow_ups: Vec<Vec<RuleNames>>,
+}
+
+/// The [`NameSpan`]s of one [`Condition`]'s text and of its sub-clauses.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ConditionNames {
+    /// In [`Condition::text`].
+    pub text: Vec<NameSpan>,
+    pub children: Vec<ConditionNames>,
 }
 
 /// An IRI the prose names: a party, an asset or a collection of either, or
@@ -113,7 +159,10 @@ pub struct Reading {
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mention {
-    /// As the policy writes it: the text reads so where no label is declared.
+    /// As the policy first writes it: the text reads so there where no
+    /// label is declared. Another spelling of the same IRI (`ex:a1`,
+    /// `http://example.com/a1`) is the same mention, read as written
+    /// there; [`Reading::names`] says where each is.
     pub written: String,
     /// Expanded with the document's prefixes.
     pub iri: String,
@@ -124,7 +173,7 @@ pub struct Mention {
 }
 
 impl Mention {
-    /// How the text names it: its label, else the IRI as written.
+    /// How the text names it: its label, else the IRI as first written.
     pub fn text(&self) -> &str {
         self.label.as_deref().unwrap_or(&self.written)
     }

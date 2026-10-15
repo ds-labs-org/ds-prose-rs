@@ -72,8 +72,8 @@ pub mod wording {
 }
 
 pub use model::{
-    Condition, Document, FollowUp, Gloss, Mention, Policy, PolicyGlossary, PolicyKind, Reading,
-    Rule, RuleKind,
+    Condition, ConditionNames, Document, FollowUp, Gloss, Mention, NameSpan, Policy,
+    PolicyGlossary, PolicyKind, PolicyNames, Reading, Rule, RuleKind, RuleNames,
 };
 
 /// Why a document could not be read at all.

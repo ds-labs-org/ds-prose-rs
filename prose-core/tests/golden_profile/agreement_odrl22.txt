@@ -168,5 +168,75 @@ Ok(
                 },
             ],
         ],
+        names: [
+            PolicyNames {
+                intro: [
+                    NameSpan {
+                        start: 21,
+                        end: 51,
+                        mention: 0,
+                    },
+                    NameSpan {
+                        start: 67,
+                        end: 95,
+                        mention: 1,
+                    },
+                ],
+                rules: [
+                    RuleNames {
+                        sentence: [
+                            NameSpan {
+                                start: 0,
+                                end: 28,
+                                mention: 1,
+                            },
+                            NameSpan {
+                                start: 44,
+                                end: 72,
+                                mention: 2,
+                            },
+                            NameSpan {
+                                start: 90,
+                                end: 120,
+                                mention: 0,
+                            },
+                        ],
+                        refinements: [
+                            ConditionNames {
+                                text: [],
+                                children: [
+                                    ConditionNames {
+                                        text: [],
+                                        children: [],
+                                    },
+                                ],
+                            },
+                        ],
+                        conditions: [
+                            ConditionNames {
+                                text: [],
+                                children: [
+                                    ConditionNames {
+                                        text: [],
+                                        children: [],
+                                    },
+                                    ConditionNames {
+                                        text: [
+                                            NameSpan {
+                                                start: 25,
+                                                end: 51,
+                                                mention: 3,
+                                            },
+                                        ],
+                                        children: [],
+                                    },
+                                ],
+                            },
+                        ],
+                        follow_ups: [],
+                    },
+                ],
+            },
+        ],
     },
 )

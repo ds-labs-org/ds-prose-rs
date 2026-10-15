@@ -301,9 +301,11 @@ pub fn document_with(value: &Value, wording: &Wording) -> Result<Reading, ProseE
     let mut doc = Document::default();
     let mut glossary = Vec::new();
     let mut mentions = Vec::new();
+    let mut names = Vec::new();
     let nodes = policy_nodes(value);
     r.iris = Prefixes::of_document(value);
     r.labels = declared_labels(value, &r.iris, r.ctx.langs());
+    r.marking = !holds_marks(value);
     for v in declared_constraints(value) {
         if let Some(id) = ident(v) {
             let id = r.iri(&id);
@@ -351,12 +353,15 @@ pub fn document_with(value: &Value, wording: &Wording) -> Result<Reading, ProseE
                         &lent
                     }
                 };
-                doc.policies.push(r.policy(o, &ancestors, lineage));
+                let mut policy = r.policy(o, &ancestors, lineage);
+                names.push(r.unmark_policy(&mut policy));
+                doc.policies.push(policy);
                 r.glossed.clear();
                 glossary.push(PolicyGlossary {
                     terms: std::mem::take(&mut r.glossary),
                 });
                 r.mentioned.clear();
+                r.marked.clear();
                 mentions.push(std::mem::take(&mut r.mentions));
             }
             // Read where a rule refers to it.
@@ -374,7 +379,79 @@ pub fn document_with(value: &Value, wording: &Wording) -> Result<Reading, ProseE
         document: doc,
         glossary,
         mentions,
+        names,
     })
+}
+
+/// The marks [`Reader::named`] puts around the text of a mention: open,
+/// the mention's index, middle, the text, close. Private-use characters, so
+/// a text the reader writes has none of its own.
+const MARK_OPEN: char = '\u{E000}';
+const MARK_MID: char = '\u{E001}';
+const MARK_CLOSE: char = '\u{E002}';
+
+/// Whether a string or key of `v` holds a character [`Reader::named`]
+/// marks with: the reader then marks nothing, so no text of the document
+/// is read as a mark. Iterative, as [`declared_constraints`].
+fn holds_marks(v: &Value) -> bool {
+    let marks = |s: &str| s.contains([MARK_OPEN, MARK_MID, MARK_CLOSE]);
+    let mut stack = vec![v];
+    while let Some(x) = stack.pop() {
+        match x {
+            Value::String(s) if marks(s) => return true,
+            Value::Array(a) => stack.extend(a),
+            Value::Object(o) => {
+                if o.keys().any(|k| marks(k)) {
+                    return true;
+                }
+                stack.extend(o.values());
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// `s` without the marks of the mentions in it, and where each was: only
+/// marks of `(index, text)` among `marked`, which the reader put there, are
+/// read as marks; any other character is kept as it is.
+fn unmark(s: &mut String, marked: &std::collections::HashSet<(usize, String)>) -> Vec<NameSpan> {
+    if !s.contains(MARK_OPEN) {
+        return Vec::new();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut spans = Vec::new();
+    let mut rest = s.as_str();
+    while let Some(at) = rest.find(MARK_OPEN) {
+        out.push_str(&rest[..at]);
+        let after = &rest[at + MARK_OPEN.len_utf8()..];
+        let mark = after.split_once(MARK_MID).and_then(|(index, tail)| {
+            let index: usize = index.parse().ok()?;
+            let (text, tail) = tail.split_once(MARK_CLOSE)?;
+            marked
+                .contains(&(index, text.to_string()))
+                .then_some((index, text, tail))
+        });
+        match mark {
+            Some((mention, text, tail)) => {
+                let start = out.len();
+                out.push_str(text);
+                spans.push(NameSpan {
+                    start,
+                    end: out.len(),
+                    mention,
+                });
+                rest = tail;
+            }
+            None => {
+                out.push(MARK_OPEN);
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    *s = out;
+    spans
 }
 
 /// The label each node of `v` declares for its identifier (expanded with
@@ -943,7 +1020,13 @@ struct Reader<'a> {
     /// The IRIs the current policy's text names, and the same IRIs, for
     /// de-duplication.
     mentions: Vec<Mention>,
-    mentioned: std::collections::HashSet<String>,
+    mentioned: std::collections::HashMap<String, usize>,
+    /// The (mention, text) pairs [`Reader::named`] marked in the current
+    /// policy's text, so [`unmark`] reads those marks and no others.
+    marked: std::collections::HashSet<(usize, String)>,
+    /// Whether [`Reader::named`] marks its text: not when the document
+    /// holds a mark character of its own ([`holds_marks`]).
+    marking: bool,
 }
 
 /// What a rule inherits from its policy when it states none of its own.
@@ -991,6 +1074,8 @@ impl<'a> Reader<'a> {
             labels: Default::default(),
             mentions: Vec::new(),
             mentioned: Default::default(),
+            marked: Default::default(),
+            marking: false,
         }
     }
 
@@ -1026,22 +1111,87 @@ impl<'a> Reader<'a> {
 
     /// An identifier the text names, as it reads: with the label the
     /// document declares for it, else as written. An IRI (or a labelled
-    /// identifier) is noted among the policy's mentions.
+    /// identifier) is noted among the policy's mentions, once however it is
+    /// written, and its text marked with the mention's index; the policy's
+    /// texts lose the marks in [`Reader::unmark_policy`], which notes where
+    /// they were.
     fn named(&mut self, written: &str) -> String {
         let iri = self.iri(written);
         let label = self.labels.get(&iri).cloned();
-        if (label.is_some() || written.contains(':')) && self.mentioned.insert(iri.clone()) {
-            self.mentions.push(Mention {
-                written: written.to_string(),
-                iri,
-                label: label.clone(),
-            });
+        let text = label.clone().unwrap_or_else(|| written.to_string());
+        if label.is_none() && !written.contains(':') {
+            return text;
         }
-        label.unwrap_or_else(|| written.to_string())
+        let index = match self.mentioned.get(&iri) {
+            Some(&i) => i,
+            None => {
+                let i = self.mentions.len();
+                self.mentioned.insert(iri.clone(), i);
+                self.mentions.push(Mention {
+                    written: written.to_string(),
+                    iri,
+                    label,
+                });
+                i
+            }
+        };
+        if !self.marking {
+            return text;
+        }
+        self.marked.insert((index, text.clone()));
+        format!("{MARK_OPEN}{index}{MARK_MID}{text}{MARK_CLOSE}")
+    }
+
+    /// `p`'s texts without the marks of [`Reader::named`], and where they
+    /// were.
+    fn unmark_policy(&self, p: &mut Policy) -> PolicyNames {
+        let marked = &self.marked;
+        unmark(&mut p.heading, marked);
+        for n in &mut p.notes {
+            unmark(n, marked);
+        }
+        fn condition(
+            c: &mut Condition,
+            marked: &std::collections::HashSet<(usize, String)>,
+        ) -> ConditionNames {
+            ConditionNames {
+                text: unmark(&mut c.text, marked),
+                children: c
+                    .children
+                    .iter_mut()
+                    .map(|c| condition(c, marked))
+                    .collect(),
+            }
+        }
+        fn rule(r: &mut Rule, marked: &std::collections::HashSet<(usize, String)>) -> RuleNames {
+            RuleNames {
+                sentence: unmark(&mut r.sentence, marked),
+                refinements: r
+                    .refinements
+                    .iter_mut()
+                    .map(|c| condition(c, marked))
+                    .collect(),
+                conditions: r
+                    .conditions
+                    .iter_mut()
+                    .map(|c| condition(c, marked))
+                    .collect(),
+                follow_ups: r
+                    .follow_ups
+                    .iter_mut()
+                    .map(|f| f.rules.iter_mut().map(|r| rule(r, marked)).collect())
+                    .collect(),
+            }
+        }
+        PolicyNames {
+            intro: unmark(&mut p.intro, marked),
+            rules: p.rules.iter_mut().map(|r| rule(r, marked)).collect(),
+        }
     }
 
     fn warn(&mut self, msg: impl Into<String>) {
-        let msg = msg.into();
+        let mut msg = msg.into();
+        unmark(&mut msg, &self.marked);
         if self.seen.insert(msg.clone()) {
             self.warnings.push(msg);
         }

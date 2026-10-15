@@ -287,3 +287,119 @@ fn a_labelled_node_with_more_than_a_label_is_still_reported_as_skipped() {
         ["skipped a node that is not an ODRL policy"]
     );
 }
+
+/// The text of each span of `names` in `text`, with its mention's IRI.
+fn spans<'a>(
+    r: &'a Reading,
+    text: &'a str,
+    names: &[prose_core::NameSpan],
+) -> Vec<(&'a str, &'a str)> {
+    names
+        .iter()
+        .map(|n| (&text[n.start..n.end], r.mentions[0][n.mention].iri.as_str()))
+        .collect()
+}
+
+#[test]
+fn the_reading_says_where_each_text_names_an_iri_and_nowhere_else() {
+    let r = read(&graph(
+        json!({"action": "play",
+            "assignee": {"@id": "http://ex.com/alice", "rdfs:label": "Alice"},
+            "target": "http://ex.com/d1",
+            "constraint": [
+                {"leftOperand": "recipient", "operator": "neq", "rightOperand": "Alice"},
+                {"leftOperand": "spatial", "operator": "eq",
+                    "rightOperand": {"@id": "https://www.wikidata.org/wiki/Q183"}}]}),
+        vec![json!({"@id": "https://www.wikidata.org/wiki/Q183", "schema:name": "Germany"})],
+    ));
+    let rule = &r.document.policies[0].rules[0];
+    let names = &r.names[0].rules[0];
+    assert_eq!(
+        spans(&r, &rule.sentence, &names.sentence),
+        [
+            ("Alice", "http://ex.com/alice"),
+            ("http://ex.com/d1", "http://ex.com/d1")
+        ]
+    );
+    assert_eq!(
+        rule.conditions[0].text,
+        "the recipient is not equal to \"Alice\""
+    );
+    assert_eq!(names.conditions[0].text, [], "a literal is not the party");
+    assert_eq!(
+        spans(&r, &rule.conditions[1].text, &names.conditions[1].text),
+        [("Germany", "https://www.wikidata.org/wiki/Q183")]
+    );
+    assert!(r.names[0].intro.is_empty());
+}
+
+#[test]
+fn an_iri_written_two_ways_is_one_mention_named_in_both_places() {
+    let r = read(&json!({
+        "@context": ["http://www.w3.org/ns/odrl.jsonld", {"ex": "http://example.com/"}],
+        "@type": "Offer",
+        "uid": "urn:p",
+        "assigner": "ex:org",
+        "permission": [{"action": "use", "target": "ex:asset:1"},
+            {"action": "play", "target": "http://example.com/asset:1"}]
+    }));
+    assert_eq!(r.mentions[0].len(), 2, "{:?}", r.mentions);
+    let p = &r.document.policies[0];
+    assert_eq!(p.intro, "An offer made by ex:org.");
+    assert_eq!(
+        spans(&r, &p.intro, &r.names[0].intro),
+        [("ex:org", "http://example.com/org")]
+    );
+    assert_eq!(
+        spans(&r, &p.rules[1].sentence, &r.names[0].rules[1].sentence),
+        [
+            ("http://example.com/asset:1", "http://example.com/asset:1"),
+            ("ex:org", "http://example.com/org")
+        ]
+    );
+    assert_eq!(
+        spans(&r, &p.rules[0].sentence, &r.names[0].rules[0].sentence)[0],
+        ("ex:asset:1", "http://example.com/asset:1")
+    );
+}
+
+#[test]
+fn the_reading_of_a_duty_and_a_refined_party_names_their_iris() {
+    let r = read(&graph(
+        json!({"action": "play", "target": "urn:asset:1",
+            "duty": [{"action": "compensate", "assignee": "urn:party:payer"}]}),
+        vec![],
+    ));
+    let rule = &r.document.policies[0].rules[0];
+    let duty = &rule.follow_ups[0].rules[0];
+    let names = &r.names[0].rules[0].follow_ups[0][0];
+    assert!(
+        spans(&r, &duty.sentence, &names.sentence)
+            .contains(&("urn:party:payer", "urn:party:payer")),
+        "{}",
+        duty.sentence
+    );
+}
+
+#[test]
+fn a_document_that_writes_a_mark_character_is_read_as_written() {
+    let forged = "\u{E000}0\u{E001}ex:org\u{E002}";
+    let r = read(&json!({
+        "@context": ["http://www.w3.org/ns/odrl.jsonld", {"ex": "http://example.com/"}],
+        "@type": "Offer",
+        "uid": "urn:p",
+        "assigner": "ex:org",
+        "permission": [{"action": "use", "target": "ex:asset:1",
+            "constraint": [{"leftOperand": "purpose", "operator": "eq", "rightOperand": forged}]}]
+    }));
+    let rule = &r.document.policies[0].rules[0];
+    assert_eq!(
+        rule.conditions[0].text,
+        format!("the purpose is equal to {forged}")
+    );
+    assert_eq!(
+        rule.sentence,
+        "Anyone may use ex:asset:1, as permitted by ex:org."
+    );
+    assert_eq!(r.names[0].rules[0].conditions[0].text, []);
+}
