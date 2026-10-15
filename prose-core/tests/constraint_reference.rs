@@ -216,3 +216,38 @@ fn a_node_that_is_neither_policy_nor_constraint_is_still_skipped() {
         doc.warnings
     );
 }
+
+fn count(c: &[Condition]) -> usize {
+    c.iter().map(|c| 1 + count(&c.children)).sum()
+}
+
+/// Each constraint refers to the next one twice: read in full, forty of
+/// them would be 2^40 clauses. Following references is bounded per
+/// document, and a reference not followed reads by its identifier.
+#[test]
+fn references_that_multiply_are_read_up_to_a_bound() {
+    let mut declared: Vec<String> = (0..40)
+        .map(|i| {
+            format!(
+                r#"{{"@type": "LogicalConstraint", "@id": "urn:c:{i}",
+                    "and": [{{"@id": "urn:c:{n}"}}, {{"@id": "urn:c:{n}"}}]}}"#,
+                n = i + 1
+            )
+        })
+        .collect();
+    declared.push(
+        r#"{"@type": "Constraint", "@id": "urn:c:40", "leftOperand": "count",
+            "operator": "lteq", "rightOperand": 1}"#
+            .into(),
+    );
+    let doc = render(&with_declared(r#""urn:c:0""#, &declared.join(","))).unwrap();
+    let read = &doc.policies[0].rules[0].conditions;
+    assert!(count(read) < 10_000, "{} clauses", count(read));
+    assert!(
+        doc.warnings
+            .iter()
+            .any(|w| w.contains("constraint references")),
+        "{:?}",
+        doc.warnings
+    );
+}
