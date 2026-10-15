@@ -119,13 +119,11 @@ pub fn document_with(value: &Value, wording: &Wording) -> Result<Reading, ProseE
     let mut doc = Document::default();
     let mut glossary = Vec::new();
     let nodes = policy_nodes(value);
-    for v in &nodes {
-        if let Value::Object(o) = v
-            && !looks_like_policy(o)
-            && looks_like_constraint(o)
-            && let Some(id) = ident(v)
-        {
-            r.declared.entry(id).or_insert_with(|| (*v).clone());
+    r.iris = Prefixes::of_document(value);
+    for v in declared_constraints(value) {
+        if let Some(id) = ident(v) {
+            let id = r.iri(&id);
+            r.declared.entry(id).or_insert_with(|| v.clone());
         }
     }
     for (i, v) in nodes.into_iter().enumerate() {
@@ -362,6 +360,47 @@ pub(crate) fn looks_like_policy(o: &Obj) -> bool {
         .any(|k| o.contains_key(*k))
 }
 
+/// The constraints `v` declares with an identifier, for rules to refer to
+/// by it (ODRL Information Model, Example 19): the top-level and `@graph`
+/// nodes first, then any constraint object with an identifier wherever it
+/// sits (a node object with `@id` declares that node where it appears), in
+/// document order. Contexts are not looked into. Iterative: a hostile value
+/// cannot overflow the stack.
+fn declared_constraints(v: &Value) -> Vec<&Value> {
+    let declares = |x: &Value| match x {
+        Value::Object(o) => {
+            !looks_like_policy(o)
+                && looks_like_constraint(o)
+                && bare_reference(o).is_none()
+                && ident(x).is_some()
+        }
+        _ => false,
+    };
+    let mut out: Vec<&Value> = policy_nodes(v)
+        .into_iter()
+        .filter(|x| declares(x))
+        .collect();
+    let mut stack = vec![v];
+    while let Some(x) = stack.pop() {
+        match x {
+            Value::Array(a) => stack.extend(a.iter().rev()),
+            Value::Object(o) => {
+                if declares(x) {
+                    out.push(x);
+                }
+                let kids: Vec<&Value> = o
+                    .iter()
+                    .filter(|(k, _)| *k != "@context")
+                    .map(|(_, x)| x)
+                    .collect();
+                stack.extend(kids.into_iter().rev());
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 /// A constraint declared as a node of its own, for rules to refer to by
 /// its identifier (ODRL Information Model, Example 19).
 fn looks_like_constraint(o: &Obj) -> bool {
@@ -434,6 +473,9 @@ struct Reader<'a> {
     declared: std::collections::HashMap<String, Value>,
     following: Vec<String>,
     followed: usize,
+    /// The document's prefixes, to tell two spellings of one constraint
+    /// identifier (`ex:c1`, `http://ex.com/c1`) for the same IRI.
+    iris: Prefixes,
 }
 
 /// What a rule inherits from its policy when it states none of its own.
@@ -456,6 +498,7 @@ impl<'a> Reader<'a> {
             declared: Default::default(),
             following: Vec::new(),
             followed: 0,
+            iris: Prefixes::default(),
         }
     }
 
@@ -975,6 +1018,7 @@ impl<'a> Reader<'a> {
     /// One that refers to itself, or one past the bound on references,
     /// reads by its identifier.
     fn referred(&mut self, id: String) -> Condition {
+        let id = self.iri(&id);
         let Some(declared) = self.declared.get(&id) else {
             return Condition {
                 text: format!("the constraint defined at {id} holds"),
@@ -998,6 +1042,16 @@ impl<'a> Reader<'a> {
         let read = self.constraint(&declared);
         self.following.pop();
         read
+    }
+
+    /// A constraint identifier as an IRI: a compact IRI whose prefix the
+    /// document binds is expanded; anything else (a full IRI, a URN, a
+    /// relative reference) is kept as written.
+    fn iri(&self, id: &str) -> String {
+        match id.contains(':') {
+            true => self.iris.expand(id),
+            false => id.to_string(),
+        }
     }
 
     fn literal(&mut self, v: &Value) -> String {
