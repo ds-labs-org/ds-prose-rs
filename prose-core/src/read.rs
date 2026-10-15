@@ -156,6 +156,54 @@ fn metadata_term(key: &str) -> Option<&'static str> {
     ["timestamp", "summary"].into_iter().find(|t| *t == local)
 }
 
+/// The keys of policy `o` that spell its metadata, with the term each
+/// spells: timestamps first, then summaries, each in key order.
+pub(crate) fn metadata_keys(o: &Obj) -> Vec<(&'static str, &String)> {
+    let mut metadata: Vec<(&'static str, &String)> = o
+        .keys()
+        .filter_map(|k| metadata_term(k).map(|t| (t, k)))
+        .collect();
+    metadata.sort_by_key(|(t, k)| (*t != "timestamp", *k));
+    metadata
+}
+
+/// The note one value of the metadata `term` reads as: "Agreed on ..." (on
+/// an `agreement`) or "Issued on ..." for a timestamp, "Summary (en): ..."
+/// for a summary. `None` when the value is not a string, a number or a literal, or is
+/// blank.
+pub(crate) fn metadata_note(term: &str, agreement: bool, v: &Value) -> Option<String> {
+    let (text, language) = match v {
+        Value::String(s) => (s.clone(), None),
+        Value::Number(n) if term == "timestamp" => (n.to_string(), None),
+        Value::Object(o) => (
+            o.get("@value")?.as_str()?.to_string(),
+            o.get("@language").and_then(Value::as_str),
+        ),
+        _ => return None,
+    };
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    Some(match term {
+        "timestamp" => match agreement {
+            true => format!("Agreed {}.", when(text)),
+            false => format!("Issued {}.", when(text)),
+        },
+        _ => {
+            let label = match language {
+                Some(l) => format!("Summary ({l})"),
+                None => "Summary".to_string(),
+            };
+            let stop = match text.ends_with(['.', '!', '?']) {
+                true => "",
+                false => ".",
+            };
+            format!("{label}: {text}{stop}")
+        }
+    })
+}
+
 /// When, as a note says it: "on 2026-10-15 at 10:00 UTC" for an
 /// `xsd:dateTime` or `xsd:date`; any other text "at" it, as written.
 fn when(s: &str) -> String {
@@ -710,12 +758,7 @@ impl<'a> Reader<'a> {
     }
 
     fn policy(&mut self, o: &Obj) -> Policy {
-        let mut metadata: Vec<(&'static str, &String)> = o
-            .keys()
-            .filter_map(|k| metadata_term(k).map(|t| (t, k)))
-            .collect();
-        // Timestamps first, then summaries, each in key order.
-        metadata.sort_by_key(|(t, k)| (*t != "timestamp", *k));
+        let metadata = metadata_keys(o);
         let read: Vec<String> = metadata.iter().map(|(_, k)| (*k).clone()).collect();
         self.unknown_keys_but(o, POLICY_KEYS, &read, "a policy");
         let kind = match types(o)
@@ -770,7 +813,7 @@ impl<'a> Reader<'a> {
         let mut notes = Vec::new();
         for (term, key) in metadata {
             for v in items(&o[key]) {
-                match self.metadata(term, &kind, v) {
+                match metadata_note(term, matches!(kind, PolicyKind::Agreement), v) {
                     Some(note) => notes.push(note),
                     None => self.warn(format!("skipped an unreadable {term}")),
                 }
@@ -844,43 +887,6 @@ impl<'a> Reader<'a> {
             notes,
             rules,
         }
-    }
-
-    /// The note one value of the metadata `term` reads as: "Agreed on ..." or
-    /// "Issued on ..." for a timestamp, "Summary (en): ..." for a summary.
-    /// `None` when the value is not a string, a number or a literal, or is
-    /// blank.
-    fn metadata(&self, term: &str, kind: &PolicyKind, v: &Value) -> Option<String> {
-        let (text, language) = match v {
-            Value::String(s) => (s.clone(), None),
-            Value::Number(n) if term == "timestamp" => (n.to_string(), None),
-            Value::Object(o) => (
-                o.get("@value")?.as_str()?.to_string(),
-                o.get("@language").and_then(Value::as_str),
-            ),
-            _ => return None,
-        };
-        let text = text.trim();
-        if text.is_empty() {
-            return None;
-        }
-        Some(match term {
-            "timestamp" => match kind {
-                PolicyKind::Agreement => format!("Agreed {}.", when(text)),
-                _ => format!("Issued {}.", when(text)),
-            },
-            _ => {
-                let label = match language {
-                    Some(l) => format!("Summary ({l})"),
-                    None => "Summary".to_string(),
-                };
-                let stop = match text.ends_with(['.', '!', '?']) {
-                    true => "",
-                    false => ".",
-                };
-                format!("{label}: {text}{stop}")
-            }
-        })
     }
 
     fn rule(&mut self, v: &Value, kind: RuleKind, inh: &Inherited) -> Rule {
