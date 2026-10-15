@@ -251,6 +251,11 @@ fn when(s: &str) -> String {
 /// The most constraint references one document's reading follows.
 const MAX_FOLLOWED: usize = 1000;
 
+/// The most inherited rules one document's reading copies into the
+/// policies that inherit them. Each is read again for each heir, so a long
+/// chain of inheriting policies would cost the square of its length.
+const MAX_INHERITED: usize = 5000;
+
 /// The most terms one policy's glossary lists.
 const MAX_GLOSSARY: usize = 30;
 
@@ -284,13 +289,48 @@ pub fn document_with(value: &Value, wording: &Wording) -> Result<Reading, ProseE
             r.declared.entry(id).or_insert_with(|| v.clone());
         }
     }
+    let objs: Vec<Option<&Obj>> = nodes
+        .iter()
+        .map(|v| match v {
+            Value::Object(o) if looks_like_policy(o) => Some(o),
+            _ => None,
+        })
+        .collect();
+    let uids: Vec<Option<String>> = objs
+        .iter()
+        .map(|o| o.and_then(|o| get(o, &["uid", "@id", "id"]).and_then(ident)))
+        .collect();
+    let parents: Vec<Vec<String>> = objs
+        .iter()
+        .map(|o| o.map(parent_ids).unwrap_or_default())
+        .collect();
+    let (lineages, cut) = lineages(&uids, &parents, |id| r.iri(id));
+    if cut {
+        r.warn(format!(
+            "stopped following inheritFrom after {MAX_ANCESTRY} ancestors"
+        ));
+    }
     for (i, v) in nodes.into_iter().enumerate() {
         match v {
             Value::Object(o) if looks_like_policy(o) => {
                 if let Some(p) = scopes.get(i) {
                     r.ctx.set_prefixes(Prefixes::default().inside(p.clone()));
                 }
-                doc.policies.push(r.policy(o));
+                let lineage = &lineages[i];
+                let ancestors: Vec<(&str, &Obj)> = lineage
+                    .ancestors
+                    .iter()
+                    .filter_map(|&a| Some((uids[a].as_deref().unwrap_or_default(), objs[a]?)))
+                    .collect();
+                let lent;
+                let o = match ancestors.is_empty() {
+                    true => o,
+                    false => {
+                        lent = lend(o, &ancestors);
+                        &lent
+                    }
+                };
+                doc.policies.push(r.policy(o, &ancestors, lineage));
                 r.glossed.clear();
                 glossary.push(PolicyGlossary {
                     terms: std::mem::take(&mut r.glossary),
@@ -309,6 +349,127 @@ pub fn document_with(value: &Value, wording: &Wording) -> Result<Reading, ProseE
         document: doc,
         glossary,
     })
+}
+
+/// The policies `o` inherits from, as written.
+fn parent_ids(o: &Obj) -> Vec<String> {
+    o.get("inheritFrom")
+        .map(|p| items(p).into_iter().filter_map(ident).collect())
+        .unwrap_or_default()
+}
+
+fn inherits_note(parents: &[String]) -> String {
+    format!("Inherits the rules of {}.", join(parents))
+}
+
+/// Where a policy's inherited rules come from (ODRL IM 2.9).
+pub(crate) struct Lineage {
+    /// The policies it inherits from that are in the document, by index:
+    /// every ancestor once, depth first, never the policy itself.
+    pub ancestors: Vec<usize>,
+    /// The ancestors it names that are not in the document, as written.
+    pub missing: Vec<String>,
+    /// Whether every missing ancestor is one of its own parents.
+    pub missing_are_parents: bool,
+    /// Whether [`MAX_ANCESTRY`] left out some of its ancestors.
+    pub cut: bool,
+}
+
+/// The most ancestors all of one document's lineages list together. Every
+/// policy of an inheritance cycle has all the others as ancestors, so a long
+/// one would cost the square of its length.
+pub(crate) const MAX_ANCESTRY: usize = 20_000;
+
+/// The lineage of each policy, from `uids[i]` and `parents[i]` (its
+/// `inheritFrom`, as written), and whether [`MAX_ANCESTRY`] cut it short.
+/// `key` expands an identifier so that a parent written as a compact IRI
+/// finds the policy written with the full one.
+pub(crate) fn lineages(
+    uids: &[Option<String>],
+    parents: &[Vec<String>],
+    key: impl Fn(&str) -> String,
+) -> (Vec<Lineage>, bool) {
+    let mut index = std::collections::HashMap::new();
+    for (i, uid) in uids.iter().enumerate() {
+        if let Some(uid) = uid {
+            index.entry(key(uid)).or_insert(i);
+        }
+    }
+    // Each parent, as the policy it names or as written when it is not here.
+    let found: Vec<Vec<Result<usize, &String>>> = parents
+        .iter()
+        .map(|ids| {
+            ids.iter()
+                .map(|id| index.get(&key(id)).copied().ok_or(id))
+                .collect()
+        })
+        .collect();
+    let mut left = MAX_ANCESTRY;
+    let mut out = Vec::with_capacity(parents.len());
+    for (i, ids) in parents.iter().enumerate() {
+        let mut lineage = Lineage {
+            ancestors: Vec::new(),
+            missing: Vec::new(),
+            missing_are_parents: true,
+            cut: false,
+        };
+        let mut seen = std::collections::HashSet::from([i]);
+        let mut stack: Vec<&Result<usize, &String>> = found[i].iter().rev().collect();
+        while let Some(parent) = stack.pop() {
+            match *parent {
+                Err(id) => {
+                    if !lineage.missing.contains(id) {
+                        lineage.missing_are_parents &= ids.contains(id);
+                        lineage.missing.push(id.clone());
+                    }
+                }
+                Ok(a) if left > 0 && seen.insert(a) => {
+                    left -= 1;
+                    lineage.ancestors.push(a);
+                    stack.extend(found[a].iter().rev());
+                }
+                Ok(a) => lineage.cut |= left == 0 && !seen.contains(&a),
+            }
+        }
+        out.push(lineage);
+    }
+    (out, left == 0)
+}
+
+/// The policy-level properties a parent lends its child (ODRL IM 2.9).
+const LENT: [&str; 5] = ["assigner", "assignee", "target", "action", "conflict"];
+
+/// `o` with what its `ancestors` lend it (ODRL IM 2.9): each policy-level
+/// asset, party, action and conflict strategy it lacks and its ancestors
+/// agree on (where they disagree, each keeps its own for its own rules),
+/// and every profile any of them is written to, after its own.
+fn lend(o: &Obj, ancestors: &[(&str, &Obj)]) -> Obj {
+    let mut out = o.clone();
+    for k in LENT {
+        if o.contains_key(k) {
+            continue;
+        }
+        let mut lent = ancestors.iter().filter_map(|(_, a)| a.get(k));
+        if let Some(first) = lent.next()
+            && lent.all(|v| v == first)
+        {
+            out.insert(k.into(), first.clone());
+        }
+    }
+    let own = o.get("profile").map(items).unwrap_or_default();
+    let mut profiles: Vec<&Value> = own.clone();
+    for (_, a) in ancestors {
+        for p in a.get("profile").map(items).unwrap_or_default() {
+            if !profiles.contains(&p) {
+                profiles.push(p);
+            }
+        }
+    }
+    if profiles.len() > own.len() {
+        let profiles = profiles.into_iter().cloned().collect();
+        out.insert("profile".into(), Value::Array(profiles));
+    }
+    out
 }
 
 /// `v` with ODRL property keys written as compact IRIs (`odrl:permission`)
@@ -637,6 +798,8 @@ struct Reader<'a> {
     declared: std::collections::HashMap<String, Value>,
     following: Vec<String>,
     followed: usize,
+    /// How many inherited rules were copied into their heirs.
+    inherited: usize,
     /// How deep the constraint being read is nested, references included.
     nesting: usize,
     /// The document's prefixes, to tell two spellings of one constraint
@@ -683,6 +846,7 @@ impl<'a> Reader<'a> {
             declared: Default::default(),
             following: Vec::new(),
             followed: 0,
+            inherited: 0,
             nesting: 0,
             iris: Prefixes::default(),
         }
@@ -757,7 +921,10 @@ impl<'a> Reader<'a> {
         }
     }
 
-    fn policy(&mut self, o: &Obj) -> Policy {
+    /// The policy `o`, with the rules of its `ancestors` (as written, and
+    /// the node) after its own, each marked with where it comes from. `o`
+    /// already carries what they lend it ([`lend`]).
+    fn policy(&mut self, o: &Obj, ancestors: &[(&str, &Obj)], lineage: &Lineage) -> Policy {
         let metadata = metadata_keys(o);
         let read: Vec<String> = metadata.iter().map(|(_, k)| (*k).clone()).collect();
         self.unknown_keys_but(o, POLICY_KEYS, &read, "a policy");
@@ -846,11 +1013,9 @@ impl<'a> Reader<'a> {
                 other => format!("Conflicts are resolved by the strategy {other}."),
             });
         }
-        if let Some(p) = o.get("inheritFrom") {
-            let ids: Vec<String> = items(p).into_iter().filter_map(ident).collect();
-            if !ids.is_empty() {
-                notes.push(format!("Inherits the rules of {}.", join(&ids)));
-            }
+        let parents = parent_ids(o);
+        if !parents.is_empty() {
+            notes.push(inherits_note(&parents));
         }
 
         let inherited = Inherited {
@@ -871,8 +1036,76 @@ impl<'a> Reader<'a> {
                 }
             }
         }
-        if rules.is_empty() {
+        // A policy that inherits has the rules of its ancestors (ODRL IM
+        // 2.9), each with the policy-level properties of the ancestor it
+        // comes from and, where that has none, the child's.
+        for (from, a) in ancestors {
+            if self.inherited >= MAX_INHERITED {
+                self.warn(format!(
+                    "stopped copying inherited rules after {MAX_INHERITED}"
+                ));
+                break;
+            }
+            let pick = |k: &str| a.get(k).or_else(|| o.get(k));
+            let inherited = Inherited {
+                assigner: self.parties(pick("assigner")),
+                assignee: self.parties(pick("assignee")),
+                target: self.assets(pick("target")),
+                actions: self.actions(pick("action")),
+            };
+            for (key, kind) in [
+                ("permission", RuleKind::Permission),
+                ("prohibition", RuleKind::Prohibition),
+                ("obligation", RuleKind::Obligation),
+            ] {
+                for rule in a.get(key).map(items).unwrap_or_default() {
+                    if self.inherited >= MAX_INHERITED {
+                        self.warn(format!(
+                            "stopped copying inherited rules after {MAX_INHERITED}"
+                        ));
+                        break;
+                    }
+                    self.inherited += 1;
+                    let mut rule = self.rule(rule, kind, &inherited);
+                    rule.sentence = format!("Inherited from {from}: {}", rule.sentence);
+                    rules.push(rule);
+                }
+            }
+        }
+        if rules.is_empty() && parents.is_empty() {
             self.warn("a policy has no permission, prohibition or obligation");
+        }
+        // Inheriting from itself, or from policies here without rules, gives
+        // a policy none: it warns as one without parents does.
+        if rules.is_empty()
+            && !parents.is_empty()
+            && lineage.missing.is_empty()
+            && !lineage.cut
+            && self.inherited < MAX_INHERITED
+        {
+            self.warn("a policy has no permission, prohibition or obligation");
+            let old = inherits_note(&parents);
+            if let Some(n) = notes.iter_mut().find(|n| **n == old) {
+                n.pop();
+                n.push_str(", but no rule comes from there.");
+            }
+        }
+        if rules.is_empty() && !lineage.missing.is_empty() {
+            let (noun, verb) = match lineage.missing.len() {
+                1 => ("policy", "is"),
+                _ => ("policies", "are"),
+            };
+            let kin = match lineage.missing_are_parents {
+                true => "parent",
+                false => "ancestor",
+            };
+            let old = inherits_note(&parents);
+            if let Some(n) = notes.iter_mut().find(|n| **n == old) {
+                *n = format!(
+                    "All of its rules come from the {kin} {noun} {}, which {verb} not in this document.",
+                    join(&lineage.missing)
+                );
+            }
         }
 
         let label = class.as_deref().unwrap_or(label);

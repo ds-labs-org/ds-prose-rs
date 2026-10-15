@@ -4,9 +4,10 @@ use serde_json::{Map, Value};
 
 use super::model::*;
 use crate::ProseError;
+use crate::profile::Prefixes;
 use crate::read::{
     MAX_DEPTH, ODRL_NS, POLICY_KEYS, QUIET_PREFIXES, RULE_KEYS, bare_reference, get, ident, items,
-    looks_like_policy, metadata_keys, metadata_note, policy_nodes, types,
+    lineages, looks_like_policy, metadata_keys, metadata_note, policy_nodes, types,
 };
 use crate::words::local_name;
 
@@ -55,6 +56,7 @@ pub fn read_model_value(value: &Value) -> Result<EditDoc, ProseError> {
     if real == 0 {
         return Err(ProseError::NoPolicy);
     }
+    inheritance_warnings(&mut r, &policies, value);
     let mut doc = EditDoc::new(policies);
     doc.shape = shape;
     doc.origin = origin;
@@ -65,6 +67,36 @@ pub fn read_model_value(value: &Value) -> Result<EditDoc, ProseError> {
         .filter(|k| !r.metadata_read.contains(k))
         .collect();
     Ok(doc)
+}
+
+const NO_RULES: &str = "a policy has no permission, prohibition or obligation";
+
+fn has_rules(p: &PolicyNode) -> bool {
+    !(p.permission.is_empty() && p.prohibition.is_empty() && p.obligation.is_empty())
+}
+
+/// Warns, as `render` does, when a policy without rules of its own gets
+/// none by inheriting (ODRL IM 2.9) either: it inherits only from itself or
+/// from policies in the document that have no rules. Parents that are not
+/// in the document may have rules, so they are no reason to warn.
+fn inheritance_warnings(r: &mut Reader, policies: &[PolicyNode], value: &Value) {
+    let iris = Prefixes::of_document(value);
+    let uids: Vec<Option<String>> = policies.iter().map(|p| p.uid.clone()).collect();
+    let parents: Vec<Vec<String>> = policies.iter().map(|p| p.inherit_from.clone()).collect();
+    let (lineages, _) = lineages(&uids, &parents, |id| match id.contains(':') {
+        true => iris.expand(id),
+        false => id.to_string(),
+    });
+    for (p, lineage) in policies.iter().zip(lineages) {
+        if !has_rules(p)
+            && !p.inherit_from.is_empty()
+            && lineage.missing.is_empty()
+            && !lineage.cut
+            && !lineage.ancestors.iter().any(|&a| has_rules(&policies[a]))
+        {
+            r.warn(NO_RULES);
+        }
+    }
 }
 
 #[derive(Default)]
@@ -152,8 +184,9 @@ impl Reader {
             prohibition: self.rules(o.get("prohibition")),
             obligation: self.rules(o.get("obligation")),
         };
-        if p.permission.is_empty() && p.prohibition.is_empty() && p.obligation.is_empty() {
-            self.warn("a policy has no permission, prohibition or obligation");
+        // One that inherits is looked at once the whole document is read.
+        if !has_rules(&p) && p.inherit_from.is_empty() {
+            self.warn(NO_RULES);
         }
         p
     }
