@@ -29,7 +29,10 @@ pub struct Policy {
     pub notes: Vec<String>,
     /// Its own rules, then those it inherits from policies in the same
     /// document (`inheritFrom`), each sentence beginning "Inherited from
-    /// {parent}: ".
+    /// {parent}: ". As ODRL IM 2.9 replicates them, an inherited rule names
+    /// the child's policy-level parties and assets where its parent has none,
+    /// and the child's own rules (and intro, profile and conflict notes) take
+    /// what its parents agree on where it states none.
     pub rules: Vec<Rule>,
 }
 

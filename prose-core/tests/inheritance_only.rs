@@ -408,3 +408,35 @@ fn the_childs_own_conflict_strategy_and_profiles_come_first() {
         ]
     );
 }
+
+/// Every policy of an inheritance cycle inherits all the others, so a long
+/// cycle would be read in the square of its length; the reading stops
+/// copying and says so.
+#[test]
+fn a_long_inheritance_cycle_is_cut_short_and_says_so() {
+    let n = 250;
+    let graph: Vec<Value> = (0..n)
+        .map(|i| {
+            json!({
+                "@type": "Set",
+                "uid": format!("urn:policy:{i}"),
+                "inheritFrom": format!("urn:policy:{}", (i + 1) % n),
+                "permission": [{ "action": "use", "target": "urn:asset:1" }]
+            })
+        })
+        .collect();
+    let doc = read(json!({ "@graph": graph }));
+    assert_eq!(
+        doc.warnings,
+        [
+            "stopped following inheritFrom after 20000 ancestors",
+            "stopped copying inherited rules after 5000",
+        ]
+    );
+    let first = &doc.policies[0];
+    assert_eq!(first.rules.len(), n);
+    assert_eq!(
+        first.rules[1].sentence,
+        "Inherited from urn:policy:1: Anyone may use urn:asset:1."
+    );
+}
