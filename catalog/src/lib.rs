@@ -515,14 +515,21 @@ mod tests {
     fn a_reference_keeps_an_incomplete_reading_as_a_finding() {
         let found = sources::Found {
             slug: "eg1".into(),
-            title: "Constraint references (eg1)".into(),
+            title: "A constraint without an operator (eg1)".into(),
             about: String::new(),
             link: "https://w3c.github.io/poe/model/#x".into(),
             policy: serde_json::json!({ "@type": "Set", "uid": "http://x/p",
                 "permission": [{ "target": "http://x/a", "action": "use",
-                                 "constraint": [{ "@id": "http://x/c1" }] }] }),
+                                 "constraint": [{ "leftOperand": "count" }] }] }),
         };
-        let s = reference("w3c", "W3C ODRL examples", "", "W3C", vec![found]);
+        let s = reference(
+            "w3c",
+            "W3C ODRL examples",
+            "",
+            "W3C",
+            vec![found],
+            &mut |_| false,
+        );
         assert!(s.entries[0].incomplete);
     }
 

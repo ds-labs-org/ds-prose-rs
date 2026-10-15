@@ -134,16 +134,55 @@ fn a_declared_logical_constraint_is_read_with_its_operands() {
     assert_eq!(doc.warnings, Vec::<String>::new());
 }
 
+/// A constraint the document does not declare reads as defined at its IRI,
+/// and the condition carries that IRI so a host can link it (the reader
+/// itself never fetches anything).
 #[test]
 fn a_reference_to_nothing_declared_reads_as_a_reference() {
     for reference in [r#""urn:c:elsewhere""#, r#"{"@id": "urn:c:elsewhere"}"#] {
         let doc = render(&with_declared(reference, PURPOSE)).unwrap();
+        let read = &doc.policies[0].rules[0].conditions;
         assert_eq!(
-            texts(&doc.policies[0].rules[0].conditions),
-            ["the constraint urn:c:elsewhere holds"],
+            texts(read),
+            ["the constraint defined at urn:c:elsewhere holds"],
             "{reference}"
         );
+        assert_eq!(read[0].reference.as_deref(), Some("urn:c:elsewhere"));
+        assert!(read[0].children.is_empty());
+        assert_eq!(doc.warnings, Vec::<String>::new(), "{reference}");
     }
+}
+
+#[test]
+fn a_reference_inside_a_logical_constraint_keeps_its_iri() {
+    let doc = render(&with_declared(
+        r#"{"and": [{"@id": "https://example.com/c/1"}, {"@id": "urn:c:purpose"}]}"#,
+        PURPOSE,
+    ))
+    .unwrap();
+    let and = &doc.policies[0].rules[0].conditions[0];
+    assert_eq!(and.reference, None);
+    assert_eq!(
+        and.children[0].text,
+        "the constraint defined at https://example.com/c/1 holds"
+    );
+    assert_eq!(
+        and.children[0].reference.as_deref(),
+        Some("https://example.com/c/1")
+    );
+    assert_eq!(
+        and.children[1].reference, None,
+        "declared: read, not referred to"
+    );
+}
+
+#[test]
+fn a_constraint_declared_in_the_document_carries_no_reference() {
+    let doc = render(&with_declared(r#""urn:c:purpose""#, PURPOSE)).unwrap();
+    assert_eq!(doc.policies[0].rules[0].conditions[0].reference, None);
+    let doc = render(EG19).unwrap();
+    let xone = &doc.policies[0].rules[0].refinements[0].children[0];
+    assert!(xone.children.iter().all(|c| c.reference.is_none()));
 }
 
 #[test]
@@ -156,6 +195,10 @@ fn a_constraint_that_refers_to_itself_ends() {
     let and = &doc.policies[0].rules[0].conditions[0];
     assert_eq!(and.text, "all of the following hold");
     assert_eq!(texts(&and.children), ["the constraint urn:c:loop holds"]);
+    assert_eq!(
+        and.children[0].reference, None,
+        "declared here, not elsewhere"
+    );
 }
 
 #[test]
