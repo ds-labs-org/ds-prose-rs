@@ -403,3 +403,41 @@ fn a_document_that_writes_a_mark_character_is_read_as_written() {
     );
     assert_eq!(r.names[0].rules[0].conditions[0].text, []);
 }
+
+/// The label in the first of the wording's languages wins; without one,
+/// an untagged label wins over an English one, and English over the rest
+/// (#45 review).
+#[test]
+fn the_wordings_language_wins_then_untagged_then_english() {
+    let doc = graph(
+        json!({"action": "play", "target": "urn:asset:1"}),
+        vec![json!({"@id": "urn:asset:1", "rdfs:label": [
+            {"@value": "The Movie", "@language": "en"},
+            {"@value": "Der Film", "@language": "de"},
+            "Film 1",
+            {"@value": "Le Film", "@language": "fr"}
+        ]})],
+    );
+    let in_lang = |langs: &[&str]| {
+        let w = Wording::new().with_languages(langs.iter().map(|l| l.to_string()).collect());
+        let r = render_with(&doc.to_string(), &w).unwrap();
+        r.document.policies[0].rules[0].sentence.clone()
+    };
+    assert_eq!(in_lang(&["de"]), "Anyone may play Der Film.");
+    assert_eq!(in_lang(&["de-CH"]), "Anyone may play Der Film.");
+    assert_eq!(in_lang(&["it", "fr"]), "Anyone may play Le Film.");
+    assert_eq!(in_lang(&["it"]), "Anyone may play Film 1.", "untagged next");
+    assert_eq!(in_lang(&[]), "Anyone may play Film 1.");
+    let no_untagged = graph(
+        json!({"action": "play", "target": "urn:asset:1"}),
+        vec![json!({"@id": "urn:asset:1", "rdfs:label": [
+            {"@value": "Der Film", "@language": "de"},
+            {"@value": "The Movie", "@language": "en-GB"}
+        ]})],
+    );
+    assert_eq!(
+        sentence(&read(&no_untagged)),
+        "Anyone may play The Movie.",
+        "English next"
+    );
+}
