@@ -2,7 +2,7 @@
 use crate::ProseError;
 use crate::model::*;
 use crate::profile::{Budget, Prefixes, TermKind, Wording};
-use crate::words::{join, local_name};
+use crate::words::{humanise, join, local_name};
 use crate::words_ctx::{WordCtx, profile_name};
 use serde_json::{Map, Value};
 use std::sync::Arc;
@@ -55,7 +55,8 @@ pub(crate) const QUIET_PREFIXES: &[&str] =
 
 /// The ODRL namespace.
 pub(crate) const ODRL_NS: &str = "http://www.w3.org/ns/odrl/2/";
-/// The ODRL properties the reader looks up by their bare name.
+/// The ODRL properties the reader looks up by their bare name, with
+/// [`PARTY_FUNCTIONS`].
 const ODRL_PROPERTIES: &[&str] = &[
     "uid",
     "profile",
@@ -89,6 +90,54 @@ const ODRL_PROPERTIES: &[&str] = &[
     "source",
     "partOf",
 ];
+
+/// The party functions of the ODRL Common Vocabulary (Vocabulary 4.3), in
+/// the order a rule's sentence names them.
+const PARTY_FUNCTIONS: &[&str] = &[
+    "attributedParty",
+    "attributingParty",
+    "compensatedParty",
+    "compensatingParty",
+    "consentingParty",
+    "consentedParty",
+    "contractingParty",
+    "contractedParty",
+    "informedParty",
+    "informingParty",
+    "trackingParty",
+    "trackedParty",
+];
+
+/// How a party function reads with the one action of its rule.
+enum Phrase {
+    /// The parties are the verb's object, and the target follows `prep`:
+    /// "compensate X for T".
+    Object(&'static str),
+    /// The parties follow the target, after `prep`; `untargeted` stands in
+    /// for a target the rule does not name: "attribute the asset to X".
+    After(&'static str, &'static str),
+}
+
+/// The phrasing of `function` with the ODRL action `action` (a local
+/// name); `None` reads it as "(function: X)".
+fn phrase(function: &str, action: &str) -> Option<Phrase> {
+    Some(match (function, action) {
+        ("attributedParty", "attribute") => Phrase::After("to", " the asset"),
+        ("compensatedParty", "compensate") => Phrase::Object("for"),
+        ("informedParty", "inform") => Phrase::Object("about"),
+        ("consentingParty", "obtainConsent") => Phrase::After("from", ""),
+        ("trackingParty", "acceptTracking") => Phrase::After("by", ""),
+        _ => return None,
+    })
+}
+
+/// The local name of an ODRL term written bare, as `odrl:local` or as a
+/// full IRI; `None` for a term of another vocabulary.
+fn odrl_local(term: &str) -> Option<&str> {
+    term.strip_prefix(ODRL_NS)
+        .or_else(|| term.strip_prefix("odrl:"))
+        .or_else(|| (!term.contains(':')).then_some(term))
+}
 
 /// The most constraint references one document's reading follows.
 const MAX_FOLLOWED: usize = 1000;
@@ -189,12 +238,18 @@ impl Rewriter<'_> {
         let term = key
             .strip_prefix(ODRL_NS)
             .or_else(|| key.strip_prefix("odrl:").filter(|_| self.odrl_prefix))?;
-        ODRL_PROPERTIES.iter().copied().find(|p| *p == term)
+        ODRL_PROPERTIES
+            .iter()
+            .chain(PARTY_FUNCTIONS)
+            .copied()
+            .find(|p| *p == term)
     }
 
     /// Whether the value under `key` can hold ODRL nodes the reader will read.
     fn holds_odrl(key: &str) -> bool {
-        ODRL_PROPERTIES.contains(&key) || matches!(key, "@graph" | "@list" | "@set")
+        ODRL_PROPERTIES.contains(&key)
+            || PARTY_FUNCTIONS.contains(&key)
+            || matches!(key, "@graph" | "@list" | "@set")
     }
 
     fn cut_off(&mut self) -> Value {
@@ -486,7 +541,15 @@ struct Inherited {
     assigner: Named,
     assignee: Named,
     target: Named,
-    actions: Vec<(String, Vec<Condition>)>,
+    actions: Vec<Act>,
+}
+
+/// An action as written, as a verb phrase, and its refinements.
+#[derive(Clone)]
+struct Act {
+    term: String,
+    text: String,
+    refinements: Vec<Condition>,
 }
 
 /// Parties or assets as a sentence names them, and the IRIs of the
@@ -495,6 +558,9 @@ struct Inherited {
 struct Named {
     names: Vec<String>,
     refs: Vec<String>,
+    /// Whether a name ends in a refinement ("X where a; b"), which nothing
+    /// may follow in the same clause without reading as part of it.
+    refined: bool,
 }
 
 impl<'a> Reader<'a> {
@@ -725,11 +791,12 @@ impl<'a> Reader<'a> {
         };
         let functions: Vec<(String, String)> = o
             .keys()
-            .filter(|k| !RULE_KEYS.contains(&k.as_str()))
+            .filter(|k| !RULE_KEYS.contains(&k.as_str()) && !PARTY_FUNCTIONS.contains(&k.as_str()))
             .filter_map(|k| self.ctx.party_function(k).map(|l| (k.clone(), l)))
             .collect();
         let function_keys: Vec<String> = functions.iter().map(|(k, _)| k.clone()).collect();
-        self.unknown_keys_but(o, RULE_KEYS, &function_keys, "a rule");
+        let known: Vec<&str> = RULE_KEYS.iter().chain(PARTY_FUNCTIONS).copied().collect();
+        self.unknown_keys_but(o, &known, &function_keys, "a rule");
         let uid = get(o, &["uid", "@id", "id"]).and_then(ident);
 
         let own_assigner = self.parties(o.get("assigner"));
@@ -765,13 +832,13 @@ impl<'a> Reader<'a> {
             &own_actions
         };
 
-        let action_names: Vec<String> = actions.iter().map(|(a, _)| a.clone()).collect();
-        let action = if action_names.is_empty() {
+        let action_names: Vec<String> = actions.iter().map(|a| a.text.clone()).collect();
+        let mut action = if action_names.is_empty() {
             "perform an unspecified action on".to_string()
         } else {
             join(&action_names)
         };
-        let target_text = if target.is_empty() {
+        let mut target_text = if target.is_empty() {
             match kind {
                 RuleKind::Obligation => String::new(),
                 _ => " an unspecified asset".to_string(),
@@ -779,6 +846,55 @@ impl<'a> Reader<'a> {
         } else {
             format!(" {}", join(target))
         };
+
+        // Party functions: as the verb's object or after the target when
+        // the rule's one action has a phrasing for them, else in a
+        // parenthesis after the target. A refined object party goes after
+        // the target, so its refinement ends the clause instead of running
+        // into the target: "compensate, for T, X where a; b".
+        let one_action = match actions.as_slice() {
+            [a] => odrl_local(&a.term),
+            _ => None,
+        };
+        let mut aside = Vec::new();
+        for function in PARTY_FUNCTIONS {
+            let Some(v) = o.get(*function) else {
+                continue;
+            };
+            self.term(function, TermKind::PartyFunction, None);
+            let parties = self.parties(Some(v));
+            for r in parties.refs {
+                if !references.contains(&r) {
+                    references.push(r);
+                }
+            }
+            if parties.names.is_empty() {
+                continue;
+            }
+            let names = join(&parties.names);
+            match one_action.and_then(|a| phrase(function, a)) {
+                Some(Phrase::Object(prep)) => {
+                    if target_text.is_empty() {
+                        action = format!("{action} {names}");
+                    } else if parties.refined {
+                        target_text = format!(", {prep}{target_text}, {names}");
+                    } else {
+                        action = format!("{action} {names}");
+                        target_text = format!(" {prep}{target_text}");
+                    }
+                }
+                Some(Phrase::After(prep, untargeted)) => {
+                    if target_text.is_empty() {
+                        target_text = untargeted.to_string();
+                    }
+                    target_text.push_str(&format!(" {prep} {names}"));
+                }
+                None => aside.push(format!("{}: {names}", humanise(function))),
+            }
+        }
+        if !aside.is_empty() {
+            target_text.push_str(&format!(" ({})", aside.join("; ")));
+        }
         let by = |verb: &str| match assigner.is_empty() {
             true => String::new(),
             false => format!(", as {verb} by {}", join(assigner)),
@@ -824,10 +940,10 @@ impl<'a> Reader<'a> {
 
         let refinements = actions
             .iter()
-            .filter(|(_, c)| !c.is_empty())
-            .map(|(a, c)| Condition {
-                text: format!("The action \"{a}\" is limited to cases where"),
-                children: c.clone(),
+            .filter(|a| !a.refinements.is_empty())
+            .map(|a| Condition {
+                text: format!("The action \"{}\" is limited to cases where", a.text),
+                children: a.refinements.clone(),
                 reference: None,
             })
             .collect();
@@ -909,6 +1025,7 @@ impl<'a> Reader<'a> {
             return Named::default();
         };
         let mut refs = Vec::new();
+        let mut refined = false;
         let names = items(v)
             .into_iter()
             .filter_map(|e| match e {
@@ -935,6 +1052,7 @@ impl<'a> Reader<'a> {
                             })
                             .collect();
                         text.push_str(&format!(" where {}", parts.join("; ")));
+                        refined = true;
                     }
                     Some(text)
                 }
@@ -944,19 +1062,27 @@ impl<'a> Reader<'a> {
                 }
             })
             .collect();
-        Named { names, refs }
+        Named {
+            names,
+            refs,
+            refined,
+        }
     }
 
     // --- actions ----------------------------------------------------------
 
-    fn actions(&mut self, v: Option<&Value>) -> Vec<(String, Vec<Condition>)> {
+    fn actions(&mut self, v: Option<&Value>) -> Vec<Act> {
         let Some(v) = v else { return vec![] };
         items(v)
             .into_iter()
             .filter_map(|a| match a {
                 Value::String(s) => {
                     self.term(s, TermKind::Action, Some("action"));
-                    Some((self.ctx.action(s), vec![]))
+                    Some(Act {
+                        term: s.clone(),
+                        text: self.ctx.action(s),
+                        refinements: vec![],
+                    })
                 }
                 Value::Object(o) => {
                     // Pre-0.7 profiles name the action under `type`.
@@ -971,7 +1097,11 @@ impl<'a> Reader<'a> {
                         .get("refinement")
                         .map(|r| items(r).into_iter().map(|c| self.constraint(c)).collect())
                         .unwrap_or_default();
-                    Some((self.ctx.action(&name), refine))
+                    Some(Act {
+                        text: self.ctx.action(&name),
+                        term: name,
+                        refinements: refine,
+                    })
                 }
                 _ => {
                     self.warn("skipped an unreadable action");
