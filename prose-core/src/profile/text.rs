@@ -13,28 +13,8 @@ impl LangText {
     /// (`de-AT` for `de-CH`). Then English, then untagged text, then the
     /// first text given.
     pub fn pick(&self, prefs: &[String]) -> Option<&str> {
-        let tagged = |want: &dyn Fn(&str) -> bool| {
-            self.0
-                .iter()
-                .find(|(l, _)| l.as_deref().is_some_and(want))
-                .map(|(_, t)| t.as_str())
-        };
-        prefs
-            .iter()
-            .find_map(|p| {
-                let mut range = p.as_str();
-                loop {
-                    if let Some(t) = tagged(&|l| l.eq_ignore_ascii_case(range)) {
-                        return Some(t);
-                    }
-                    match shorter(range) {
-                        Some(r) => range = r,
-                        None => break,
-                    }
-                }
-                tagged(&|l| primary(l).eq_ignore_ascii_case(primary(p)))
-            })
-            .or_else(|| tagged(&|l| primary(l) == "en"))
+        self.preferred(prefs)
+            .or_else(|| self.tagged(&|l| primary(l) == "en"))
             .or_else(|| {
                 self.0
                     .iter()
@@ -42,6 +22,32 @@ impl LangText {
                     .map(|(_, t)| t.as_str())
             })
             .or_else(|| self.0.first().map(|(_, t)| t.as_str()))
+    }
+
+    /// The text in the best language for `prefs`, as [`LangText::pick`]
+    /// tries them, and nothing when none of them is given.
+    pub(crate) fn preferred(&self, prefs: &[String]) -> Option<&str> {
+        prefs.iter().find_map(|p| {
+            let mut range = p.as_str();
+            loop {
+                if let Some(t) = self.tagged(&|l| l.eq_ignore_ascii_case(range)) {
+                    return Some(t);
+                }
+                match shorter(range) {
+                    Some(r) => range = r,
+                    None => break,
+                }
+            }
+            self.tagged(&|l| primary(l).eq_ignore_ascii_case(primary(p)))
+        })
+    }
+
+    /// The first text whose tag `want` accepts.
+    fn tagged(&self, want: &dyn Fn(&str) -> bool) -> Option<&str> {
+        self.0
+            .iter()
+            .find(|(l, _)| l.as_deref().is_some_and(want))
+            .map(|(_, t)| t.as_str())
     }
 
     pub fn is_empty(&self) -> bool {

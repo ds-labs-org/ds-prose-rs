@@ -304,7 +304,9 @@ pub fn document_with(value: &Value, wording: &Wording) -> Result<Reading, ProseE
     let mut names = Vec::new();
     let nodes = policy_nodes(value);
     r.iris = Prefixes::of_document(value);
-    r.labels = declared_labels(value, &r.iris, r.ctx.langs());
+    // The wording's languages choose among labels with no profile loaded
+    // too.
+    r.labels = declared_labels(value, &r.iris, wording.languages());
     r.marking = !holds_marks(value);
     for v in declared_constraints(value) {
         if let Some(id) = ident(v) {
@@ -525,7 +527,10 @@ fn label_rank(key: &str, iris: &Prefixes) -> Option<usize> {
 }
 
 /// The label `o` declares: of its most preferred label property, the value
-/// in the first of `langs`, else untagged, else in English, else the first.
+/// in the first of `langs` that has one (matched as [`LangText::pick`]
+/// matches), else untagged, else in English, else the first.
+///
+/// [`LangText::pick`]: crate::profile::LangText::pick
 fn label_of(o: &Obj, iris: &Prefixes, langs: &[String]) -> Option<String> {
     let (_, value) = o
         .iter()
@@ -543,22 +548,18 @@ fn label_of(o: &Obj, iris: &Prefixes, langs: &[String]) -> Option<String> {
         })
         .filter(|(_, s)| !s.trim().is_empty())
         .collect();
-    let in_lang = |want: &str| {
-        values.iter().find(|(l, _)| {
-            l.is_some_and(|l| {
-                l.eq_ignore_ascii_case(want)
-                    || l.to_ascii_lowercase()
-                        .starts_with(&format!("{}-", want.to_ascii_lowercase()))
-            })
-        })
-    };
-    langs
-        .iter()
-        .find_map(|l| in_lang(l))
-        .or_else(|| values.iter().find(|(l, _)| l.is_none()))
-        .or_else(|| in_lang("en"))
-        .or(values.first())
-        .map(|(_, s)| s.trim().to_string())
+    let mut tagged = crate::profile::LangText::default();
+    for (l, v) in &values {
+        if let Some(l) = l {
+            tagged.push(Some(l), v.to_string());
+        }
+    }
+    tagged
+        .preferred(langs)
+        .or_else(|| values.iter().find(|(l, _)| l.is_none()).map(|(_, v)| *v))
+        .or_else(|| tagged.preferred(&["en".to_string()]))
+        .or(values.first().map(|(_, v)| *v))
+        .map(|s| s.trim().to_string())
 }
 
 /// The policies `o` inherits from, as written.
