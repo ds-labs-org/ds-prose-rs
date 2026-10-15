@@ -90,6 +90,9 @@ const ODRL_PROPERTIES: &[&str] = &[
     "partOf",
 ];
 
+/// The most constraint references one document's reading follows.
+const MAX_FOLLOWED: usize = 1000;
+
 /// The most terms one policy's glossary lists.
 const MAX_GLOSSARY: usize = 30;
 
@@ -115,7 +118,17 @@ pub fn document_with(value: &Value, wording: &Wording) -> Result<Reading, ProseE
     };
     let mut doc = Document::default();
     let mut glossary = Vec::new();
-    for (i, v) in policy_nodes(value).into_iter().enumerate() {
+    let nodes = policy_nodes(value);
+    for v in &nodes {
+        if let Value::Object(o) = v
+            && !looks_like_policy(o)
+            && looks_like_constraint(o)
+            && let Some(id) = ident(v)
+        {
+            r.declared.entry(id).or_insert_with(|| (*v).clone());
+        }
+    }
+    for (i, v) in nodes.into_iter().enumerate() {
         match v {
             Value::Object(o) if looks_like_policy(o) => {
                 if let Some(p) = scopes.get(i) {
@@ -127,6 +140,8 @@ pub fn document_with(value: &Value, wording: &Wording) -> Result<Reading, ProseE
                     terms: std::mem::take(&mut r.glossary),
                 });
             }
+            // Read where a rule refers to it.
+            Value::Object(o) if looks_like_constraint(o) && ident(v).is_some() => {}
             _ => r.warn("skipped a node that is not an ODRL policy"),
         }
     }
@@ -347,6 +362,17 @@ pub(crate) fn looks_like_policy(o: &Obj) -> bool {
         .any(|k| o.contains_key(*k))
 }
 
+/// A constraint declared as a node of its own, for rules to refer to by
+/// its identifier (ODRL Information Model, Example 19).
+fn looks_like_constraint(o: &Obj) -> bool {
+    types(o)
+        .iter()
+        .any(|t| matches!(local_name(t), "Constraint" | "LogicalConstraint"))
+        || ["leftOperand", "and", "or", "xone", "andSequence"]
+            .iter()
+            .any(|k| o.contains_key(*k))
+}
+
 pub(crate) fn types(o: &Obj) -> Vec<&str> {
     ["@type", "type"]
         .iter()
@@ -402,6 +428,12 @@ struct Reader<'a> {
     /// The current policy's glossary, and the IRIs already in it.
     glossary: Vec<Gloss>,
     glossed: std::collections::HashSet<String>,
+    /// The constraints the document declares as nodes of their own, by
+    /// identifier; the ones being read now; how many references were
+    /// followed.
+    declared: std::collections::HashMap<String, Value>,
+    following: Vec<String>,
+    followed: usize,
 }
 
 /// What a rule inherits from its policy when it states none of its own.
@@ -421,6 +453,9 @@ impl<'a> Reader<'a> {
             ctx,
             glossary: Vec::new(),
             glossed: Default::default(),
+            declared: Default::default(),
+            following: Vec::new(),
+            followed: 0,
         }
     }
 
@@ -724,6 +759,7 @@ impl<'a> Reader<'a> {
             .map(|(a, c)| Condition {
                 text: format!("The action \"{a}\" is limited to cases where"),
                 children: c.clone(),
+                reference: None,
             })
             .collect();
         let conditions = o
@@ -870,14 +906,17 @@ impl<'a> Reader<'a> {
     // --- constraints ------------------------------------------------------
 
     fn constraint(&mut self, v: &Value) -> Condition {
+        let reference = match v {
+            Value::String(id) => Some(id.clone()),
+            Value::Object(o) => bare_reference(o),
+            _ => None,
+        };
+        if let Some(id) = reference {
+            return self.referred(id);
+        }
         let Value::Object(o) = v else {
-            return Condition::leaf(match ident(v) {
-                Some(id) => format!("the constraint {id} holds"),
-                None => {
-                    self.warn("skipped an unreadable constraint");
-                    "an unreadable constraint holds".to_string()
-                }
-            });
+            self.warn("skipped an unreadable constraint");
+            return Condition::leaf("an unreadable constraint holds");
         };
         for (key, text) in [
             ("and", "all of the following hold"),
@@ -892,6 +931,7 @@ impl<'a> Reader<'a> {
                         .into_iter()
                         .map(|c| self.constraint(c))
                         .collect(),
+                    reference: None,
                 };
             }
         }
@@ -928,6 +968,36 @@ impl<'a> Reader<'a> {
             self.ctx.operator_for(&left, &op),
             right
         ))
+    }
+
+    /// A constraint referred to by `id`: the one the document declares,
+    /// read in its place, else a clause that names where it is defined.
+    /// One that refers to itself, or one past the bound on references,
+    /// reads by its identifier.
+    fn referred(&mut self, id: String) -> Condition {
+        let Some(declared) = self.declared.get(&id) else {
+            return Condition {
+                text: format!("the constraint defined at {id} holds"),
+                children: Vec::new(),
+                reference: Some(id),
+            };
+        };
+        if self.following.contains(&id) {
+            self.warn(format!("the constraint {id} refers to itself"));
+            return Condition::leaf(format!("the constraint {id} holds"));
+        }
+        if self.followed >= MAX_FOLLOWED {
+            self.warn(format!(
+                "stopped following constraint references after {MAX_FOLLOWED}"
+            ));
+            return Condition::leaf(format!("the constraint {id} holds"));
+        }
+        self.followed += 1;
+        let declared = declared.clone();
+        self.following.push(id);
+        let read = self.constraint(&declared);
+        self.following.pop();
+        read
     }
 
     fn literal(&mut self, v: &Value) -> String {

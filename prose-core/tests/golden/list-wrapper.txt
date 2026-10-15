@@ -19,6 +19,7 @@ Ok(
                             Condition {
                                 text: "the purpose is equal to \"research\"",
                                 children: [],
+                                reference: None,
                             },
                         ],
                         follow_ups: [],

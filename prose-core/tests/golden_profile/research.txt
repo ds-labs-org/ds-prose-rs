@@ -24,18 +24,22 @@ Ok(
                                         Condition {
                                             text: "the number of data subjects is at least 50",
                                             children: [],
+                                            reference: None,
                                         },
                                     ],
+                                    reference: None,
                                 },
                             ],
                             conditions: [
                                 Condition {
                                     text: "the research purpose is any of clinical research or academic research",
                                     children: [],
+                                    reference: None,
                                 },
                                 Condition {
                                     text: "the retention period is at most P2Y",
                                     children: [],
+                                    reference: None,
                                 },
                             ],
                             follow_ups: [],

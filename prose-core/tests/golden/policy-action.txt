@@ -21,8 +21,10 @@ Ok(
                                     Condition {
                                         text: "the location is equal to urn:geo:EU",
                                         children: [],
+                                        reference: None,
                                     },
                                 ],
+                                reference: None,
                             },
                         ],
                         conditions: [],

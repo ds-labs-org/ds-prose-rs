@@ -15,15 +15,21 @@
 //!   They are shown as written; what the renderer cannot read in them is a
 //!   finding, listed on their page, not a build failure.
 //!
+//! A constraint a policy refers to and does not declare reads as defined at
+//! its IRI; the page links the IRI when it answers HTTP 200 ([`links`]).
+//!
 //! [ds-odrl-compliance-rdf]: https://github.com/ds-labs-org/ds-odrl-compliance-rdf
 pub mod features;
+pub mod links;
 pub mod sources;
 pub mod translate;
 
 use prose_yew::OdrlProse;
+use prose_yew::prose_core::{Condition, Rule};
 use sources::Found;
 use std::collections::BTreeSet;
 use std::path::Path;
+use std::rc::Rc;
 use yew::AttrValue;
 
 /// One policy document as the catalog shows it.
@@ -51,11 +57,18 @@ pub struct Source {
     pub entries: Vec<Entry>,
 }
 
-/// Renders one policy document and checks its reading.
-pub fn entry(found: Found) -> Result<Entry, String> {
+/// Renders one policy document and checks its reading. `live` says whether
+/// the IRI of a constraint the policy refers to, and does not declare,
+/// answers HTTP 200 ([`links::answers_200`]); those IRIs are links.
+pub fn entry(found: Found, live: &mut dyn FnMut(&str) -> bool) -> Result<Entry, String> {
     let json = serde_json::to_string_pretty(&found.policy).expect("JSON") + "\n";
     let doc = prose_yew::prose_core::render(&json).map_err(|e| format!("{}: {e:?}", found.slug))?;
-    let html = without_markers(&ssr(&json));
+    let mut referred = BTreeSet::new();
+    for p in &doc.policies {
+        references(&p.rules, &mut referred);
+    }
+    let links = referred.into_iter().filter(|iri| live(iri)).collect();
+    let html = without_markers(&ssr(&json, links));
     Ok(Entry {
         incomplete: html.contains("incomplete constraint"),
         features: features::of(&found.policy),
@@ -69,9 +82,28 @@ pub fn entry(found: Found) -> Result<Entry, String> {
     })
 }
 
-fn ssr(json: &str) -> String {
+/// The IRIs of the constraints `rules` refer to and the document does not
+/// declare.
+fn references(rules: &[Rule], out: &mut BTreeSet<String>) {
+    fn walk(c: &[Condition], out: &mut BTreeSet<String>) {
+        for c in c {
+            out.extend(c.reference.clone());
+            walk(&c.children, out);
+        }
+    }
+    for r in rules {
+        walk(&r.refinements, out);
+        walk(&r.conditions, out);
+        for f in &r.follow_ups {
+            references(&f.rules, out);
+        }
+    }
+}
+
+fn ssr(json: &str, links: BTreeSet<String>) -> String {
     let props = yew::props!(prose_yew::OdrlProseProps {
         json: AttrValue::from(json.to_string()),
+        links: Rc::new(links),
     });
     let rt = tokio::runtime::Builder::new_current_thread()
         .build()
@@ -112,13 +144,17 @@ pub fn compliance(cases_dir: &Path, link: &str) -> Result<Source, String> {
     for n in &names {
         let text = std::fs::read_to_string(cases_dir.join(n)).map_err(|e| format!("{n}: {e}"))?;
         let case = translate::translate(n.trim_end_matches(".ttl"), &text)?;
-        let e = entry(Found {
-            link: format!("{link}/{}.ttl", case.slug),
-            title: label(&case.slug),
-            about: case.title,
-            slug: case.slug,
-            policy: case.policies,
-        })?;
+        // The translation writes every constraint inline: nothing to link.
+        let e = entry(
+            Found {
+                link: format!("{link}/{}.ttl", case.slug),
+                title: label(&case.slug),
+                about: case.title,
+                slug: case.slug,
+                policy: case.policies,
+            },
+            &mut |_| false,
+        )?;
         if e.incomplete {
             return Err(format!(
                 "{}: a constraint reads as incomplete; the translation misses a term",
@@ -145,18 +181,19 @@ Inheritance (`dsc:inheritsFrom`) becomes ODRL's `inheritFrom`.\n"
 }
 
 /// Renders the policies of a reference source. A document the renderer
-/// refuses is reported on stderr and left out.
+/// refuses is reported on stderr and left out. `live` is as for [`entry`].
 pub fn reference(
     id: &'static str,
     name: &'static str,
     intro: &str,
     license: &'static str,
     found: Vec<Found>,
+    live: &mut dyn FnMut(&str) -> bool,
 ) -> Source {
     let entries = found
         .into_iter()
         .filter_map(|f| {
-            entry(f)
+            entry(f, live)
                 .map_err(|e| eprintln!("warning: {id}: left out: {e}"))
                 .ok()
         })

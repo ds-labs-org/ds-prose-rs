@@ -15,11 +15,12 @@ fn found() -> Found {
         link: "https://w3c.github.io/poe/model/#x".into(),
         policy: json!({ "@context": "http://www.w3.org/ns/odrl.jsonld", "@graph": [
             { "@type": "Offer", "uid": "http://example.com/policy:88",
-              "permission": [{ "target": "http://example.com/book/1999", "action": "use",
-                "constraint": [{ "@id": "https://example.com/c/elsewhere" }],
-                "refinement": { "xone": { "@list": [
+              "permission": [{ "target": "http://example.com/book/1999",
+                "action": [{ "rdf:value": { "@id": "odrl:reproduce" },
+                  "refinement": { "xone": { "@list": [
                     { "@id": "http://example.com/p:88/C1" },
-                    { "@id": "http://example.com/p:88/C2" } ] } } }] },
+                    { "@id": "http://example.com/p:88/C2" } ] } } }],
+                "constraint": [{ "@id": "https://example.com/c/elsewhere" }] }] },
             { "@type": "Constraint", "uid": "http://example.com/p:88/C1",
               "leftOperand": "media", "operator": "eq", "rightOperand": "online" },
             { "@type": "Constraint", "uid": "http://example.com/p:88/C2",
@@ -28,7 +29,7 @@ fn found() -> Found {
     }
 }
 
-const LINK: &str = r#"<a class="prose-reference" href="https://example.com/c/elsewhere">https://example.com/c/elsewhere</a>"#;
+const LINK: &str = r#"<a href="https://example.com/c/elsewhere" class="prose-reference">https://example.com/c/elsewhere</a>"#;
 
 #[test]
 fn a_reference_that_answers_200_is_a_link() {

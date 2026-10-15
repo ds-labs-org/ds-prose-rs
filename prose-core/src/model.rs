@@ -64,6 +64,11 @@ pub struct FollowUp {
 pub struct Condition {
     pub text: String,
     pub children: Vec<Condition>,
+    /// The IRI of a constraint the policy refers to and the document does
+    /// not declare; `text` reads "the constraint defined at {IRI} holds".
+    /// The reader fetches nothing: a host that knows the IRI dereferences
+    /// can show it as a link.
+    pub reference: Option<String>,
 }
 
 impl Condition {
@@ -71,6 +76,7 @@ impl Condition {
         Condition {
             text: text.into(),
             children: Vec::new(),
+            reference: None,
         }
     }
 }

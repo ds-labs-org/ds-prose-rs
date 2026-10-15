@@ -26,7 +26,7 @@ async fn ssr(links: &[&str]) -> String {
 }
 
 fn link(iri: &str) -> String {
-    format!(r#"<a class="prose-reference" href="{iri}">{iri}</a>"#)
+    format!(r#"<a href="{iri}" class="prose-reference">{iri}</a>"#)
 }
 
 #[tokio::test]

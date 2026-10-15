@@ -2,7 +2,7 @@
 //! [--w3c <model.html> <link>] [--edc <dir> <link>] [--dsp <dir> <link>]`:
 //! builds the site's catalog from local copies of its sources. Each `link`
 //! is where that source's files are linked under.
-use compliance_catalog::{Source, compliance, reference, sources, write_site};
+use compliance_catalog::{Source, compliance, links, reference, sources, write_site};
 use std::path::Path;
 
 const W3C_INTRO: &str = "The examples of the [ODRL Information Model 2.2](https://www.w3.org/TR/odrl-model/), \
@@ -31,7 +31,10 @@ fn main() {
     if rest.len() % 3 != 0 {
         usage();
     }
-    let run = || -> Result<Vec<Source>, String> {
+    // A constraint declared outside its policy is linked when its IRI
+    // answers 200; each IRI is checked once per build.
+    let mut live = links::cached(|iri| links::answers_200(iri, links::TIMEOUT));
+    let mut run = || -> Result<Vec<Source>, String> {
         let mut out = Vec::new();
         for opt in rest.chunks(3) {
             let (path, link) = (Path::new(&opt[1]), opt[2].trim_end_matches('/'));
@@ -46,6 +49,7 @@ fn main() {
                         W3C_INTRO,
                         "W3C Software and Document License",
                         sources::w3c_model(&html, link),
+                        &mut live,
                     )
                 }
                 "--edc" => reference(
@@ -54,6 +58,7 @@ fn main() {
                     EDC_INTRO,
                     "Apache-2.0",
                     sources::json_dir(path, link)?,
+                    &mut live,
                 ),
                 "--dsp" => reference(
                     "dsp",
@@ -61,6 +66,7 @@ fn main() {
                     DSP_INTRO,
                     "Apache-2.0",
                     sources::json_dir(path, link)?,
+                    &mut live,
                 ),
                 _ => usage(),
             });

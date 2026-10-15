@@ -29,6 +29,7 @@ Ok(
                                             Condition {
                                                 text: "the payment amount is equal to 100.00 euro",
                                                 children: [],
+                                                reference: None,
                                             },
                                         ],
                                         follow_ups: [],

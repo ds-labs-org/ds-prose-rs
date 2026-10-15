@@ -28,6 +28,7 @@ async fn v01_snapshots() {
             glossary: true,
             validator: None,
             violations: false,
+            links: Default::default(),
         })
         .await;
         let path = format!("{}/tests/snapshots/{name}.html", env!("CARGO_MANIFEST_DIR"));
@@ -677,6 +678,7 @@ fn prose_props(json: String, wording: Option<Rc<Wording>>, glossary: bool) -> Od
         glossary,
         validator: None,
         violations: false,
+        links: Default::default(),
     }
 }
 

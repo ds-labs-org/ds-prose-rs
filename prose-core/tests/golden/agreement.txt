@@ -23,8 +23,10 @@ Ok(
                                     Condition {
                                         text: "the number of times used is at most 5",
                                         children: [],
+                                        reference: None,
                                     },
                                 ],
+                                reference: None,
                             },
                         ],
                         conditions: [
@@ -34,12 +36,15 @@ Ok(
                                     Condition {
                                         text: "the purpose is any of \"research\" or \"education\"",
                                         children: [],
+                                        reference: None,
                                     },
                                     Condition {
                                         text: "the location is equal to https://example.com/geo/EU",
                                         children: [],
+                                        reference: None,
                                     },
                                 ],
+                                reference: None,
                             },
                         ],
                         follow_ups: [],
