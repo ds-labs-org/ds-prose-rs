@@ -362,7 +362,7 @@ pub fn document_with(value: &Value, wording: &Wording) -> Result<Reading, ProseE
             // Read where a rule refers to it.
             Value::Object(o) if looks_like_constraint(o) && ident(v).is_some() => {}
             // Read where the policy names it.
-            Value::Object(o) if label_of(o, &r.iris, &[]).is_some() && ident(v).is_some() => {}
+            Value::Object(o) if only_labels(o, &r.iris) && ident(v).is_some() => {}
             _ => r.warn("skipped a node that is not an ODRL policy"),
         }
     }
@@ -420,23 +420,39 @@ fn declared_labels(
     labels
 }
 
+/// Whether `o` does nothing but label its identifier: apart from `@id`
+/// (or its aliases), `@type` and `@context`, it has label properties only,
+/// at least one. A node with anything more (a rule, a policy it holds) is
+/// not read, and is reported as skipped.
+fn only_labels(o: &Obj, iris: &Prefixes) -> bool {
+    label_of(o, iris, &[]).is_some()
+        && o.keys().all(|k| {
+            matches!(
+                k.as_str(),
+                "@id" | "id" | "uid" | "@type" | "type" | "@context"
+            ) || label_rank(k, iris).is_some()
+        })
+}
+
+/// Where `key` stands among [`LABEL_IRIS`], if it is a label property.
+fn label_rank(key: &str, iris: &Prefixes) -> Option<usize> {
+    let (prefix, local) = key.split_once(':')?;
+    let iri = iris.try_expand(key).or_else(|| {
+        LABEL_PREFIXES
+            .iter()
+            .find(|(p, _)| *p == prefix)
+            .map(|(_, ns)| format!("{ns}{local}"))
+    })?;
+    let iri = iri.replacen("https://schema.org/", "http://schema.org/", 1);
+    LABEL_IRIS.iter().position(|l| *l == iri)
+}
+
 /// The label `o` declares: of its most preferred label property, the value
 /// in the first of `langs`, else untagged, else in English, else the first.
 fn label_of(o: &Obj, iris: &Prefixes, langs: &[String]) -> Option<String> {
-    let rank = |key: &str| {
-        let (prefix, local) = key.split_once(':')?;
-        let iri = iris.try_expand(key).or_else(|| {
-            LABEL_PREFIXES
-                .iter()
-                .find(|(p, _)| *p == prefix)
-                .map(|(_, ns)| format!("{ns}{local}"))
-        })?;
-        let iri = iri.replacen("https://schema.org/", "http://schema.org/", 1);
-        LABEL_IRIS.iter().position(|l| *l == iri)
-    };
     let (_, value) = o
         .iter()
-        .filter_map(|(k, v)| Some((rank(k)?, v)))
+        .filter_map(|(k, v)| Some((label_rank(k, iris)?, v)))
         .min_by_key(|(r, _)| *r)?;
     let values: Vec<(Option<&str>, &str)> = items(value)
         .into_iter()
