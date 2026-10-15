@@ -32,7 +32,7 @@ tokio = { version = "1", features = ["rt", "macros"] }
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 yew = { version = "0.23", features = ["csr"] }
 wasm-bindgen-test = "0.3"
-gloo-timers = { version = "0.3", features = ["futures"] }
+gloo-timers = { version = "0.4", features = ["futures"] }
 web-sys = { version = "0.3", features = [
     "KeyboardEventInit", "FocusEventInit", "InputEventInit", "ClipboardEventInit",
     "EventInit", "HtmlInputElement", "DataTransfer", "MouseEvent", "MouseEventInit",
