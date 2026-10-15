@@ -139,3 +139,63 @@ async fn two_iris_of_one_short_label_are_shown_in_full() {
         assert_eq!(shown[0].1, iri, "the IRI is shown in full: {html}");
     }
 }
+
+/// Only where the text names the IRI is it marked: a quoted literal, or a
+/// word of the sentence, that reads like the IRI's label is not the IRI
+/// (#45 review).
+#[tokio::test]
+async fn a_literal_that_reads_like_a_label_is_not_the_iri() {
+    let html = ssr_of(
+        r#"{"@context": ["http://www.w3.org/ns/odrl.jsonld",
+            {"rdfs": "http://www.w3.org/2000/01/rdf-schema#"}],
+          "@type": "Set", "uid": "urn:p",
+          "permission": [{"action": "play",
+            "assignee": {"@id": "http://ex.com/alice", "rdfs:label": "Alice"},
+            "target": {"@id": "http://ex.com/d1", "rdfs:label": "research"},
+            "constraint": [
+              {"leftOperand": "recipient", "operator": "neq", "rightOperand": "Alice"},
+              {"leftOperand": "purpose", "operator": "eq", "rightOperand": "research"}]}]}"#,
+        &["http://ex.com/alice", "http://ex.com/d1"],
+    )
+    .await;
+    for (iri, label) in [
+        ("http://ex.com/alice", "Alice"),
+        ("http://ex.com/d1", "research"),
+    ] {
+        let shown = titled(&html, iri);
+        assert_eq!(shown.len(), 1, "only in the sentence: {html}");
+        assert_eq!(shown[0].1, label, "{html}");
+    }
+    assert!(html.contains(r#"is not equal to "Alice""#), "{html}");
+    assert!(html.contains(r#"is equal to "research""#), "{html}");
+}
+
+#[tokio::test]
+async fn a_label_that_is_also_the_action_marks_the_asset_only() {
+    let html = ssr_of(
+        r#"{"@context": ["http://www.w3.org/ns/odrl.jsonld",
+            {"rdfs": "http://www.w3.org/2000/01/rdf-schema#"}],
+          "@type": "Set", "uid": "urn:p",
+          "permission": [{"action": "play",
+            "target": {"@id": "urn:asset:1", "rdfs:label": "play"}}]}"#,
+        &[],
+    )
+    .await;
+    assert_eq!(titled(&html, "urn:asset:1").len(), 1, "{html}");
+    assert!(html.contains("Anyone may play <span"), "{html}");
+}
+
+#[tokio::test]
+async fn an_iri_written_two_ways_is_short_both_times() {
+    let html = ssr_of(
+        r#"{"@context": ["http://www.w3.org/ns/odrl.jsonld", {"ex": "http://example.com/"}],
+          "@type": "Set", "uid": "urn:p",
+          "permission": [{"action": "use", "target": "ex:asset:1"},
+            {"action": "play", "target": "http://example.com/asset:1"}]}"#,
+        &[],
+    )
+    .await;
+    let shown = titled(&html, "http://example.com/asset:1");
+    assert_eq!(shown.len(), 2, "{html}");
+    assert!(shown.iter().all(|(_, text)| *text == "asset:1"), "{html}");
+}
