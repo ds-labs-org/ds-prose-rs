@@ -2,7 +2,7 @@
 use crate::ProseError;
 use crate::model::*;
 use crate::profile::{Budget, Prefixes, TermKind, Wording};
-use crate::words::{humanise, join, local_name};
+use crate::words::{duration, humanise, is_duration_type, join, local_name};
 use crate::words_ctx::{WordCtx, profile_name};
 use serde_json::{Map, Value};
 use std::sync::Arc;
@@ -1898,16 +1898,24 @@ impl<'a> Reader<'a> {
         }
     }
 
+    /// Whether a literal's `@type` names xsd:duration.
+    fn is_duration(&self, datatype: &str) -> bool {
+        is_duration_type(&self.iris.expand(datatype))
+    }
+
     fn literal(&mut self, v: &Value) -> String {
         match v {
-            Value::String(s) => fmt_str(s),
+            Value::String(s) => duration(s).unwrap_or_else(|| fmt_str(s)),
             Value::Number(n) => n.to_string(),
             Value::Bool(b) => b.to_string(),
             Value::Object(o) => {
                 if let Some(inner) = o.get("@value") {
-                    let typed = o.get("@type").and_then(Value::as_str).is_some();
+                    let datatype = o.get("@type").and_then(Value::as_str);
                     return match inner {
-                        Value::String(s) if typed => s.clone(),
+                        Value::String(s) if datatype.is_some_and(|t| self.is_duration(t)) => {
+                            duration(s).unwrap_or_else(|| s.clone())
+                        }
+                        Value::String(s) if datatype.is_some() => s.clone(),
                         Value::String(s) => fmt_str(s),
                         // Sorted keys, as v0.1 printed them (it had no `preserve_order`).
                         other => sorted(other).to_string(),
