@@ -275,6 +275,7 @@ pub fn document_with(value: &Value, wording: &Wording) -> Result<Reading, ProseE
         false => Vec::new(),
     };
     let mut doc = Document::default();
+    let mut parents = Vec::new();
     let mut glossary = Vec::new();
     let nodes = policy_nodes(value);
     r.iris = Prefixes::of_document(value);
@@ -291,6 +292,7 @@ pub fn document_with(value: &Value, wording: &Wording) -> Result<Reading, ProseE
                     r.ctx.set_prefixes(Prefixes::default().inside(p.clone()));
                 }
                 doc.policies.push(r.policy(o));
+                parents.push(parent_ids(o));
                 r.glossed.clear();
                 glossary.push(PolicyGlossary {
                     terms: std::mem::take(&mut r.glossary),
@@ -304,11 +306,79 @@ pub fn document_with(value: &Value, wording: &Wording) -> Result<Reading, ProseE
     if doc.policies.is_empty() {
         return Err(ProseError::NoPolicy);
     }
+    inherit(&mut doc.policies, &parents, |id| r.iri(id));
     doc.warnings = r.warnings;
     Ok(Reading {
         document: doc,
         glossary,
     })
+}
+
+/// The policies `o` inherits from, as written.
+fn parent_ids(o: &Obj) -> Vec<String> {
+    o.get("inheritFrom")
+        .map(|p| items(p).into_iter().filter_map(ident).collect())
+        .unwrap_or_default()
+}
+
+fn inherits_note(parents: &[String]) -> String {
+    format!("Inherits the rules of {}.", join(parents))
+}
+
+/// Replicates into each policy the rules of the policies it inherits from
+/// (ODRL IM 2.9), after its own: every ancestor in the document once, depth
+/// first, each rule marked with the policy it comes from. A policy left
+/// without rules because its parents are not in the document says so in
+/// place of its inheritance note. `parents[i]` are `policies[i]`'s, as
+/// written; `iri` expands an identifier to match them up.
+fn inherit(policies: &mut [Policy], parents: &[Vec<String>], iri: impl Fn(&str) -> String) {
+    let mut index = std::collections::HashMap::new();
+    for (i, p) in policies.iter().enumerate() {
+        if let Some(uid) = &p.uid {
+            index.entry(iri(uid)).or_insert(i);
+        }
+    }
+    let own: Vec<Vec<Rule>> = policies.iter().map(|p| p.rules.clone()).collect();
+    for (i, ids) in parents.iter().enumerate() {
+        if ids.is_empty() {
+            continue;
+        }
+        let mut seen = std::collections::HashSet::from([i]);
+        let mut missing: Vec<String> = Vec::new();
+        let mut stack: Vec<&String> = ids.iter().rev().collect();
+        while let Some(id) = stack.pop() {
+            let Some(&a) = index.get(&iri(id)) else {
+                if ids.contains(id) && !missing.contains(id) {
+                    missing.push(id.clone());
+                }
+                continue;
+            };
+            if !seen.insert(a) {
+                continue;
+            }
+            let from = policies[a].uid.clone().unwrap_or_default();
+            for rule in &own[a] {
+                let mut rule = rule.clone();
+                rule.sentence = format!("Inherited from {from}: {}", rule.sentence);
+                policies[i].rules.push(rule);
+            }
+            stack.extend(parents[a].iter().rev());
+        }
+        if policies[i].rules.is_empty() && !missing.is_empty() {
+            let (noun, verb) = match missing.len() {
+                1 => ("policy", "is"),
+                _ => ("policies", "are"),
+            };
+            let note = format!(
+                "All of its rules come from the parent {noun} {}, which {verb} not in this document.",
+                join(&missing)
+            );
+            let old = inherits_note(ids);
+            if let Some(n) = policies[i].notes.iter_mut().find(|n| **n == old) {
+                *n = note;
+            }
+        }
+    }
 }
 
 /// `v` with ODRL property keys written as compact IRIs (`odrl:permission`)
@@ -846,11 +916,9 @@ impl<'a> Reader<'a> {
                 other => format!("Conflicts are resolved by the strategy {other}."),
             });
         }
-        if let Some(p) = o.get("inheritFrom") {
-            let ids: Vec<String> = items(p).into_iter().filter_map(ident).collect();
-            if !ids.is_empty() {
-                notes.push(format!("Inherits the rules of {}.", join(&ids)));
-            }
+        let parents = parent_ids(o);
+        if !parents.is_empty() {
+            notes.push(inherits_note(&parents));
         }
 
         let inherited = Inherited {
@@ -871,7 +939,9 @@ impl<'a> Reader<'a> {
                 }
             }
         }
-        if rules.is_empty() {
+        // A policy that inherits has the rules of its parents (ODRL IM 2.9),
+        // which [`inherit`] adds once the whole document is read.
+        if rules.is_empty() && parents.is_empty() {
             self.warn("a policy has no permission, prohibition or obligation");
         }
 

@@ -27,6 +27,9 @@ pub struct Policy {
     /// When it was made (`timestamp`), its summary, then profile, conflict
     /// strategy and inheritance, one sentence each.
     pub notes: Vec<String>,
+    /// Its own rules, then those it inherits from policies in the same
+    /// document (`inheritFrom`), each sentence beginning "Inherited from
+    /// {parent}: ".
     pub rules: Vec<Rule>,
 }
 
