@@ -86,3 +86,53 @@ fn the_declared_constraints_of_example_19_read() {
     assert!(!e.html.contains("incomplete"), "{}", e.html);
     assert!(e.warnings.is_empty(), "{:?}", e.warnings);
 }
+
+/// A policy that refers to undeclared constraints from a nested logical
+/// constraint, a duty, a duty's consequence and a target's refinement.
+fn scattered() -> Found {
+    Found {
+        slug: "scattered".into(),
+        title: "References everywhere".into(),
+        about: String::new(),
+        link: "https://example.com/policy".into(),
+        policy: json!({ "@context": "http://www.w3.org/ns/odrl.jsonld",
+            "@type": "Set", "uid": "urn:p",
+            "permission": [{ "action": "use",
+                "target": { "@id": "urn:a", "refinement": "https://example.com/c/target" },
+                "constraint": [{ "or": [
+                    { "@id": "https://example.com/c/nested" },
+                    { "leftOperand": "count", "operator": "lteq", "rightOperand": 1 } ] }],
+                "duty": [{ "action": "compensate",
+                    "constraint": { "@id": "https://example.com/c/duty" },
+                    "consequence": [{ "action": "inform",
+                        "constraint": "https://example.com/c/consequence" }] }] }] }),
+    }
+}
+
+const SCATTERED: [&str; 4] = [
+    "https://example.com/c/consequence",
+    "https://example.com/c/duty",
+    "https://example.com/c/nested",
+    "https://example.com/c/target",
+];
+
+#[test]
+fn every_undeclared_reference_is_checked_wherever_it_sits() {
+    let mut asked = Vec::new();
+    entry(scattered(), &mut |iri: &str| {
+        asked.push(iri.to_string());
+        false
+    })
+    .unwrap();
+    asked.sort();
+    assert_eq!(asked, SCATTERED);
+}
+
+#[test]
+fn every_reference_that_answers_200_is_a_link_wherever_it_sits() {
+    let e = entry(scattered(), &mut |_: &str| true).unwrap();
+    for iri in SCATTERED {
+        let link = format!(r#"<a href="{iri}" class="prose-reference">{iri}</a>"#);
+        assert!(e.html.contains(&link), "{iri}: {}", e.html);
+    }
+}
