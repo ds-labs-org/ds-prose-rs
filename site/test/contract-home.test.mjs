@@ -21,7 +21,8 @@ test('the policy on the page is the repository fixture, byte for byte', () => {
 test('the rendered block is the stored renderer output, and every sentence in it is on the page as text', () => {
   const stored = content('examples/offer.html').trim();
   assert.ok(home.includes(`<div class="rendered" role="region" aria-label="Rendered output" tabindex="0">${stored}</div>`));
-  const sentences = [...stored.matchAll(/<p class="prose-rule-sentence">([^<]+)<\/p>/g)].map((m) => unescape(m[1]));
+  // A sentence holds the IRIs it names as span.prose-iri (#45).
+  const sentences = [...stored.matchAll(/<p class="prose-rule-sentence">(.*?)<\/p>/g)].map((m) => unescape(m[1]));
   assert.equal(sentences.length, 2);
   for (const s of sentences) assert.ok(home.includes(s), s);
 });

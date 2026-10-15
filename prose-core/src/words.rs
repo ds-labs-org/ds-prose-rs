@@ -18,6 +18,27 @@ pub fn local_name(term: &str) -> &str {
     term.rsplit_once(':').map_or(term, |(_, local)| local)
 }
 
+/// A short name for an IRI: its last segment after a `/`, `#` or `:`, with
+/// trailing ones ignored, and the segment before it too when the last has
+/// no letter; the whole IRI if that leaves nothing.
+/// `http://example.com/asset:9898.movie` gives `9898.movie`,
+/// `http://example.com/person:88` gives `person:88`.
+pub fn short_iri(iri: &str) -> &str {
+    let trimmed = iri.trim_end_matches(['/', '#', ':']);
+    let cut = |s: &str| s.rfind(['/', '#', ':']).map_or(0, |i| i + 1);
+    let mut start = cut(trimmed);
+    if !trimmed[start..].chars().any(char::is_alphabetic) && start > 0 {
+        let before = cut(&trimmed[..start - 1]);
+        if before < start - 1 {
+            start = before;
+        }
+    }
+    match &trimmed[start..] {
+        "" => iri,
+        short => short,
+    }
+}
+
 /// `dateTime` -> `date time`, `payment_amount` -> `payment amount`.
 pub fn humanise(name: &str) -> String {
     let mut out = String::new();

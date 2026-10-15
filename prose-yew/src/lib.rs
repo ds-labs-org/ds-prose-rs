@@ -7,7 +7,9 @@
 //! plus `prose-permission` / `prose-prohibition` / `prose-obligation`,
 //! `prose-rule-sentence`, `prose-label`, `prose-notes`, `prose-warnings`,
 //! `prose-error`, `prose-reference` (a link to a constraint declared outside
-//! the document, see [`OdrlProseProps::links`]), and in the glossary of profile terms ([`ProseGlossary`])
+//! the document, see [`OdrlProseProps::links`]), `prose-iri` (a party, asset
+//! or value named by an IRI, shown short with the IRI in its title), and in
+//! the glossary of profile terms ([`ProseGlossary`])
 //! `prose-glossary`, `prose-note`, `prose-kind-of`, `prose-implies`,
 //! `prose-deprecated`, `prose-from`.
 //!
@@ -35,7 +37,10 @@ pub use edit::{
 pub use prose_core;
 use prose_core::profile::Wording;
 use prose_core::validate::{Report, Validator};
-use prose_core::{Condition, Document, Policy, PolicyGlossary, ProseError, Rule, RuleKind};
+use prose_core::{
+    Condition, ConditionNames, Document, Mention, NameSpan, Policy, PolicyGlossary, PolicyNames,
+    ProseError, Rule, RuleKind, RuleNames,
+};
 use std::collections::BTreeSet;
 use std::rc::Rc;
 use yew::prelude::*;
@@ -81,8 +86,9 @@ pub struct OdrlProseProps {
     pub violations: bool,
     /// IRIs the host found to dereference (the catalog: those that answer
     /// HTTP 200). A condition that refers to a constraint declared at one
-    /// of them shows the IRI as a link; any other IRI stays plain text. The
-    /// component fetches nothing. Empty by default: no link.
+    /// of them shows the IRI as a link, and so does a party, an asset or a
+    /// value named by an `http(s)` IRI among them; any other IRI is not a
+    /// link. The component fetches nothing. Empty by default: no link.
     #[prop_or_default]
     pub links: Rc<BTreeSet<String>>,
 }
@@ -169,7 +175,7 @@ pub fn odrl_prose(props: &OdrlProseProps) -> Html {
             let glossary = if props.glossary { &r.glossary[..] } else { &[] };
             html! {
                 <article class={class}>
-                    { document(&r.document, glossary, &props.links) }
+                    { document(&r.document, glossary, &r.mentions, &r.names, &props.links) }
                     if let Some(report) = &*report { { violations_section(report) } }
                 </article>
             }
@@ -217,10 +223,30 @@ fn error(e: &ProseError) -> Html {
 /// The IRIs a reference may link to.
 type Links = BTreeSet<String>;
 
-fn document(doc: &Document, glossary: &[PolicyGlossary], links: &Links) -> Html {
+/// What the text of one policy is shown with: the IRIs it names, and the
+/// IRIs that may be links.
+struct Cx<'a> {
+    mentions: &'a [Mention],
+    links: &'a Links,
+}
+
+/// Where no reading says where a text names an IRI: nowhere.
+static NO_NAMES: std::sync::LazyLock<(PolicyNames, RuleNames, ConditionNames)> =
+    std::sync::LazyLock::new(Default::default);
+
+fn document(
+    doc: &Document,
+    glossary: &[PolicyGlossary],
+    mentions: &[Vec<Mention>],
+    names: &[PolicyNames],
+    links: &Links,
+) -> Html {
     html! {
         <>
-            { for doc.policies.iter().enumerate().map(|(i, p)| policy(p, glossary.get(i), links)) }
+            { for doc.policies.iter().enumerate().map(|(i, p)| {
+                let cx = Cx { mentions: mentions.get(i).map_or(&[], Vec::as_slice), links };
+                policy(p, glossary.get(i), names.get(i).unwrap_or(&NO_NAMES.0), &cx)
+            }) }
             if !doc.warnings.is_empty() {
                 <aside class="prose-warnings">
                     <p class="prose-label">{ "Not rendered" }</p>
@@ -231,19 +257,20 @@ fn document(doc: &Document, glossary: &[PolicyGlossary], links: &Links) -> Html 
     }
 }
 
-fn policy(p: &Policy, glossary: Option<&PolicyGlossary>, links: &Links) -> Html {
+fn policy(p: &Policy, glossary: Option<&PolicyGlossary>, names: &PolicyNames, cx: &Cx) -> Html {
     let glossary = glossary.filter(|g| !g.terms.is_empty());
+    let rule_names = |j: usize| names.rules.get(j).unwrap_or(&NO_NAMES.1);
     html! {
         <section class="prose-policy">
             <h3>{ &p.heading }</h3>
             // The policy's parties are the ones its rules inherit, so their
             // references are among the rules'.
-            <p>{ linked_text(&p.intro, p.rules.iter().flat_map(|r| &r.references), links) }</p>
+            <p>{ linked_text(&p.intro, p.rules.iter().flat_map(|r| &r.references), &names.intro, cx) }</p>
             if !p.notes.is_empty() {
                 <ul class="prose-notes">{ for p.notes.iter().map(|n| html! { <li>{ n }</li> }) }</ul>
             }
             if !p.rules.is_empty() {
-                <ol class="prose-rules">{ for p.rules.iter().map(|r| rule(r, links)) }</ol>
+                <ol class="prose-rules">{ for p.rules.iter().enumerate().map(|(j, r)| rule(r, rule_names(j), cx)) }</ol>
             }
             if let Some(g) = glossary {
                 <ProseGlossary glossary={g.clone()} />
@@ -252,47 +279,57 @@ fn policy(p: &Policy, glossary: Option<&PolicyGlossary>, links: &Links) -> Html 
     }
 }
 
-fn rule(r: &Rule, links: &Links) -> Html {
+fn rule(r: &Rule, names: &RuleNames, cx: &Cx) -> Html {
     let kind = match r.kind {
         RuleKind::Permission => "prose-permission",
         RuleKind::Prohibition => "prose-prohibition",
         RuleKind::Obligation => "prose-obligation",
     };
+    let follow_up = |k: usize, l: usize| {
+        names
+            .follow_ups
+            .get(k)
+            .and_then(|f| f.get(l))
+            .unwrap_or(&NO_NAMES.1)
+    };
     html! {
         <li class={classes!("prose-rule", kind)}>
-            <p class="prose-rule-sentence">{ linked_text(&r.sentence, &r.references, links) }</p>
-            { conditions("Limits on the action", &r.refinements, links) }
-            { conditions("Applies only if", &r.conditions, links) }
-            { for r.follow_ups.iter().map(|f| html! {
+            <p class="prose-rule-sentence">{ linked_text(&r.sentence, &r.references, &names.sentence, cx) }</p>
+            { conditions("Limits on the action", &r.refinements, &names.refinements, cx) }
+            { conditions("Applies only if", &r.conditions, &names.conditions, cx) }
+            { for r.follow_ups.iter().enumerate().map(|(k, f)| html! {
                 <>
                     <p class="prose-label">{ format!("{}:", f.label) }</p>
-                    <ul>{ for f.rules.iter().map(|r| rule(r, links)) }</ul>
+                    <ul>{ for f.rules.iter().enumerate().map(|(l, r)| rule(r, follow_up(k, l), cx)) }</ul>
                 </>
             }) }
         </li>
     }
 }
 
-fn conditions(label: &str, list: &[Condition], links: &Links) -> Html {
+fn conditions(label: &str, list: &[Condition], names: &[ConditionNames], cx: &Cx) -> Html {
     if list.is_empty() {
         return html! {};
     }
     html! {
         <>
             <p class="prose-label">{ format!("{label}:") }</p>
-            { condition_list(list, links) }
+            { condition_list(list, names, cx) }
         </>
     }
 }
 
-fn condition_list(list: &[Condition], links: &Links) -> Html {
+fn condition_list(list: &[Condition], names: &[ConditionNames], cx: &Cx) -> Html {
     html! {
         <ul>
-            { for list.iter().map(|c| html! {
-                <li>
-                    { condition_text(c, links) }
-                    if !c.children.is_empty() { { ":" } { condition_list(&c.children, links) } }
-                </li>
+            { for list.iter().enumerate().map(|(i, c)| {
+                let names = names.get(i).unwrap_or(&NO_NAMES.2);
+                html! {
+                    <li>
+                        { condition_text(c, names, cx) }
+                        if !c.children.is_empty() { { ":" } { condition_list(&c.children, &names.children, cx) } }
+                    </li>
+                }
             }) }
         </ul>
     }
@@ -300,42 +337,86 @@ fn condition_list(list: &[Condition], links: &Links) -> Html {
 
 /// A condition's text, with the IRI of the constraint it refers to as a
 /// link when the host found that IRI dereferences.
-fn condition_text(c: &Condition, links: &Links) -> Html {
-    linked_text(&c.text, &c.reference, links)
+fn condition_text(c: &Condition, names: &ConditionNames, cx: &Cx) -> Html {
+    linked_text(&c.text, &c.reference, &names.text, cx)
 }
 
 /// `text`, in which each "the constraint defined at {IRI} holds" whose IRI
-/// is one of `iris` and one of `links` shows the IRI as a link. Only that
-/// clause is linked: the same IRI elsewhere in the text (an asset named by
-/// it) stays plain text.
-fn linked_text<'i>(text: &str, iris: impl IntoIterator<Item = &'i String>, links: &Links) -> Html {
+/// is one of `iris` keeps the IRI in full, as a link when it is one of the
+/// host's links, and each place `names` says the text names an IRI shows
+/// it short ([`iri`]). Those places come from the reading, so a literal or
+/// a word that reads like a label is left as it is.
+fn linked_text<'i>(
+    text: &str,
+    iris: impl IntoIterator<Item = &'i String>,
+    names: &[NameSpan],
+    cx: &Cx,
+) -> Html {
     const BEFORE: &str = "the constraint defined at ";
-    let iris: Vec<&str> = iris
-        .into_iter()
-        .map(String::as_str)
-        .filter(|iri| links.contains(*iri))
+    let mut marks: Vec<(usize, usize, Html)> = names
+        .iter()
+        .filter_map(|n| {
+            let m = cx.mentions.get(n.mention)?;
+            let shown = text.get(n.start..n.end)?;
+            Some((n.start, n.end, iri(m, shown, cx)))
+        })
         .collect();
-    let mut parts: Vec<Html> = Vec::new();
-    let mut rest = text;
-    loop {
-        let next = iris
-            .iter()
-            .filter_map(|iri| {
-                let at = rest.find(&format!("{BEFORE}{iri} holds"))?;
-                Some((at, *iri))
-            })
-            .min();
-        let Some((at, iri)) = next else { break };
-        let start = at + BEFORE.len();
-        parts.push(html! { { &rest[..start] } });
-        parts.push(html! { <a class="prose-reference" href={iri.to_string()}>{ iri }</a> });
-        rest = &rest[start + iri.len()..];
+    let mut seen: Vec<&str> = Vec::new();
+    for iri in iris.into_iter().map(String::as_str) {
+        if seen.contains(&iri) || !cx.links.contains(iri) {
+            continue;
+        }
+        seen.push(iri);
+        let clause = format!("{BEFORE}{iri} holds");
+        for (at, _) in text.match_indices(&clause) {
+            let start = at + BEFORE.len();
+            marks.push((
+                start,
+                start + iri.len(),
+                html! { <a class="prose-reference" href={iri.to_string()}>{ iri }</a> },
+            ));
+        }
     }
-    if parts.is_empty() {
+    if marks.is_empty() {
         return html! { { text } };
     }
-    parts.push(html! { { rest } });
+    marks.sort_by_key(|(start, end, _)| (*start, *end));
+    let mut parts: Vec<Html> = Vec::new();
+    let mut at = 0;
+    for (start, end, mark) in marks {
+        if start < at {
+            continue;
+        }
+        if start > at {
+            parts.push(html! { { &text[at..start] } });
+        }
+        parts.push(mark);
+        at = end;
+    }
+    if at < text.len() {
+        parts.push(html! { { &text[at..] } });
+    }
     html! { <>{ for parts }</> }
+}
+
+/// One IRI the prose names, short, with the full IRI in its title: a
+/// link when it is an `http(s)` IRI among the host's links. Where another
+/// IRI of the policy has the same short label, it is shown as the text
+/// reads there (`shown`).
+fn iri(m: &Mention, shown: &str, cx: &Cx) -> Html {
+    let short = m.short_label();
+    let shared = cx
+        .mentions
+        .iter()
+        .any(|o| o.iri != m.iri && o.short_label() == short);
+    let shown = if shared { shown } else { short };
+    let title = m.iri.clone();
+    let web = m.iri.starts_with("http://") || m.iri.starts_with("https://");
+    if web && cx.links.contains(&m.iri) {
+        html! { <a class="prose-iri" href={m.iri.clone()} {title}>{ shown.to_string() }</a> }
+    } else {
+        html! { <span class="prose-iri" {title}>{ shown.to_string() }</span> }
+    }
 }
 
 #[cfg(doctest)]

@@ -1,0 +1,34 @@
+{
+  "@context": [
+    "http://www.w3.org/ns/odrl.jsonld",
+    {"rdfs": "http://www.w3.org/2000/01/rdf-schema#", "dct": "http://purl.org/dc/terms/"}
+  ],
+  "@graph": [
+    {
+      "@type": "Agreement",
+      "uid": "http://example.com/policy:8080",
+      "permission": [{
+        "target": "http://example.com/asset:9898.movie",
+        "assigner": {"@id": "http://example.com/party:org:abc", "dct:title": "ABC Pictures"},
+        "assignee": "http://example.com/party:person:billie",
+        "action": "play",
+        "constraint": [{
+          "leftOperand": "spatial",
+          "operator": "eq",
+          "rightOperand": {"@id": "https://www.wikidata.org/wiki/Q183"}
+        }]
+      }]
+    },
+    {
+      "@id": "http://example.com/asset:9898.movie",
+      "rdfs:label": [
+        {"@value": "Der Film", "@language": "de"},
+        {"@value": "The Movie", "@language": "en"}
+      ]
+    },
+    {
+      "@id": "https://www.wikidata.org/wiki/Q183",
+      "http://www.w3.org/2004/02/skos/core#prefLabel": "Germany"
+    }
+  ]
+}

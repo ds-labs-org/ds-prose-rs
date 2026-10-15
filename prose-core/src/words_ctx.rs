@@ -58,7 +58,7 @@ impl<'a> WordCtx<'a> {
         self.prefixes = Cow::Owned(prefixes);
     }
 
-    fn langs(&self) -> &[String] {
+    pub(crate) fn langs(&self) -> &[String] {
         self.wording.map_or(&[], |w| w.languages())
     }
 

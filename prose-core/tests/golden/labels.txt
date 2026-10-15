@@ -1,0 +1,33 @@
+Ok(
+    Document {
+        policies: [
+            Policy {
+                kind: Agreement,
+                uid: Some(
+                    "http://example.com/policy:8080",
+                ),
+                heading: "Agreement http://example.com/policy:8080",
+                intro: "An agreement.",
+                notes: [],
+                rules: [
+                    Rule {
+                        kind: Permission,
+                        uid: None,
+                        sentence: "http://example.com/party:person:billie may play The Movie, as permitted by ABC Pictures.",
+                        refinements: [],
+                        conditions: [
+                            Condition {
+                                text: "the location is equal to Germany",
+                                children: [],
+                                reference: None,
+                            },
+                        ],
+                        follow_ups: [],
+                        references: [],
+                    },
+                ],
+            },
+        ],
+        warnings: [],
+    },
+)

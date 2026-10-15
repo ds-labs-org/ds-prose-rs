@@ -144,5 +144,99 @@ Ok(
                 ],
             },
         ],
+        mentions: [
+            [
+                Mention {
+                    written: "http://example.com/party:alice",
+                    iri: "http://example.com/party:alice",
+                    label: None,
+                },
+                Mention {
+                    written: "http://example.com/party:bob",
+                    iri: "http://example.com/party:bob",
+                    label: None,
+                },
+                Mention {
+                    written: "http://example.com/data:set1",
+                    iri: "http://example.com/data:set1",
+                    label: None,
+                },
+                Mention {
+                    written: "https://example.com/geo/EU",
+                    iri: "https://example.com/geo/EU",
+                    label: None,
+                },
+            ],
+        ],
+        names: [
+            PolicyNames {
+                intro: [
+                    NameSpan {
+                        start: 21,
+                        end: 51,
+                        mention: 0,
+                    },
+                    NameSpan {
+                        start: 67,
+                        end: 95,
+                        mention: 1,
+                    },
+                ],
+                rules: [
+                    RuleNames {
+                        sentence: [
+                            NameSpan {
+                                start: 0,
+                                end: 28,
+                                mention: 1,
+                            },
+                            NameSpan {
+                                start: 44,
+                                end: 72,
+                                mention: 2,
+                            },
+                            NameSpan {
+                                start: 90,
+                                end: 120,
+                                mention: 0,
+                            },
+                        ],
+                        refinements: [
+                            ConditionNames {
+                                text: [],
+                                children: [
+                                    ConditionNames {
+                                        text: [],
+                                        children: [],
+                                    },
+                                ],
+                            },
+                        ],
+                        conditions: [
+                            ConditionNames {
+                                text: [],
+                                children: [
+                                    ConditionNames {
+                                        text: [],
+                                        children: [],
+                                    },
+                                    ConditionNames {
+                                        text: [
+                                            NameSpan {
+                                                start: 25,
+                                                end: 51,
+                                                mention: 3,
+                                            },
+                                        ],
+                                        children: [],
+                                    },
+                                ],
+                            },
+                        ],
+                        follow_ups: [],
+                    },
+                ],
+            },
+        ],
     },
 )
