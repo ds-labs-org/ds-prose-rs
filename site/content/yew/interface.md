@@ -23,7 +23,7 @@ A function component that renders ODRL JSON-LD as semantic HTML with `prose_core
 | `glossary` | `bool` | `true` | Show a glossary of profile terms after each policy. It appears only when a profile explains a term the policy uses. |
 | `validator` | `Option<Validator>` | `None` | Validate against the validator's profiles. Nothing is shown for it unless `violations` is set. |
 | `violations` | `bool` | `false` | Add a section after the policies with the findings and the verdict. Needs `validator`. |
-| `links` | `Rc<BTreeSet<String>>` | empty | IRIs the host found to dereference. A condition that refers to a constraint declared at one of them, outside the document, shows the IRI as an `a.prose-reference`; any other IRI stays plain text. The component fetches nothing. |
+| `links` | `Rc<BTreeSet<String>>` | empty | IRIs the host found to dereference. A condition or a rule sentence that refers to a constraint declared at one of them, outside the document, shows the IRI as an `a.prose-reference`; any other IRI stays plain text. The component fetches nothing. |
 
 `SharedWording` wraps an `Rc<Wording>`. Two values are equal when they are the same `Rc`, so the component renders again only when the host hands it another `Rc`.
 

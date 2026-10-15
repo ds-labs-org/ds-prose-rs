@@ -48,6 +48,11 @@ pub struct Rule {
     /// Constraints on the rule: it applies only while all of these hold.
     pub conditions: Vec<Condition>,
     pub follow_ups: Vec<FollowUp>,
+    /// The IRIs of constraints the sentence refers to (in a target's or a
+    /// party's refinement) and the document does not declare, each once;
+    /// the sentence reads "the constraint defined at {IRI} holds" for each.
+    /// A rule's own conditions carry theirs on [`Condition::reference`].
+    pub references: Vec<String>,
 }
 
 /// Rules that hang off another rule: the duties a permission requires, the

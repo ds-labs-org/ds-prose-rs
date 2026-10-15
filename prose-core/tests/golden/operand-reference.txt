@@ -28,6 +28,7 @@ Ok(
                             },
                         ],
                         follow_ups: [],
+                        references: [],
                     },
                 ],
             },

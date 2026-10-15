@@ -236,7 +236,9 @@ fn policy(p: &Policy, glossary: Option<&PolicyGlossary>, links: &Links) -> Html 
     html! {
         <section class="prose-policy">
             <h3>{ &p.heading }</h3>
-            <p>{ &p.intro }</p>
+            // The policy's parties are the ones its rules inherit, so their
+            // references are among the rules'.
+            <p>{ linked_text(&p.intro, p.rules.iter().flat_map(|r| &r.references), links) }</p>
             if !p.notes.is_empty() {
                 <ul class="prose-notes">{ for p.notes.iter().map(|n| html! { <li>{ n }</li> }) }</ul>
             }
@@ -258,7 +260,7 @@ fn rule(r: &Rule, links: &Links) -> Html {
     };
     html! {
         <li class={classes!("prose-rule", kind)}>
-            <p class="prose-rule-sentence">{ &r.sentence }</p>
+            <p class="prose-rule-sentence">{ linked_text(&r.sentence, &r.references, links) }</p>
             { conditions("Limits on the action", &r.refinements, links) }
             { conditions("Applies only if", &r.conditions, links) }
             { for r.follow_ups.iter().map(|f| html! {
@@ -299,17 +301,41 @@ fn condition_list(list: &[Condition], links: &Links) -> Html {
 /// A condition's text, with the IRI of the constraint it refers to as a
 /// link when the host found that IRI dereferences.
 fn condition_text(c: &Condition, links: &Links) -> Html {
-    let linked = c
-        .reference
-        .as_deref()
+    linked_text(&c.text, &c.reference, links)
+}
+
+/// `text`, in which each "the constraint defined at {IRI} holds" whose IRI
+/// is one of `iris` and one of `links` shows the IRI as a link. Only that
+/// clause is linked: the same IRI elsewhere in the text (an asset named by
+/// it) stays plain text.
+fn linked_text<'i>(text: &str, iris: impl IntoIterator<Item = &'i String>, links: &Links) -> Html {
+    const BEFORE: &str = "the constraint defined at ";
+    let iris: Vec<&str> = iris
+        .into_iter()
+        .map(String::as_str)
         .filter(|iri| links.contains(*iri))
-        .and_then(|iri| Some((iri, c.text.split_once(iri)?)));
-    match linked {
-        Some((iri, (before, after))) => html! {
-            <>{ before }<a class="prose-reference" href={iri.to_string()}>{ iri }</a>{ after }</>
-        },
-        None => html! { { &c.text } },
+        .collect();
+    let mut parts: Vec<Html> = Vec::new();
+    let mut rest = text;
+    loop {
+        let next = iris
+            .iter()
+            .filter_map(|iri| {
+                let at = rest.find(&format!("{BEFORE}{iri} holds"))?;
+                Some((at, *iri))
+            })
+            .min();
+        let Some((at, iri)) = next else { break };
+        let start = at + BEFORE.len();
+        parts.push(html! { { &rest[..start] } });
+        parts.push(html! { <a class="prose-reference" href={iri.to_string()}>{ iri }</a> });
+        rest = &rest[start + iri.len()..];
     }
+    if parts.is_empty() {
+        return html! { { text } };
+    }
+    parts.push(html! { { rest } });
+    html! { <>{ for parts }</> }
 }
 
 #[cfg(doctest)]

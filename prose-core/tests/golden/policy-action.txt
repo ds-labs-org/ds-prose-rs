@@ -29,6 +29,7 @@ Ok(
                         ],
                         conditions: [],
                         follow_ups: [],
+                        references: [],
                     },
                 ],
             },

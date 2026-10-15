@@ -43,6 +43,7 @@ Ok(
                                 },
                             ],
                             follow_ups: [],
+                            references: [],
                         },
                         Rule {
                             kind: Permission,
@@ -51,6 +52,7 @@ Ok(
                             refinements: [],
                             conditions: [],
                             follow_ups: [],
+                            references: [],
                         },
                         Rule {
                             kind: Prohibition,
@@ -59,6 +61,7 @@ Ok(
                             refinements: [],
                             conditions: [],
                             follow_ups: [],
+                            references: [],
                         },
                         Rule {
                             kind: Obligation,
@@ -67,6 +70,7 @@ Ok(
                             refinements: [],
                             conditions: [],
                             follow_ups: [],
+                            references: [],
                         },
                     ],
                 },

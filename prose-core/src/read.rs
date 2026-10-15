@@ -483,10 +483,18 @@ struct Reader<'a> {
 /// What a rule inherits from its policy when it states none of its own.
 #[derive(Default, Clone)]
 struct Inherited {
-    assigner: Vec<String>,
-    assignee: Vec<String>,
-    target: Vec<String>,
+    assigner: Named,
+    assignee: Named,
+    target: Named,
     actions: Vec<(String, Vec<Condition>)>,
+}
+
+/// Parties or assets as a sentence names them, and the IRIs of the
+/// undeclared constraints their refinements refer to.
+#[derive(Default, Clone)]
+struct Named {
+    names: Vec<String>,
+    refs: Vec<String>,
 }
 
 impl<'a> Reader<'a> {
@@ -595,8 +603,9 @@ impl<'a> Reader<'a> {
         for t in types(o) {
             self.term(t, TermKind::PolicyClass, None);
         }
-        let assigner = self.parties(o.get("assigner"));
-        let assignee = self.parties(o.get("assignee"));
+        let assigner_named = self.parties(o.get("assigner"));
+        let assignee_named = self.parties(o.get("assignee"));
+        let (assigner, assignee) = (&assigner_named.names, &assignee_named.names);
 
         let (label, intro) = match &kind {
             PolicyKind::Set => ("Policy set", "A set of rules".to_string()),
@@ -604,7 +613,7 @@ impl<'a> Reader<'a> {
                 "Offer",
                 match assigner.is_empty() {
                     true => "An offer".to_string(),
-                    false => format!("An offer made by {}", join(&assigner)),
+                    false => format!("An offer made by {}", join(assigner)),
                 },
             ),
             PolicyKind::Agreement => ("Agreement", "An agreement".to_string()),
@@ -613,16 +622,16 @@ impl<'a> Reader<'a> {
         let mut intro = intro;
         match (&kind, assigner.is_empty(), assignee.is_empty()) {
             (PolicyKind::Offer, _, false) => {
-                intro.push_str(&format!(", addressed to {}", join(&assignee)))
+                intro.push_str(&format!(", addressed to {}", join(assignee)))
             }
             (PolicyKind::Offer, _, true) => {}
             (_, false, false) => intro.push_str(&format!(
                 " between {} (assigner) and {} (assignee)",
-                join(&assigner),
-                join(&assignee)
+                join(assigner),
+                join(assignee)
             )),
-            (_, false, true) => intro.push_str(&format!(" from {} (assigner)", join(&assigner))),
-            (_, true, false) => intro.push_str(&format!(" for {} (assignee)", join(&assignee))),
+            (_, false, true) => intro.push_str(&format!(" from {} (assigner)", join(assigner))),
+            (_, true, false) => intro.push_str(&format!(" for {} (assignee)", join(assignee))),
             (_, true, true) => {}
         }
         intro.push('.');
@@ -663,8 +672,8 @@ impl<'a> Reader<'a> {
         }
 
         let inherited = Inherited {
-            assigner,
-            assignee,
+            assigner: assigner_named.clone(),
+            assignee: assignee_named.clone(),
             target: self.assets(o.get("target")),
             actions: self.actions(o.get("action")),
         };
@@ -710,6 +719,7 @@ impl<'a> Reader<'a> {
                     refinements: vec![],
                     conditions: vec![],
                     follow_ups: vec![],
+                    references: vec![],
                 };
             }
         };
@@ -726,21 +736,29 @@ impl<'a> Reader<'a> {
         let own_assignee = self.parties(o.get("assignee"));
         let own_target = self.assets(o.get("target"));
         let own_actions = self.actions(o.get("action"));
-        let assigner = if own_assigner.is_empty() {
-            &inh.assigner
-        } else {
-            &own_assigner
+        let own = |own: &'_ Named, inherited: &'_ Named| -> Named {
+            match own.names.is_empty() {
+                true => inherited.clone(),
+                false => own.clone(),
+            }
         };
-        let assignee = if own_assignee.is_empty() {
-            &inh.assignee
-        } else {
-            &own_assignee
-        };
-        let target = if own_target.is_empty() {
-            &inh.target
-        } else {
-            &own_target
-        };
+        let assigner_named = own(&own_assigner, &inh.assigner);
+        let assignee_named = own(&own_assignee, &inh.assignee);
+        let target_named = own(&own_target, &inh.target);
+        let mut references = Vec::new();
+        for r in [&assigner_named, &assignee_named, &target_named]
+            .into_iter()
+            .flat_map(|n| &n.refs)
+        {
+            if !references.contains(r) {
+                references.push(r.clone());
+            }
+        }
+        let (assigner, assignee, target) = (
+            &assigner_named.names,
+            &assignee_named.names,
+            &target_named.names,
+        );
         let actions = if own_actions.is_empty() {
             &inh.actions
         } else {
@@ -794,8 +812,13 @@ impl<'a> Reader<'a> {
         for (key, label) in &functions {
             self.term(key, TermKind::PartyFunction, None);
             let parties = self.parties(o.get(key));
-            if !parties.is_empty() {
-                sentence.push_str(&format!(" {label}: {}.", join(&parties)));
+            if !parties.names.is_empty() {
+                sentence.push_str(&format!(" {label}: {}.", join(&parties.names)));
+            }
+            for r in parties.refs {
+                if !references.contains(&r) {
+                    references.push(r);
+                }
             }
         }
 
@@ -816,8 +839,8 @@ impl<'a> Reader<'a> {
         // Duties of an obligation or follow-ups of a duty inherit nothing:
         // the parties are re-stated by the author or read as "the assignee".
         let child_inh = Inherited {
-            assigner: assigner.clone(),
-            assignee: assignee.clone(),
+            assigner: assigner_named.clone(),
+            assignee: assignee_named.clone(),
             ..Default::default()
         };
         let mut follow_ups = Vec::new();
@@ -867,22 +890,26 @@ impl<'a> Reader<'a> {
             refinements,
             conditions,
             follow_ups,
+            references,
         }
     }
 
     // --- parties and assets ---------------------------------------------
 
-    fn parties(&mut self, v: Option<&Value>) -> Vec<String> {
+    fn parties(&mut self, v: Option<&Value>) -> Named {
         self.entities(v, "party")
     }
 
-    fn assets(&mut self, v: Option<&Value>) -> Vec<String> {
+    fn assets(&mut self, v: Option<&Value>) -> Named {
         self.entities(v, "asset")
     }
 
-    fn entities(&mut self, v: Option<&Value>, noun: &str) -> Vec<String> {
-        let Some(v) = v else { return vec![] };
-        items(v)
+    fn entities(&mut self, v: Option<&Value>, noun: &str) -> Named {
+        let Some(v) = v else {
+            return Named::default();
+        };
+        let mut refs = Vec::new();
+        let names = items(v)
             .into_iter()
             .filter_map(|e| match e {
                 Value::String(s) => Some(s.clone()),
@@ -901,7 +928,11 @@ impl<'a> Reader<'a> {
                     if let Some(r) = o.get("refinement") {
                         let parts: Vec<String> = items(r)
                             .into_iter()
-                            .map(|c| inline(&self.constraint(c)))
+                            .map(|c| {
+                                let c = self.constraint(c);
+                                references_in(&c, &mut refs);
+                                inline(&c)
+                            })
                             .collect();
                         text.push_str(&format!(" where {}", parts.join("; ")));
                     }
@@ -912,7 +943,8 @@ impl<'a> Reader<'a> {
                     None
                 }
             })
-            .collect()
+            .collect();
+        Named { names, refs }
     }
 
     // --- actions ----------------------------------------------------------
@@ -1143,6 +1175,20 @@ pub(crate) fn join_with(items: &[String], conj: &str) -> String {
         [] => String::new(),
         [one] => one.clone(),
         [init @ .., last] => format!("{} {conj} {last}", init.join(", ")),
+    }
+}
+
+/// The IRIs `c` and its sub-clauses refer to, each once, in reading order.
+/// Iterative: the depth of a reading is bounded, but not by much.
+fn references_in(c: &Condition, out: &mut Vec<String>) {
+    let mut stack = vec![c];
+    while let Some(c) = stack.pop() {
+        if let Some(r) = &c.reference
+            && !out.contains(r)
+        {
+            out.push(r.clone());
+        }
+        stack.extend(c.children.iter().rev());
     }
 }
 

@@ -21,6 +21,7 @@ Ok(
                         refinements: [],
                         conditions: [],
                         follow_ups: [],
+                        references: [],
                     },
                 ],
             },

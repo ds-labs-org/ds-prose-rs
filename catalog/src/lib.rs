@@ -92,6 +92,7 @@ fn references(rules: &[Rule], out: &mut BTreeSet<String>) {
         }
     }
     for r in rules {
+        out.extend(r.references.iter().cloned());
         walk(&r.refinements, out);
         walk(&r.conditions, out);
         for f in &r.follow_ups {
