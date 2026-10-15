@@ -371,6 +371,8 @@ pub(crate) struct Lineage {
     pub missing: Vec<String>,
     /// Whether every missing ancestor is one of its own parents.
     pub missing_are_parents: bool,
+    /// Whether [`MAX_ANCESTRY`] left out some of its ancestors.
+    pub cut: bool,
 }
 
 /// The most ancestors all of one document's lineages list together. Every
@@ -409,6 +411,7 @@ pub(crate) fn lineages(
             ancestors: Vec::new(),
             missing: Vec::new(),
             missing_are_parents: true,
+            cut: false,
         };
         let mut seen = std::collections::HashSet::from([i]);
         let mut stack: Vec<&Result<usize, &String>> = found[i].iter().rev().collect();
@@ -425,7 +428,7 @@ pub(crate) fn lineages(
                     lineage.ancestors.push(a);
                     stack.extend(found[a].iter().rev());
                 }
-                Ok(_) => {}
+                Ok(a) => lineage.cut |= left == 0 && !seen.contains(&a),
             }
         }
         out.push(lineage);
@@ -1071,6 +1074,21 @@ impl<'a> Reader<'a> {
         }
         if rules.is_empty() && parents.is_empty() {
             self.warn("a policy has no permission, prohibition or obligation");
+        }
+        // Inheriting from itself, or from policies here without rules, gives
+        // a policy none: it warns as one without parents does.
+        if rules.is_empty()
+            && !parents.is_empty()
+            && lineage.missing.is_empty()
+            && !lineage.cut
+            && self.inherited < MAX_INHERITED
+        {
+            self.warn("a policy has no permission, prohibition or obligation");
+            let old = inherits_note(&parents);
+            if let Some(n) = notes.iter_mut().find(|n| **n == old) {
+                n.pop();
+                n.push_str(", but no rule comes from there.");
+            }
         }
         if rules.is_empty() && !lineage.missing.is_empty() {
             let (noun, verb) = match lineage.missing.len() {
