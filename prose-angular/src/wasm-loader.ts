@@ -1,5 +1,5 @@
 /** Loads and instantiates the wasm module. Injected so it can be tested. */
-export type WasmInit = (url: string) => Promise<unknown>;
+export type WasmInit<A, T> = (arg: A) => Promise<T>;
 
 /**
  * A loader that runs `init` at most once at a time and shares the result, so
@@ -7,11 +7,11 @@ export type WasmInit = (url: string) => Promise<unknown>;
  * the callers waiting on it all see the failure, and the next call tries again
  * (the file may have been missing only for a moment).
  */
-export function createWasmLoader(init: WasmInit): (url: string) => Promise<unknown> {
-  let ready: Promise<unknown> | undefined;
-  return (url) => {
+export function createWasmLoader<A, T>(init: WasmInit<A, T>): (arg: A) => Promise<T> {
+  let ready: Promise<T> | undefined;
+  return (arg) => {
     if (!ready) {
-      const attempt: Promise<unknown> = init(url).catch((error: unknown) => {
+      const attempt: Promise<T> = init(arg).catch((error: unknown) => {
         if (ready === attempt) ready = undefined;
         throw error;
       });

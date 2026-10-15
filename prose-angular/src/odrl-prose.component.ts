@@ -10,12 +10,12 @@ import {
   output,
   signal,
 } from '@angular/core';
-import { ProseHandle, ProseValidator, type ValidateOptions, type ValidationReport } from '@ds-labs/prose-wasm';
+import type { ProseHandle, ValidateOptions, ValidationReport } from '@ds-labs/prose-wasm';
 import { ProfileSummary, parseSummary } from './profile-sync';
 import { StandaloneReporter, createChangeTracker, parseReport, profileTexts, reportChanged, validationOptions } from './validation-sync';
-import { PROSE_WASM_URL, loadWasm } from './wasm-runtime';
+import { PROSE_WASM_MODULE, PROSE_WASM_URL, type ProseWasmModule, loadWasm } from './wasm-runtime';
 
-export { PROSE_WASM_URL };
+export { PROSE_WASM_MODULE, PROSE_WASM_URL };
 
 /**
  * `<ds-odrl-prose [json]="policy" />` renders ODRL JSON-LD as plain-language
@@ -24,8 +24,9 @@ export { PROSE_WASM_URL };
  * The component owns the host element's children (Yew keeps its own virtual
  * DOM there); style it through the `prose-*` classes or the `class` input.
  *
- * `[profile]` takes the text of an ODRL profile (JSON-LD or Turtle, as the
- * host fetched it; the component does no network access). The prose then uses
+ * `[profile]` takes the text of an ODRL profile (JSON-LD, or Turtle with the
+ * Turtle build, see `PROSE_WASM_MODULE`; as the host fetched it, the
+ * component does no network access). The prose then uses
  * the profile's labels, and a glossary of its terms follows each policy.
  * `profileLoaded` emits the profile's summary; an unreadable profile emits
  * `profileError` and the previous profile stays.
@@ -56,9 +57,9 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
   readonly json = input.required<string>();
   /** Extra class(es) for the rendered `<article class="ds-prose">`. */
   readonly articleClass = input<string>();
-  /** The ODRL profile the prose is worded with, as JSON-LD or Turtle text. */
+  /** The ODRL profile the prose is worded with, as JSON-LD text (or Turtle, with the Turtle build). */
   readonly profile = input<string | null>(null);
-  /** Several ODRL profiles, as JSON-LD or Turtle text each; wins over `profile`. */
+  /** Several ODRL profiles, as JSON-LD (or Turtle) text each; wins over `profile`. */
   readonly profiles = input<string[] | null>(null);
   /** Validate with a closed vocabulary: ODRL plus the loaded profiles. */
   readonly strict = input(false);
@@ -82,13 +83,15 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
   private readonly zone = inject(NgZone);
   private readonly wasmUrl = inject(PROSE_WASM_URL);
+  private readonly wasmModule = inject(PROSE_WASM_MODULE);
+  private wasm?: ProseWasmModule;
   private handle?: ProseHandle;
   private readonly profilesChanged = createChangeTracker<string[]>();
   private readonly handleOptionsChanged = createChangeTracker<ValidateOptions>();
   // The profiles the handle holds now, and the validator built from them for
   // a report the handle is not asked for.
   private appliedProfiles: string[] = [];
-  private readonly standalone = new StandaloneReporter((profiles, options) => new ProseValidator(profiles, options));
+  private readonly standalone = new StandaloneReporter((profiles, options) => new this.wasm!.ProseValidator(profiles, options));
   // Whether the handle validates (it was given options, with the findings shown).
   private handleValidates = false;
   private destroyed = false;
@@ -107,7 +110,7 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
 
   private async sync(): Promise<void> {
     try {
-      await loadWasm(this.wasmUrl);
+      this.wasm = await loadWasm({ module: this.wasmModule, url: this.wasmUrl });
     } catch (error) {
       if (!this.destroyed) this.showLoadError(error);
       return;
@@ -124,7 +127,7 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
     // Yew schedules its own work; keep it out of Angular's change detection.
     const outcome = this.zone.runOutsideAngular(() => {
       const mounted = this.handle;
-      const handle = mounted ?? new ProseHandle(this.host, json, cls);
+      const handle = mounted ?? new this.wasm!.ProseHandle(this.host, json, cls);
       this.handle = handle;
       const out: {
         summaries?: ProfileSummary[];

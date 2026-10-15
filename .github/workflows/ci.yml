@@ -50,11 +50,13 @@ jobs:
           RUSTDOCFLAGS: "-D warnings"
 
       # The workspace build turns on prose-core's turtle feature (prose-wasm
-      # asks for it); prose-core alone is tested without it and with it.
-      - name: prose-core with and without Turtle
+      # asks for it by default); prose-core alone is tested without it and
+      # with it, and prose-wasm without it (the default npm build).
+      - name: prose-core and prose-wasm with and without Turtle
         run: |
           cargo test -p prose-core --locked
           cargo test -p prose-core --features turtle --locked
+          cargo test -p prose-wasm --no-default-features --locked
 
       # A time budget for strict validation (building the index, then one
       # large policy). Ignored in the debug run above, where it would measure
@@ -105,6 +107,7 @@ jobs:
         run: |
           cargo clippy -p prose-yew -p demo --target wasm32-unknown-unknown --features csr --all-targets --locked -- -D warnings
           cargo clippy -p prose-wasm --target wasm32-unknown-unknown --all-targets --locked -- -D warnings
+          cargo clippy -p prose-wasm --no-default-features --target wasm32-unknown-unknown --all-targets --locked -- -D warnings
 
       # `--test '*'`, not a list of names: a new file under tests/ is covered
       # the moment it exists (a bare `cargo test -p ... --target
@@ -122,6 +125,8 @@ jobs:
           cargo test -p prose-yew --target wasm32-unknown-unknown --features csr --locked --test '*'
           cargo test -p demo --target wasm32-unknown-unknown --locked --test '*'
           cargo test -p prose-wasm --target wasm32-unknown-unknown --locked --test '*'
+          # The default npm file, without the Turtle reader.
+          cargo test -p prose-wasm --no-default-features --target wasm32-unknown-unknown --locked --test '*'
 
   # The release demo build, served under the Pages sub-path (/demo/ of the
   # site) and booted in a browser. Catches a build or boot failure before the
@@ -166,9 +171,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
-          # wasm-pack builds the npm package; Trunk builds the Yew demo that
-          # goes into the site tree.
-          tool: trunk@0.22.0-beta.2,wasm-pack
+          # wasm-pack builds the npm package (0.14 or newer: --profile);
+          # Trunk builds the Yew demo that goes into the site tree.
+          tool: trunk@0.22.0-beta.2,wasm-pack@0.15.0
       - uses: actions/setup-node@v4
         with:
           # Angular 20 (the demo) needs Node 20.19, 22.12 or newer; the

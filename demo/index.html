@@ -11,6 +11,10 @@
     <link data-trunk rel="css" href="../site/content/examples/prose.css" />
     <link data-trunk rel="css" href="../site/content/examples/prose-editor.css" />
     <link data-trunk rel="css" href="styles.css" />
+    <!-- Release builds use the size-tuned wasm-release profile of the workspace
+         Cargo.toml. wasm-opt is off: it saves nothing over that profile once
+         compressed, and Trunk's binaryen rejects the bulk-memory ops LTO emits. -->
+    <link data-trunk rel="rust" data-bin="demo" data-cargo-profile-release="wasm-release" data-wasm-opt="0" />
 </head>
 <body>
 <!--ds-topnav-->

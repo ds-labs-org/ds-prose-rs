@@ -12,8 +12,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 prose-yew = { path = "../prose-yew", features = ["csr"] }
-# The npm build reads profiles written in Turtle as well as JSON-LD.
-prose-core = { path = "../prose-core", features = ["turtle"] }
+prose-core = { path = "../prose-core" }
 yew = { version = "0.23", features = ["csr"] }
 wasm-bindgen = "0.2"
 # `validate` takes plain JS values (options, profile lists) and turns them
@@ -23,11 +22,20 @@ web-sys = { version = "0.3", features = ["Element"] }
 # The profile summary `setProfile` returns is JSON text.
 serde_json = "1"
 
+[features]
+# Read profiles written in Turtle as well as JSON-LD. The npm package ships
+# two builds: prose_wasm_bg.wasm without it (the default file, about 30 KiB
+# smaller over the wire) and prose_wasm_turtle_bg.wasm with it.
+default = ["turtle"]
+turtle = ["prose-core/turtle"]
+
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3"
 gloo-timers = { version = "0.3", features = ["futures"] }
 web-sys = { version = "0.3", features = ["Document", "Window", "HtmlElement"] }
 
 [package.metadata.wasm-pack.profile.release]
-# The system wasm-opt rejects rustc's default wasm features; size is not the point of this crate.
+# The system wasm-opt rejects rustc's default wasm features. The npm build
+# uses the workspace's size-tuned `wasm-release` profile with `--no-opt`
+# instead (scripts/package-prose-wasm.mjs): wasm-opt saves nothing over it.
 wasm-opt = false

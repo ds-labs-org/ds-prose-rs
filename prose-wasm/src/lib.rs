@@ -5,8 +5,8 @@
 //! Yew keeps its own virtual DOM inside that element, so the host must not
 //! touch the element's children.
 //!
-//! `setProfile` reads an ODRL profile as JSON-LD or Turtle (prose-core's
-//! `turtle` feature is on in this crate); the host fetches it. `setProfiles`
+//! `setProfile` reads an ODRL profile as JSON-LD, or Turtle with this
+//! crate's `turtle` feature (on by default); the host fetches it. `setProfiles`
 //! reads several, and `setValidation` adds the validator's findings to the
 //! rendering.
 //!
@@ -84,8 +84,8 @@ fn throw(e: String) -> JsError {
     JsError::new(&e)
 }
 
-/// Reads `text` as a profile (JSON-LD, or Turtle: this crate turns on
-/// prose-core's `turtle` feature). `None` means no profile.
+/// Reads `text` as a profile (JSON-LD, or Turtle with the `turtle`
+/// feature). `None` means no profile.
 pub fn read_profile(text: Option<&str>) -> Result<Option<SharedWording>, ProfileError> {
     match text {
         None => Ok(None),
@@ -177,7 +177,8 @@ impl ProseHandle {
     /// previous profile then stays.
     #[wasm_bindgen(js_name = setProfile)]
     pub fn set_profile(&mut self, text: Option<String>) -> Result<String, JsError> {
-        let wording = read_profile(text.as_deref()).map_err(|e| JsError::new(&e.to_string()))?;
+        let wording = read_profile(text.as_deref())
+            .map_err(|e| JsError::new(&validation::profile_error(&e)))?;
         let summary = match wording.as_ref().and_then(|w| w.0.profiles().next()) {
             Some(p) => summary_json(p),
             None => "null".to_string(),
@@ -361,6 +362,7 @@ mod tests {
         assert_eq!(s["warnings"], json!([]));
     }
 
+    #[cfg(feature = "turtle")]
     #[test]
     fn summary_of_turtle_twin_is_the_same() {
         assert_eq!(summary(RESEARCH_TTL), summary(RESEARCH));
@@ -385,7 +387,13 @@ mod tests {
     fn read_profile_none_clears_and_errors_pass_through() {
         assert!(read_profile(None).unwrap().is_none());
         assert!(read_profile(Some(RESEARCH)).unwrap().is_some());
+        #[cfg(feature = "turtle")]
         assert!(read_profile(Some(RESEARCH_TTL)).unwrap().is_some());
+        #[cfg(not(feature = "turtle"))]
+        assert_eq!(
+            read_profile(Some(RESEARCH_TTL)).unwrap_err(),
+            ProfileError::UnsupportedFormat
+        );
         assert_eq!(
             read_profile(Some("<!doctype html><p>hi")).unwrap_err(),
             ProfileError::LooksLikeHtml

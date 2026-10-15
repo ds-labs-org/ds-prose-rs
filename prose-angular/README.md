@@ -55,7 +55,7 @@ export class PolicyComponent {
 |---|---|---|
 | `json` | input, required | the ODRL policy as JSON-LD text |
 | `articleClass` | input | extra class(es) for the rendered `<article class="ds-prose">` |
-| `profile` | input | the ODRL profile the prose is worded with, as JSON-LD or Turtle text (`null` or blank: none) |
+| `profile` | input | the ODRL profile the prose is worded with, as JSON-LD text, or Turtle with the Turtle build (`null` or blank: none) |
 | `profiles` | input | several profiles, as text each; a list wins over `profile` (an empty list clears them) |
 | `strict` | input | validate with a closed vocabulary: ODRL plus the loaded profiles (default `false`) |
 | `validation` | input | the full `ValidateOptions`; takes precedence over `strict` |
@@ -67,6 +67,7 @@ export class PolicyComponent {
 | `profileLoaded` | output | emits a `ProfileSummary` (`iri`, `title`, `version`, `terms`, `counts`, `warnings`) for each profile loaded |
 | `profileError` | output | emits the error when `profile` is not a readable profile; the previous profile stays |
 | `PROSE_WASM_URL` | injection token | where the browser fetches the wasm from, relative to the page's base href (default `prose_wasm_bg.wasm`) |
+| `PROSE_WASM_MODULE` | injection token | which build of `@ds-labs/prose-wasm` runs: by default JSON-LD profiles only; `() => import('@ds-labs/prose-wasm/turtle')`, with `PROSE_WASM_URL` set to `prose_wasm_turtle_bg.wasm`, reads Turtle as well |
 
 Invalid JSON shows an error message in place of the prose; it recovers on the
 next valid input. Style the result through the `prose-*` classes

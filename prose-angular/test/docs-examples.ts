@@ -7,6 +7,7 @@
 import { ApplicationConfig, Component, ViewEncapsulation, inject, signal } from '@angular/core';
 import {
   OdrlProseComponent,
+  PROSE_WASM_MODULE,
   PROSE_WASM_URL,
   ProseValidatorService,
   type ProfileSummary,
@@ -33,6 +34,15 @@ export const appConfig: ApplicationConfig = {
   providers: [{ provide: PROSE_WASM_URL, useValue: '/assets/prose_wasm_bg.wasm' }],
 };
 // endregion: wasm_url
+
+// region: turtle
+export const turtleConfig: ApplicationConfig = {
+  providers: [
+    { provide: PROSE_WASM_MODULE, useValue: () => import('@ds-labs/prose-wasm/turtle') },
+    { provide: PROSE_WASM_URL, useValue: 'prose_wasm_turtle_bg.wasm' },
+  ],
+};
+// endregion: turtle
 
 // region: profile
 @Component({

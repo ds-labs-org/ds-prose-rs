@@ -146,12 +146,23 @@ fn unreadable_profiles_name_their_position() {
     assert!(e.contains("profile 1"), "{e}");
 }
 
+#[cfg(feature = "turtle")]
 #[test]
 fn json_and_turtle_profiles_validate_alike() {
     let a = report(CLEAN, &[RESEARCH], json!({}));
     let b = report(CLEAN, &[RESEARCH_TTL], json!({}));
     assert_eq!(a, b);
     assert_eq!(a["verdict"], "conforms");
+}
+
+/// The default npm file has no Turtle reader: the message says which file
+/// has one.
+#[cfg(not(feature = "turtle"))]
+#[test]
+fn turtle_profile_names_the_turtle_build() {
+    let e = wording(&[RESEARCH_TTL.to_string()]).unwrap_err();
+    assert!(e.contains("profile 1"), "{e}");
+    assert!(e.contains("@ds-labs/prose-wasm/turtle"), "{e}");
 }
 
 #[test]

@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
-import { validate, type ValidateOptions, type ValidationReport } from '@ds-labs/prose-wasm';
-import { PROSE_WASM_URL, loadWasm } from './wasm-runtime';
+import type { ValidateOptions, ValidationReport } from '@ds-labs/prose-wasm';
+import { PROSE_WASM_MODULE, PROSE_WASM_URL, loadWasm } from './wasm-runtime';
 
 /**
  * Validates ODRL policies against ODRL profiles without rendering anything
@@ -11,12 +11,14 @@ import { PROSE_WASM_URL, loadWasm } from './wasm-runtime';
 @Injectable({ providedIn: 'root' })
 export class ProseValidatorService {
   private readonly wasmUrl = inject(PROSE_WASM_URL);
+  private readonly wasmModule = inject(PROSE_WASM_MODULE);
 
   /**
    * The report for the policy `json` against `profiles` (the text of each
-   * profile, JSON-LD or Turtle; the service does no network access). Strict
-   * unless `options.strict` is `false`. Waits for the wasm module to load;
-   * rejects when it cannot, or when a profile or the options cannot be read.
+   * profile, JSON-LD, or Turtle with the Turtle build; the service does no
+   * network access). Strict unless `options.strict` is `false`. Waits for
+   * the wasm module to load; rejects when it cannot, or when a profile or
+   * the options cannot be read.
    * A problem in the policy is never a rejection: it is a finding.
    */
   async validate(
@@ -24,8 +26,8 @@ export class ProseValidatorService {
     profiles: string | readonly string[] | null = null,
     options: ValidateOptions | null = null,
   ): Promise<ValidationReport> {
-    await loadWasm(this.wasmUrl);
+    const wasm = await loadWasm({ module: this.wasmModule, url: this.wasmUrl });
     const list = typeof profiles === 'string' || profiles == null ? profiles : [...profiles];
-    return JSON.parse(validate(json, list, options)) as ValidationReport;
+    return JSON.parse(wasm.validate(json, list, options)) as ValidationReport;
   }
 }

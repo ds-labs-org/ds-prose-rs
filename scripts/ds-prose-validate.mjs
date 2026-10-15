@@ -196,11 +196,12 @@ function codeOf(r) {
 /** 2 outranks 1, which outranks 3. */
 const RANK = { 0: 0, 3: 1, 1: 2, 2: 3 };
 
-/** The wasm module of this package, loaded for Node. */
+/** The wasm module of this package, loaded for Node: the build that reads
+ * Turtle profiles as well as JSON-LD (size does not matter here). */
 async function loadEngine() {
   const here = dirname(fileURLToPath(import.meta.url));
-  const glue = await import(pathToFileURL(join(here, 'prose_wasm.js')).href);
-  glue.initSync({ module: readFileSync(join(here, 'prose_wasm_bg.wasm')) });
+  const glue = await import(pathToFileURL(join(here, 'prose_wasm_turtle.js')).href);
+  glue.initSync({ module: readFileSync(join(here, 'prose_wasm_turtle_bg.wasm')) });
   return {
     validator(profiles, options) {
       const v = new glue.ProseValidator(profiles, options);
