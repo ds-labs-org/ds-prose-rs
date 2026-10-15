@@ -251,3 +251,73 @@ fn references_that_multiply_are_read_up_to_a_bound() {
         doc.warnings
     );
 }
+
+// --- #41 review: where a constraint is declared, and how it is named -------
+
+/// A node object with `@id` declares that node wherever it appears: a
+/// constraint written inline in one rule is declared for every other rule
+/// that refers to it.
+#[test]
+fn a_constraint_declared_inline_is_found_from_another_rule() {
+    let doc = render(
+        r#"{"@context": "http://www.w3.org/ns/odrl.jsonld", "@type": "Set", "uid": "urn:p",
+            "permission": [
+              {"action": "use", "target": "urn:a", "constraint": [{"@id": "http://ex.com/c1",
+                "leftOperand": "purpose", "operator": "eq", "rightOperand": "research"}]},
+              {"action": "read", "target": "urn:a", "constraint": "http://ex.com/c1"}
+            ]}"#,
+    )
+    .unwrap();
+    let rules = &doc.policies[0].rules;
+    assert_eq!(texts(&rules[0].conditions), texts(&rules[1].conditions));
+    assert!(rules[1].conditions[0].text.contains("research"));
+    assert_eq!(rules[1].conditions[0].reference, None);
+    assert_eq!(doc.warnings, Vec::<String>::new());
+}
+
+/// A policy whose permission refers to `constraint`, beside `declared`,
+/// under a context that binds `ex:`.
+fn with_prefix(constraint: &str, declared: &str) -> String {
+    format!(
+        r#"{{"@context": ["http://www.w3.org/ns/odrl.jsonld", {{"ex": "http://ex.com/"}}], "@graph": [
+            {{"@type": "Set", "uid": "urn:p",
+              "permission": [{{"action": "use", "target": "urn:a", "constraint": {constraint}}}]}},
+            {{"@type": "Constraint", "@id": "{declared}", "leftOperand": "purpose",
+              "operator": "eq", "rightOperand": "research"}}
+        ]}}"#
+    )
+}
+
+/// `ex:c1` and `http://ex.com/c1` are one IRI under a context that binds
+/// `ex`: either spelling finds the constraint declared with the other.
+#[test]
+fn a_compact_reference_finds_the_constraint_declared_by_its_full_iri() {
+    for (refer, declared) in [
+        (r#""ex:c1""#, "http://ex.com/c1"),
+        (r#""http://ex.com/c1""#, "ex:c1"),
+        (r#"{"@id": "ex:c1"}"#, "http://ex.com/c1"),
+    ] {
+        let doc = render(&with_prefix(refer, declared)).unwrap();
+        let read = &doc.policies[0].rules[0].conditions;
+        assert_eq!(
+            texts(read),
+            [r#"the purpose is equal to "research""#],
+            "{refer} -> {declared}"
+        );
+        assert_eq!(read[0].reference, None, "{refer} -> {declared}");
+        assert_eq!(doc.warnings, Vec::<String>::new(), "{refer} -> {declared}");
+    }
+}
+
+/// A compact reference to a constraint the document does not declare names
+/// the IRI it expands to, which a host can check and link.
+#[test]
+fn an_undeclared_compact_reference_names_its_full_iri() {
+    let doc = render(&with_prefix(r#""ex:c9""#, "http://ex.com/c1")).unwrap();
+    let read = &doc.policies[0].rules[0].conditions;
+    assert_eq!(
+        texts(read),
+        ["the constraint defined at http://ex.com/c9 holds"]
+    );
+    assert_eq!(read[0].reference.as_deref(), Some("http://ex.com/c9"));
+}
