@@ -272,3 +272,65 @@ fn a_rebound_odrl_prefix_is_still_reported() {
         ["ignored unknown property \"odrl:informedParty\" on a rule"]
     );
 }
+
+/// A refined party as the verb's object would run its refinement into the
+/// target ("... the location is equal to \"z\" for t"), so the target comes
+/// first, set off by commas, and the refinement ends the clause.
+#[test]
+fn a_refined_object_party_comes_after_the_target() {
+    let doc = read(json!({
+        "@context": "http://www.w3.org/ns/odrl.jsonld",
+        "@type": "Set",
+        "uid": "urn:policy:1",
+        "obligation": [{
+            "target": "urn:t",
+            "action": "compensate",
+            "compensatedParty": {
+                "@type": "PartyCollection",
+                "source": "urn:C",
+                "refinement": [
+                    {"leftOperand": "purpose", "operator": "eq", "rightOperand": "y"},
+                    {"leftOperand": "spatial", "operator": "eq", "rightOperand": "z"}
+                ]
+            }
+        }]
+    }));
+    assert_eq!(
+        only_rule(&doc).sentence,
+        "The assignee must compensate, for urn:t, any party in the collection urn:C where the purpose is equal to \"y\"; the location is equal to \"z\"."
+    );
+    assert!(doc.warnings.is_empty(), "{:?}", doc.warnings);
+}
+
+#[test]
+fn a_refined_informed_party_comes_after_the_target() {
+    let doc = read(agreement(json!([{
+        "target": "urn:t",
+        "action": "inform",
+        "informedParty": [
+            "urn:q",
+            {"@id": "urn:p", "refinement": [
+                {"leftOperand": "industry", "operator": "eq", "rightOperand": "press"}
+            ]}
+        ]
+    }])));
+    assert_eq!(
+        only_rule(&doc).sentence,
+        "urn:person:b must inform, about urn:t, urn:q and urn:p where the industry is equal to \"press\", as required by urn:org:a."
+    );
+    assert!(doc.warnings.is_empty(), "{:?}", doc.warnings);
+}
+
+/// Without a refinement the party stays the verb's object: "compensate X for T".
+#[test]
+fn an_unrefined_object_party_keeps_the_target_after_it() {
+    let doc = read(agreement(json!([{
+        "target": "urn:t",
+        "action": "compensate",
+        "compensatedParty": "urn:p"
+    }])));
+    assert_eq!(
+        only_rule(&doc).sentence,
+        "urn:person:b must compensate urn:p for urn:t, as required by urn:org:a."
+    );
+}
