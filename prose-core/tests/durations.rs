@@ -237,3 +237,32 @@ fn editor_slot_reads_the_same() {
         at_most("24 hours")
     );
 }
+
+#[test]
+fn untyped_value_object_reads_like_a_plain_string() {
+    // `{"@value": "P30D"}` (no @type, or only @language) is the same plain
+    // string literal as `"P30D"`: render and the editor word it alike.
+    for right in [
+        json!({"@value": "P30D"}),
+        json!({"@value": "P30D", "@language": "en"}),
+    ] {
+        assert_eq!(reads(right.clone()), at_most("30 days"), "{right}");
+        assert_eq!(
+            slot(right.clone()),
+            ("P30D".into(), "30 days".into()),
+            "{right}"
+        );
+        let doc = read_model(&policy(right.clone()).to_string()).unwrap();
+        assert_eq!(
+            sentences(&doc)[0].rules[0].conditions.items[0]
+                .sentence
+                .plain(),
+            reads(right.clone()),
+            "{right}"
+        );
+    }
+    // Still strict: a non-duration stays quoted as written on both paths.
+    let right = json!({"@value": "P30DX"});
+    assert_eq!(reads(right.clone()), at_most("\"P30DX\""));
+    assert_eq!(slot(right), ("P30DX".into(), "\"P30DX\"".into()));
+}
