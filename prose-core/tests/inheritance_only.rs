@@ -171,13 +171,23 @@ fn a_diamond_brings_the_grandparents_rules_once() {
         "Inherited from case:policy-grandparent: Anyone may use an unspecified asset, as permitted by did:web:root-provider.example.",
         "Inherited from case:policy-grandparent: The assignee must notify, as required by did:web:root-provider.example.",
     ];
-    for uid in [
-        "case:policy-parent-1",
-        "case:policy-parent-2",
-        "case:policy-child",
-    ] {
+    for uid in ["case:policy-parent-1", "case:policy-parent-2"] {
         assert_eq!(sentences(policy(&doc, uid)), inherited, "{uid}");
     }
+    // The child's assignee is the assignee of the rules it inherits, and the
+    // assigner its parents agree on is its own (IM 2.9).
+    let child = policy(&doc, "case:policy-child");
+    assert_eq!(
+        sentences(child),
+        [
+            "Inherited from case:policy-grandparent: did:web:caller.example may use an unspecified asset, as permitted by did:web:root-provider.example.",
+            "Inherited from case:policy-grandparent: did:web:caller.example must notify, as required by did:web:root-provider.example.",
+        ]
+    );
+    assert_eq!(
+        child.intro,
+        "An agreement between did:web:root-provider.example (assigner) and did:web:caller.example (assignee)."
+    );
     assert_eq!(
         policy(&doc, "case:policy-child").notes,
         ["Inherits the rules of case:policy-parent-1 and case:policy-parent-2."]
@@ -257,6 +267,144 @@ fn a_cycle_ends_and_never_brings_a_policy_its_own_rules() {
         [
             "Anyone may play urn:asset:1.",
             "Inherited from urn:policy:a: Anyone may use urn:asset:1.",
+        ]
+    );
+}
+
+/// ODRL IM 2.9's own example: eg29 (the parent) and eg30 (the child), read
+/// together. Inheritance copies the parent's policy-level parties into the
+/// child and the child's into the parent's rules, so the result reads as
+/// eg31: org-01 assigns both rules and user:0001 is assignee of both.
+fn im_eg29_eg30() -> Value {
+    json!({ "@context": "http://www.w3.org/ns/odrl.jsonld", "@graph": [
+        {
+            "@type": "Policy",
+            "uid": "http://example.com/policy:default",
+            "profile": "http://example.com/odrl:profile:30",
+            "assigner": "http://example.com/org-01",
+            "obligation": [{
+                "target": "http://example.com/asset:terms-and-conditions",
+                "action": "reviewPolicy"
+            }]
+        },
+        {
+            "@type": "Agreement",
+            "uid": "http://example.com/policy:4444",
+            "profile": "http://example.com/odrl:profile:30",
+            "inheritFrom": "http://example.com/policy:default",
+            "assignee": "http://example.com/user:0001",
+            "permission": [{
+                "target": "http://example.com/asset:5555",
+                "action": "display"
+            }]
+        }
+    ]})
+}
+
+#[test]
+fn the_child_and_the_inherited_rules_share_their_policy_level_parties() {
+    let doc = read(im_eg29_eg30());
+    let child = policy(&doc, "http://example.com/policy:4444");
+    assert_eq!(
+        child.intro,
+        "An agreement between http://example.com/org-01 (assigner) and http://example.com/user:0001 (assignee)."
+    );
+    assert_eq!(
+        sentences(child),
+        [
+            "http://example.com/user:0001 may display http://example.com/asset:5555, as permitted by http://example.com/org-01.",
+            "Inherited from http://example.com/policy:default: http://example.com/user:0001 must review policy http://example.com/asset:terms-and-conditions, as required by http://example.com/org-01.",
+        ]
+    );
+    // The parent is read as it was.
+    assert_eq!(
+        sentences(policy(&doc, "http://example.com/policy:default")),
+        [
+            "The assignee must review policy http://example.com/asset:terms-and-conditions, as required by http://example.com/org-01."
+        ]
+    );
+}
+
+#[test]
+fn parents_that_disagree_on_a_party_lend_it_only_to_their_own_rules() {
+    let doc = read(json!({ "@graph": [
+        {
+            "@type": "Set",
+            "uid": "urn:policy:a",
+            "assigner": "urn:party:a",
+            "permission": [{ "action": "print", "target": "urn:asset:1" }]
+        },
+        {
+            "@type": "Set",
+            "uid": "urn:policy:b",
+            "assigner": "urn:party:b",
+            "prohibition": [{ "action": "print", "target": "urn:asset:1" }]
+        },
+        {
+            "@type": "Agreement",
+            "uid": "urn:policy:child",
+            "inheritFrom": ["urn:policy:a", "urn:policy:b"],
+            "assignee": "urn:party:c"
+        }
+    ]}));
+    let child = policy(&doc, "urn:policy:child");
+    assert_eq!(child.intro, "An agreement for urn:party:c (assignee).");
+    assert_eq!(
+        sentences(child),
+        [
+            "Inherited from urn:policy:a: urn:party:c may print urn:asset:1, as permitted by urn:party:a.",
+            "Inherited from urn:policy:b: urn:party:c must not print urn:asset:1, as prohibited by urn:party:b.",
+        ]
+    );
+}
+
+#[test]
+fn the_child_takes_its_parents_conflict_strategy_and_profile() {
+    let doc = read(json!({ "@graph": [
+        {
+            "@type": "Set",
+            "uid": "http://ex.com/parent",
+            "profile": "http://ex.com/prof",
+            "conflict": "prohibit",
+            "permission": [{ "action": "use", "target": "urn:asset:1" }],
+            "prohibition": [{ "action": "use", "target": "urn:asset:1" }]
+        },
+        { "@type": "Set", "uid": "http://ex.com/child", "inheritFrom": "http://ex.com/parent" }
+    ]}));
+    assert_eq!(
+        policy(&doc, "http://ex.com/child").notes,
+        [
+            "Written to the profile http://ex.com/prof.",
+            "If a permission and a prohibition conflict, the prohibition wins.",
+            "Inherits the rules of http://ex.com/parent.",
+        ]
+    );
+}
+
+#[test]
+fn the_childs_own_conflict_strategy_and_profiles_come_first() {
+    let doc = read(json!({ "@graph": [
+        {
+            "@type": "Set",
+            "uid": "http://ex.com/parent",
+            "profile": ["http://ex.com/prof", "http://ex.com/other"],
+            "conflict": "prohibit",
+            "permission": [{ "action": "use", "target": "urn:asset:1" }]
+        },
+        {
+            "@type": "Set",
+            "uid": "http://ex.com/child",
+            "profile": "http://ex.com/prof",
+            "conflict": "perm",
+            "inheritFrom": "http://ex.com/parent"
+        }
+    ]}));
+    assert_eq!(
+        policy(&doc, "http://ex.com/child").notes,
+        [
+            "Written to the profile http://ex.com/prof and http://ex.com/other.",
+            "If a permission and a prohibition conflict, the permission wins.",
+            "Inherits the rules of http://ex.com/parent.",
         ]
     );
 }
