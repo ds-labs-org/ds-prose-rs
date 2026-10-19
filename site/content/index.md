@@ -41,6 +41,6 @@ npm install @ds-labs/prose-angular
 
 | Package | Version | What it exposes |
 |---|---|---|
-| `prose-yew` (crate) | 0.5.0 | `OdrlProse`, `OdrlProseView`, `ProseGlossary`, `ProseProblems`, the editor hooks and `BASE_CSS`. |
-| `@ds-labs/prose-wasm` (npm) | 0.5.0 | `ProseHandle` for the read-only renderer, `ProseValidator`, `validate`, `rules`, and the `ds-prose-validate` command. No editor. |
-| `@ds-labs/prose-angular` (npm) | 0.5.0 | The `ds-odrl-prose` component and `ProseValidatorService`. Read-only, client-side only. |
+| `prose-yew` (crate) | 0.5.1 | `OdrlProse`, `OdrlProseView`, `ProseGlossary`, `ProseProblems`, the editor hooks and `BASE_CSS`. |
+| `@ds-labs/prose-wasm` (npm) | 0.5.1 | `ProseHandle` for the read-only renderer, `ProseValidator`, `validate`, `rules`, and the `ds-prose-validate` command. No editor. |
+| `@ds-labs/prose-angular` (npm) | 0.5.1 | The `ds-odrl-prose` component and `ProseValidatorService`. Read-only, client-side only. |

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Reads a release tag and prints "<package> <version>", or fails.
-#   prose-wasm-v0.5.0     -> prose-wasm 0.5.0
+#   prose-wasm-v0.5.1     -> prose-wasm 0.5.1
 #   prose-angular-v1.2.3-rc.1 -> prose-angular 1.2.3-rc.1
 set -euo pipefail
 tag="${1:?usage: release-info.sh <tag>}"
