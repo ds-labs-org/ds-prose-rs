@@ -322,3 +322,32 @@ fn operator_with_uses_the_profile_label_outside_odrl() {
         operator_for("count", "ex:withinRegion")
     );
 }
+
+#[test]
+fn operator_with_agrees_unless_a_profile_labels_the_operand() {
+    use prose_core::wording::operator_with;
+    let p = Prefixes::of_document(&json!({"@context": {"ex": EX}}));
+    let w = Wording::new().with_profile(research());
+    // An ODRL term keeps its built-in noun phrase, so it keeps the plural.
+    assert_eq!(operator_with(&w, &p, "dateTime", "lt"), "are before");
+    let moment = ProfileVocab::from_value(
+        &json!({
+            "@context": {"odrl": ODRL, "ex": EX, "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+                         "owl": "http://www.w3.org/2002/07/owl#"},
+            "@graph": [
+                {"@id": "https://example.org/moment", "@type": "owl:Ontology"},
+                {"@id": "ex:dateTime", "@type": "odrl:LeftOperand", "rdfs:label": "Moment"}
+            ]
+        }),
+        &ProfileLimits::default(),
+    )
+    .unwrap();
+    let w = Wording::new().with_profile(moment);
+    assert_eq!(operator_with(&w, &p, "ex:dateTime", "lt"), "is before");
+    // A profile operator label agrees with the plural subject.
+    let w = Wording::new().with_profile(research());
+    assert_eq!(
+        operator_with(&w, &p, "dateTime", "ex:withinRegion"),
+        "are within region"
+    );
+}

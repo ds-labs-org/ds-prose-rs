@@ -117,23 +117,242 @@ pub fn operator(term: &str) -> String {
     .to_string()
 }
 
-/// Operators read better with a different phrase for time: "the date and
-/// time is before X" rather than "is less than X".
-pub fn operator_for(left: &str, op: &str) -> String {
-    let temporal = matches!(
-        local_name(left),
-        "dateTime" | "timeInterval" | "delayPeriod"
-    );
-    if temporal {
-        match local_name(op) {
-            "lt" => return "is before".into(),
-            "lteq" => return "is on or before".into(),
-            "gt" => return "is after".into(),
-            "gteq" => return "is on or after".into(),
-            _ => {}
+/// Left operands whose noun phrase is plural: "the date and time" is two
+/// nouns, so its operator reads "are before", not "is before".
+pub(crate) const PLURAL_OPERANDS: &[&str] = &["dateTime"];
+
+/// Whether `term`'s built-in noun phrase is plural.
+pub(crate) fn plural_operand(term: &str) -> bool {
+    PLURAL_OPERANDS.contains(&local_name(term))
+}
+
+/// The verb phrase after `left`: singular as [`operator`] has it, with a
+/// different phrase for a point in time ("is before" rather than "is less
+/// than"), then made plural when `plural`. Only a date and time is a point
+/// in time: a time interval, a delay period or an elapsed time is a
+/// quantity and keeps the quantity wording.
+pub(crate) fn operator_phrase(left: &str, op: &str, plural: bool, shape: ValueShape) -> String {
+    let date = shape == ValueShape::DateOnly;
+    let temporal = local_name(left) == "dateTime";
+    let phrase = match (temporal, date, local_name(op)) {
+        (true, true, "lt") => "is before the start of".to_string(),
+        (true, true, "lteq") => "is on or before the end of".to_string(),
+        (true, true, "gt") => "is after the end of".to_string(),
+        (true, true, "gteq") => "is on or after the start of".to_string(),
+        (true, false, "lt") => "is before".to_string(),
+        (true, false, "lteq") => "is on or before".to_string(),
+        (true, false, "gt") => "is after".to_string(),
+        (true, false, "gteq") => "is on or after".to_string(),
+        _ => operator(op),
+    };
+    if plural { plural_verb(phrase) } else { phrase }
+}
+
+const XSD_DATE: &str = "http://www.w3.org/2001/XMLSchema#date";
+
+/// Whether a literal's datatype, expanded as far as the policy's prefixes
+/// go, is xsd:date: the full IRI, or `xsd:`/`xs:` left unbound.
+fn is_date_type(datatype: &str) -> bool {
+    matches!(datatype, XSD_DATE | "xsd:date" | "xs:date")
+}
+
+/// Exactly `YYYY-MM-DD`: ASCII digits, no zone, no range check.
+fn is_plain_date(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 10
+        && b.iter().enumerate().all(|(i, c)| match i {
+            4 | 7 => *c == b'-',
+            _ => c.is_ascii_digit(),
+        })
+}
+
+/// `YYYY-MM-DD` followed by nothing, `Z`, or `+hh:mm`/`-hh:mm`. Shape only.
+fn is_date_with_zone(s: &str) -> bool {
+    let Some(date) = s.get(..10) else {
+        return false;
+    };
+    if !is_plain_date(date) {
+        return false;
+    }
+    match &s[10..] {
+        "" | "Z" => true,
+        zone => {
+            let z = zone.as_bytes();
+            z.len() == 6
+                && (z[0] == b'+' || z[0] == b'-')
+                && z[1].is_ascii_digit()
+                && z[2].is_ascii_digit()
+                && z[3] == b':'
+                && z[4].is_ascii_digit()
+                && z[5].is_ascii_digit()
         }
     }
-    operator(op)
+}
+
+/// Whether a right operand is a date without a time of day. `datatype` is
+/// the expanded `@type`, `None` for a plain string or an untyped `@value`.
+/// Without a datatype the value must be exactly `YYYY-MM-DD`; with xsd:date
+/// the value must also look like a date, since editing a typed literal can
+/// leave a time of day in it. Nothing is computed: the zone, if any, is not
+/// read and the date is never rewritten.
+fn date_only(value: &str, datatype: Option<&str>) -> bool {
+    match datatype {
+        None => is_plain_date(value),
+        Some(t) => is_date_type(t) && is_date_with_zone(value),
+    }
+}
+
+/// What a constraint's one right operand is, as far as wording goes. Compute
+/// it once with [`ValueShape::of`]; the reader, the editor sentence and the
+/// editor's operator dropdown all read the same shape, so they agree.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ValueShape {
+    /// A date with a time of day: xsd:dateTime or xsd:dateTimeStamp, or an
+    /// untyped string shaped `YYYY-MM-DDThh:mm(:ss(.s)?)?(zone)?`.
+    Instant,
+    /// A whole day: `YYYY-MM-DD` untyped, or xsd:date with a date-shaped
+    /// value (an optional zone is allowed).
+    DateOnly,
+    /// An xsd:duration, or an untyped string that reads as an ISO 8601
+    /// duration.
+    Duration,
+    /// Anything else: a number, a reference, several values, no value.
+    #[default]
+    Other,
+}
+
+impl ValueShape {
+    /// The shape of one literal. `datatype` is the `@type` expanded as far
+    /// as the policy's prefixes go, `None` for a plain string or an untyped
+    /// `@value`. Shape only: nothing is computed and no range is checked.
+    pub fn of(value: &str, datatype: Option<&str>) -> ValueShape {
+        if date_only(value, datatype) {
+            return ValueShape::DateOnly;
+        }
+        match datatype {
+            Some(t) if is_duration_type(t) => {
+                if duration(value).is_some() {
+                    ValueShape::Duration
+                } else {
+                    ValueShape::Other
+                }
+            }
+            Some(t) if is_date_time_type(t) => ValueShape::Instant,
+            Some(_) => ValueShape::Other,
+            None if duration(value).is_some() => ValueShape::Duration,
+            None if is_instant(value) => ValueShape::Instant,
+            None => ValueShape::Other,
+        }
+    }
+}
+
+/// xsd:dateTime or xsd:dateTimeStamp, the full IRI or `xsd:`/`xs:` unbound.
+fn is_date_time_type(datatype: &str) -> bool {
+    let local = datatype
+        .strip_prefix("http://www.w3.org/2001/XMLSchema#")
+        .or_else(|| datatype.strip_prefix("xsd:"))
+        .or_else(|| datatype.strip_prefix("xs:"));
+    matches!(local, Some("dateTime" | "dateTimeStamp"))
+}
+
+/// `YYYY-MM-DDThh:mm(:ss(.s)?)?` then nothing, `Z` or `+hh:mm`/`-hh:mm`.
+fn is_instant(s: &str) -> bool {
+    let Some(date) = s.get(..10) else {
+        return false;
+    };
+    let Some(rest) = s[10..].strip_prefix('T') else {
+        return false;
+    };
+    if !is_plain_date(date) {
+        return false;
+    }
+    let digits = |t: &str| t.len() == 2 && t.bytes().all(|c| c.is_ascii_digit());
+    let (Some(hh), Some(rest)) = (rest.get(..2), rest.get(2..)) else {
+        return false;
+    };
+    let Some(rest) = rest.strip_prefix(':') else {
+        return false;
+    };
+    let (Some(mm), mut rest) = (rest.get(..2), rest.get(2..).unwrap_or("")) else {
+        return false;
+    };
+    if !digits(hh) || !digits(mm) {
+        return false;
+    }
+    if let Some(sec) = rest.strip_prefix(':') {
+        let Some(ss) = sec.get(..2) else {
+            return false;
+        };
+        if !digits(ss) {
+            return false;
+        }
+        rest = &sec[2..];
+        if let Some(frac) = rest.strip_prefix('.') {
+            let n = frac.bytes().take_while(u8::is_ascii_digit).count();
+            if n == 0 {
+                return false;
+            }
+            rest = &frac[n..];
+        }
+    }
+    match rest {
+        "" | "Z" => true,
+        zone => {
+            let z = zone.as_bytes();
+            z.len() == 6
+                && (z[0] == b'+' || z[0] == b'-')
+                && digits(&zone[1..3])
+                && z[3] == b':'
+                && digits(&zone[4..6])
+        }
+    }
+}
+
+/// [`operator_for`] when the one right operand is a date without a time of
+/// day: a bound on a whole day says whether it means the start or the end.
+pub fn operator_for_date(left: &str, op: &str) -> String {
+    operator_phrase(left, op, plural_operand(left), ValueShape::DateOnly)
+}
+
+/// A leading "is" becomes "are", "has" "have", "does" "do", "contains"
+/// "contain" and "matches" "match". Anything else is kept.
+fn plural_verb(phrase: String) -> String {
+    let (verb, rest) = match phrase.split_once(' ') {
+        Some((v, r)) => (v, Some(r)),
+        None => (phrase.as_str(), None),
+    };
+    let plural = match verb {
+        "is" => "are",
+        "has" => "have",
+        "does" => "do",
+        "contains" => "contain",
+        "matches" => "match",
+        _ => return phrase,
+    };
+    match rest {
+        Some(r) => format!("{plural} {r}"),
+        None => plural.to_string(),
+    }
+}
+
+/// A profile operator label (already lower-cased, with its verb) made plural
+/// to agree with a plural subject. A label that does not start with a verb
+/// follows "are" ("earlier than" reads "are earlier than"); "are" is kept.
+pub(crate) fn plural_label(label: &str) -> String {
+    let verb = label.split_whitespace().next().unwrap_or("");
+    match verb {
+        "is" | "has" | "does" | "contains" | "matches" => plural_verb(label.to_string()),
+        "are" => label.to_string(),
+        _ => format!("are {label}"),
+    }
+}
+
+/// The phrase that follows `left`: a date and time reads "is before" rather
+/// than "is less than" (a duration stays a quantity), and the verb agrees in number with the operand's noun phrase
+/// ("the date and time are before").
+pub fn operator_for(left: &str, op: &str) -> String {
+    operator_phrase(left, op, plural_operand(left), ValueShape::Other)
 }
 
 /// An action as a base-form verb phrase ("use", "attribute", "grant use").
@@ -247,4 +466,128 @@ fn duration_parts(s: &str, units: &[(char, &'static str)]) -> Option<Vec<(String
         rest = &after[1..];
     }
     Some(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn operator_for_agrees_with_the_date_and_time() {
+        let cases = [
+            ("lt", "are before"),
+            ("lteq", "are on or before"),
+            ("gt", "are after"),
+            ("gteq", "are on or after"),
+            ("eq", "are equal to"),
+            ("neq", "are not equal to"),
+            ("isAllOf", "are all of"),
+            ("isAnyOf", "are any of"),
+            ("isNoneOf", "are none of"),
+            ("isPartOf", "are part of"),
+            ("hasPart", "have as a part"),
+            ("ex:near", "are related by near to"),
+            ("odrl:lt", "are before"),
+            ("http://www.w3.org/ns/odrl/2/lt", "are before"),
+        ];
+        for (op, want) in cases {
+            assert_eq!(operator_for("dateTime", op), want, "{op}");
+        }
+        assert_eq!(operator_for("odrl:dateTime", "lt"), "are before");
+    }
+
+    #[test]
+    fn other_operands_stay_singular() {
+        assert_eq!(operator_for("timeInterval", "lt"), "is less than");
+        assert_eq!(operator_for("delayPeriod", "eq"), "is equal to");
+        assert_eq!(operator_for("count", "lteq"), "is at most");
+        assert_eq!(operator_for("elapsedTime", "gteq"), "is at least");
+    }
+
+    #[test]
+    fn duration_operands_read_as_quantities() {
+        let cases = [
+            ("lt", "is less than"),
+            ("lteq", "is at most"),
+            ("gt", "is greater than"),
+            ("gteq", "is at least"),
+            ("eq", "is equal to"),
+        ];
+        for left in [
+            "timeInterval",
+            "delayPeriod",
+            "elapsedTime",
+            "odrl:timeInterval",
+        ] {
+            for (op, want) in cases {
+                for got in [operator_for(left, op), operator_for_date(left, op)] {
+                    assert_eq!(got, want, "{left} {op}");
+                    for bad in ["before", "after", "start of", "end of", "are "] {
+                        assert!(!got.contains(bad), "{left} {op}: {got}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn profile_label_verbs_take_the_plural() {
+        for (label, want) in [
+            ("is within region", "are within region"),
+            ("has overlap with", "have overlap with"),
+            ("does not overlap", "do not overlap"),
+            ("contains", "contain"),
+            ("matches window", "match window"),
+            ("are near", "are near"),
+            ("earlier than", "are earlier than"),
+        ] {
+            assert_eq!(plural_label(label), want, "{label}");
+        }
+    }
+
+    #[test]
+    fn operator_is_unchanged() {
+        assert_eq!(operator("lt"), "is less than");
+    }
+
+    #[test]
+    fn date_only_detects_dates_without_time() {
+        let xsd = "http://www.w3.org/2001/XMLSchema#";
+        assert!(date_only("2026-12-31", None));
+        for v in [
+            "2026-12-31T10:00:00Z",
+            "2026-12-31Z",
+            "2026-1-31",
+            "20261231",
+            "P30D",
+            "",
+        ] {
+            assert!(!date_only(v, None), "{v}");
+        }
+        for dt in [format!("{xsd}date"), "xsd:date".into(), "xs:date".into()] {
+            for v in ["2026-12-31", "2026-12-31Z", "2026-12-31+02:00"] {
+                assert!(date_only(v, Some(&dt)), "{dt} {v}");
+            }
+            assert!(!date_only("2026-12-31T10:00:00Z", Some(&dt)), "{dt}");
+        }
+        assert!(!date_only("2026-12-31", Some(&format!("{xsd}dateTime"))));
+        assert!(!date_only("2026-12-31", Some(&format!("{xsd}string"))));
+    }
+
+    #[test]
+    fn operator_for_date_names_the_start_or_end_of_the_day() {
+        let cases = [
+            ("lt", "are before the start of"),
+            ("lteq", "are on or before the end of"),
+            ("gt", "are after the end of"),
+            ("gteq", "are on or after the start of"),
+            ("eq", "are equal to"),
+            ("neq", "are not equal to"),
+        ];
+        for (op, want) in cases {
+            assert_eq!(operator_for_date("dateTime", op), want, "{op}");
+        }
+        assert_eq!(operator_for_date("timeInterval", "lt"), "is less than");
+        assert_eq!(operator_for_date("count", "lt"), "is less than");
+    }
 }

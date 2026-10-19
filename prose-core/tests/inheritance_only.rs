@@ -168,8 +168,8 @@ fn a_diamond_brings_the_grandparents_rules_once() {
         doc.warnings
     );
     let inherited = [
-        "Inherited from case:policy-grandparent: Anyone may use an unspecified asset, as permitted by did:web:root-provider.example.",
-        "Inherited from case:policy-grandparent: The assignee must notify, as required by did:web:root-provider.example.",
+        "Inherited from case:policy-grandparent: Anyone may use an unspecified asset, as permitted by the assigner did:web:root-provider.example.",
+        "Inherited from case:policy-grandparent: The assignee must notify, as required by the assigner did:web:root-provider.example.",
     ];
     for uid in ["case:policy-parent-1", "case:policy-parent-2"] {
         assert_eq!(sentences(policy(&doc, uid)), inherited, "{uid}");
@@ -180,8 +180,8 @@ fn a_diamond_brings_the_grandparents_rules_once() {
     assert_eq!(
         sentences(child),
         [
-            "Inherited from case:policy-grandparent: did:web:caller.example may use an unspecified asset, as permitted by did:web:root-provider.example.",
-            "Inherited from case:policy-grandparent: did:web:caller.example must notify, as required by did:web:root-provider.example.",
+            "Inherited from case:policy-grandparent: did:web:caller.example may use an unspecified asset, as permitted by the assigner did:web:root-provider.example.",
+            "Inherited from case:policy-grandparent: did:web:caller.example must notify, as required by the assigner did:web:root-provider.example.",
         ]
     );
     assert_eq!(
@@ -312,15 +312,15 @@ fn the_child_and_the_inherited_rules_share_their_policy_level_parties() {
     assert_eq!(
         sentences(child),
         [
-            "http://example.com/user:0001 may display http://example.com/asset:5555, as permitted by http://example.com/org-01.",
-            "Inherited from http://example.com/policy:default: http://example.com/user:0001 must review policy http://example.com/asset:terms-and-conditions, as required by http://example.com/org-01.",
+            "http://example.com/user:0001 may display http://example.com/asset:5555, as permitted by the assigner http://example.com/org-01.",
+            "Inherited from http://example.com/policy:default: http://example.com/user:0001 must review policy http://example.com/asset:terms-and-conditions, as required by the assigner http://example.com/org-01.",
         ]
     );
     // The parent is read as it was.
     assert_eq!(
         sentences(policy(&doc, "http://example.com/policy:default")),
         [
-            "The assignee must review policy http://example.com/asset:terms-and-conditions, as required by http://example.com/org-01."
+            "The assignee must review policy http://example.com/asset:terms-and-conditions, as required by the assigner http://example.com/org-01."
         ]
     );
 }
@@ -352,8 +352,8 @@ fn parents_that_disagree_on_a_party_lend_it_only_to_their_own_rules() {
     assert_eq!(
         sentences(child),
         [
-            "Inherited from urn:policy:a: urn:party:c may print urn:asset:1, as permitted by urn:party:a.",
-            "Inherited from urn:policy:b: urn:party:c must not print urn:asset:1, as prohibited by urn:party:b.",
+            "Inherited from urn:policy:a: urn:party:c may print urn:asset:1, as permitted by the assigner urn:party:a.",
+            "Inherited from urn:policy:b: urn:party:c must not print urn:asset:1, as prohibited by the assigner urn:party:b.",
         ]
     );
 }

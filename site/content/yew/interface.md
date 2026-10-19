@@ -149,7 +149,7 @@ The whole configuration of an editing view. It is `Clone`, `PartialEq` and `Defa
 | `remove_button` | `ButtonContent` | `ButtonContent::Symbol` | What a minus button shows. |
 | `reveal` | `Reveal` | `Reveal::Always` | When the plus and minus buttons are visible. |
 | `base_css` | `bool` | `true` | Edit mode writes `<style>` with `BASE_CSS`. Turn it off to bring your own. |
-| `show_raw_terms` | `bool` | `true` | Operator options read "is before (lt)" rather than "is before". |
+| `show_raw_terms` | `bool` | `true` | Operator options read "is at most (lteq)" rather than "is at most". |
 | `suggestions` | `bool` | `true` | A suggestion list while typing in a free-text slot. Off, a slot is a plain textbox. |
 | `max_suggestions` | `usize` | `8` | The cap of the suggestion list. |
 | `host_plans_operator_switches` | `bool` | `false` | The host translates an operator switch the reducer would refuse, so the select offers every operator. Off, it offers only the switches the reducer accepts. |

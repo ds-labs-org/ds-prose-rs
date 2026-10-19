@@ -192,6 +192,20 @@
 //! ```
 //! #![deny(unreachable_patterns)]
 //! #![allow(dead_code)]
+//! use prose_core::wording::ValueShape;
+//! fn f(x: &ValueShape) -> u8 {
+//!     match x {
+//!         ValueShape::Instant => 0,
+//!         ValueShape::DateOnly => 0,
+//!         ValueShape::Duration => 0,
+//!         ValueShape::Other => 0,
+//!         _ => 1,
+//!     }
+//! }
+//! ```
+//! ```
+//! #![deny(unreachable_patterns)]
+//! #![allow(dead_code)]
 //! use prose_core::edit::ChoiceKind;
 //! fn f(x: &ChoiceKind) -> u8 {
 //!     match x {

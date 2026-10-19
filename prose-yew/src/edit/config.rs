@@ -81,7 +81,8 @@ pub struct Vocabulary {
     pub parties: Vec<Suggestion>,
     pub assets: Vec<Suggestion>,
     /// Closed list of raw terms; the option labels come from
-    /// `labels.operator_option` and `wording::operator_for`.
+    /// `labels.operator_option`, `wording::operator_for` and
+    /// `wording::operator_for_date`.
     pub operators: Vec<AttrValue>,
     /// Closed list; the value "" means absent.
     pub conflicts: Vec<Choice>,
@@ -871,7 +872,7 @@ pub struct EditConfig {
     /// Edit mode renders `<style>{BASE_CSS}</style>`; turn it off to bring
     /// your own.
     pub base_css: bool,
-    /// Operator options read "is before (lt)" rather than "is before".
+    /// Operator options read "is at most (lteq)" rather than "is at most".
     pub show_raw_terms: bool,
     pub suggestions: bool,
     pub max_suggestions: usize,

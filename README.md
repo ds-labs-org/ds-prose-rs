@@ -70,7 +70,23 @@ bare keys only, because its writer keeps key spelling, so a document written
 with prefixed keys renders in `OdrlProse` but reads there as no rules.
 
 Example: `{"leftOperand":"dateTime","operator":"lt","rightOperand":{"@value":"2026-12-31","@type":"xsd:date"}}`
-reads as "the date and time is before 2026-12-31".
+reads as "the date and time are before the start of 2026-12-31".
+
+"The date and time" takes a plural verb: it is read as two nouns. The other
+operands stay singular, and so does an operand a profile labels itself. A date
+without a time of day is a whole day, so `lt` and `gteq` bound it at its start
+and `lteq` and `gt` at its end. A date without a zone leaves the zone open
+(XSD reads it as a day in an unstated zone); the renderer does not pick one
+and never rewrites the date. A value with a time of day is an instant and
+reads as before ("the date and time are before 2026-12-31T10:00:00Z"). `eq`
+and `neq` are unchanged. Only the date and time is a point in time. A time
+interval, a delay period and an elapsed time are quantities: `lt` reads "is
+less than", `lteq` "is at most", `gt` "is greater than" and `gteq` "is at
+least", whether the right operand is a duration or a date. A profile's
+operator label agrees with the subject too: "Earlier than" reads "the date
+and time are earlier than", and a relabelled operand stays singular.
+A rule sentence names its assigner by role: "as permitted by the
+assigner X", "as prohibited by the assigners X and Y".
 
 A constraint can be declared once, as a node of its own with an identifier,
 and referred to by that identifier (`"constraint": [{"@id": "urn:c:1"}]`, or
@@ -614,7 +630,7 @@ The enums that grow as the editor learns more of ODRL are `#[non_exhaustive]`,
 so adding a variant is a minor release, not a breaking one. In `prose-core`:
 `EditEvent`, `EditError`, `NewItem`, `FocusTarget`, `ListKind`, `Field`, `Step`,
 `NodeRef`, `Segment`, `SlotKind`, `ChoiceKind`, `EmptyText`, `IssueTarget`,
-`profile::TermKind`, `profile::ProfileError`, `StrictEdit` and, in `validate`, `Mode`, `Verdict`, `Tier`, `Basis`, `RuleId` and `RuleInfo`. In `prose-yew`: `FocusKind`
+`profile::TermKind`, `profile::ProfileError`, `StrictEdit`, `wording::ValueShape` (also `edit::ValueShape`) and, in `validate`, `Mode`, `Verdict`, `Tier`, `Basis`, `RuleId` and `RuleInfo`. In `prose-yew`: `FocusKind`
 and `DecorationAt`. Outside the defining crate a `match` on one of them needs
 a wildcard arm with a sensible fallback. Units,
 `rightOperandReference` and `partOf` can be edited but not added today (see
@@ -630,7 +646,23 @@ The profile types can grow too: `ProfileVocab`, `Wording`, `Prefixes` and
 `LangText` are opaque (private fields, methods only), and `Term`,
 `OperandHints`, `ProfileSummary`, `ProfileLimits`, `Reading`,
 `PolicyGlossary` and `Gloss` are `#[non_exhaustive]` structs: read their
-fields, and start from `ProfileLimits::default()` to change a limit.
+fields, and start from `ProfileLimits::default()` to change a limit. So is
+`edit::ChoiceSlot`: build one with `ChoiceSlot::new` and set its fields.
+
+Changed after 0.4.0 (wording): the rendered text changes, on purpose. "the
+date and time is before X" reads "are before X"; a date-only right operand
+reads "are before the start of X" (see above); a rule sentence reads "as
+permitted by the assigner X". The v0.1 goldens, the profile goldens, the SSR
+snapshots and the site example change with it. `wording::operator_for` and
+`wording::operator_with` now agree in number with the left operand ("are
+before" for `dateTime`); `wording::operator_for_date` and
+`wording::operator_with_date` are new. A duration is not an instant:
+`timeInterval` with `lt` read "is before" since v0.1 and now reads "is less
+than", as do `delayPeriod` and the other ordering operators (`lteq` "is at
+most", `gt` "is greater than", `gteq` "is at least"). A profile operator
+label agrees with a plural subject ("the date and time are earlier than").
+`ChoiceSlot` is now `#[non_exhaustive]` and gained `value_shape` (a
+`ValueShape`); build one with `ChoiceSlot::new` and set the fields. `ValueShape::of` is new.
 
 Changed after 0.4.0 (additive except for struct literals): `Condition`
 gained `reference` (the IRI of a constraint referred to and not declared),

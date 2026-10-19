@@ -83,7 +83,7 @@ fn a_label_on_the_party_itself_names_it() {
     ));
     assert_eq!(
         sentence(&r),
-        "Billie may play http://example.com/a, as permitted by ABC Pictures."
+        "Billie may play http://example.com/a, as permitted by the assigner ABC Pictures."
     );
 }
 
@@ -198,7 +198,7 @@ fn a_collection_and_a_party_of_the_policy_are_listed() {
     assert_eq!(r.document.policies[0].intro, "An offer made by Org A.");
     assert_eq!(
         sentence(&r),
-        "Anyone may play any asset in the collection urn:collection:films, as permitted by Org A."
+        "Anyone may play any asset in the collection urn:collection:films, as permitted by the assigner Org A."
     );
     assert!(
         r.mentions[0]
@@ -399,7 +399,7 @@ fn a_document_that_writes_a_mark_character_is_read_as_written() {
     );
     assert_eq!(
         rule.sentence,
-        "Anyone may use ex:asset:1, as permitted by ex:org."
+        "Anyone may use ex:asset:1, as permitted by the assigner ex:org."
     );
     assert_eq!(r.names[0].rules[0].conditions[0].text, []);
 }

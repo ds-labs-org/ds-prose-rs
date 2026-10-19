@@ -15,7 +15,7 @@ Ok(
                     Rule {
                         kind: Permission,
                         uid: None,
-                        sentence: "http://example.com/party:bob may distribute http://example.com/data:set1, as permitted by http://example.com/party:alice.",
+                        sentence: "http://example.com/party:bob may distribute http://example.com/data:set1, as permitted by the assigner http://example.com/party:alice.",
                         refinements: [
                             Condition {
                                 text: "The action \"distribute\" is limited to cases where",

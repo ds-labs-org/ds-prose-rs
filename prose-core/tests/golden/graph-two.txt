@@ -33,7 +33,7 @@ Ok(
                     Rule {
                         kind: Prohibition,
                         uid: None,
-                        sentence: "No one may distribute urn:asset:b, as prohibited by urn:party:org.",
+                        sentence: "No one may distribute urn:asset:b, as prohibited by the assigner urn:party:org.",
                         refinements: [],
                         conditions: [],
                         follow_ups: [],

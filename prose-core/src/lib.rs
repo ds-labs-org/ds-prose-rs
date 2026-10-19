@@ -38,8 +38,10 @@ mod words_ctx;
 /// The wording helpers the reader uses, public so an editor can show the
 /// same phrases for the same terms.
 pub mod wording {
+    pub use crate::words::ValueShape;
     pub use crate::words::{
-        action, humanise, join, local_name, operand, operator, operator_for, short_iri,
+        action, humanise, join, local_name, operand, operator, operator_for, operator_for_date,
+        short_iri,
     };
 
     /// The (term, phrase) table [`operand`] draws on.
@@ -68,6 +70,16 @@ pub mod wording {
         op: &str,
     ) -> String {
         crate::words_ctx::operator_with(wording, prefixes, left, op)
+    }
+
+    /// [`operator_for_date`], worded with the loaded profiles.
+    pub fn operator_with_date(
+        wording: &crate::profile::Wording,
+        prefixes: &crate::profile::Prefixes,
+        left: &str,
+        op: &str,
+    ) -> String {
+        crate::words_ctx::operator_with_date(wording, prefixes, left, op)
     }
 }
 

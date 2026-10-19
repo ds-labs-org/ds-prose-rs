@@ -2,7 +2,7 @@
 use crate::ProseError;
 use crate::model::*;
 use crate::profile::{Budget, Prefixes, TermKind, Wording};
-use crate::words::{duration, humanise, is_duration_type, join, local_name};
+use crate::words::{ValueShape, duration, humanise, is_duration_type, join, local_name};
 use crate::words_ctx::{WordCtx, profile_name};
 use serde_json::{Map, Value};
 use std::sync::Arc;
@@ -1555,9 +1555,10 @@ impl<'a> Reader<'a> {
         if !aside.is_empty() {
             target_text.push_str(&format!(" ({})", aside.join("; ")));
         }
-        let by = |verb: &str| match assigner.is_empty() {
-            true => String::new(),
-            false => format!(", as {verb} by {}", join(assigner)),
+        let by = |verb: &str| match assigner.len() {
+            0 => String::new(),
+            1 => format!(", as {verb} by the assigner {}", join(assigner)),
+            _ => format!(", as {verb} by the assigners {}", join(assigner)),
         };
         let mut sentence = match kind {
             RuleKind::Permission => {
@@ -1849,10 +1850,11 @@ impl<'a> Reader<'a> {
             self.warn("a constraint is missing its rightOperand");
             "an unspecified value".to_string()
         };
+        let shape = self.value_shape(o.get("rightOperand"));
         Condition::leaf(format!(
             "{} {} {}",
             self.ctx.operand(&left),
-            self.ctx.operator_for(&left, &op),
+            self.ctx.operator_for(&left, &op, shape),
             right
         ))
     }
@@ -1901,6 +1903,25 @@ impl<'a> Reader<'a> {
     /// Whether a literal's `@type` names xsd:duration.
     fn is_duration(&self, datatype: &str) -> bool {
         is_duration_type(&self.iris.expand(datatype))
+    }
+
+    /// The shape of a constraint's right operand: that of its one literal,
+    /// and [`ValueShape::Other`] for no value, several, or a non-string one.
+    fn value_shape(&self, right: Option<&Value>) -> ValueShape {
+        let Some(right) = right else {
+            return ValueShape::Other;
+        };
+        match items(right).as_slice() {
+            [Value::String(s)] => ValueShape::of(s, None),
+            [Value::Object(o)] => match o.get("@value") {
+                Some(Value::String(s)) => {
+                    let datatype = o.get("@type").and_then(Value::as_str);
+                    ValueShape::of(s, datatype.map(|t| self.iris.expand(t)).as_deref())
+                }
+                _ => ValueShape::Other,
+            },
+            _ => ValueShape::Other,
+        }
     }
 
     fn literal(&mut self, v: &Value) -> String {

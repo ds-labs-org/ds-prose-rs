@@ -186,7 +186,7 @@ fn several_durations_and_other_values() {
             "the delay period is equal to 60 minutes",
             "the metered time is at most 10 hours",
             "the number of times used is at most 30",
-            "the date and time is before 2026-12-31",
+            "the date and time are before the start of 2026-12-31",
         ]
     );
 }
@@ -265,4 +265,50 @@ fn untyped_value_object_reads_like_a_plain_string() {
     let right = json!({"@value": "P30DX"});
     assert_eq!(reads(right.clone()), at_most("\"P30DX\""));
     assert_eq!(slot(right), ("P30DX".into(), "\"P30DX\"".into()));
+}
+
+/// A duration is a quantity, not an instant: the operator reads as one on
+/// the reader and the editor sentence alike.
+#[test]
+fn duration_operands_compare_as_quantities() {
+    for (left, op, right, want) in [
+        (
+            "timeInterval",
+            "lt",
+            typed("P30D", "xsd:duration"),
+            "the time interval is less than 30 days",
+        ),
+        (
+            "delayPeriod",
+            "gteq",
+            json!("PT60M"),
+            "the delay period is at least 60 minutes",
+        ),
+        (
+            "elapsedTime",
+            "gt",
+            json!("PT1H"),
+            "the elapsed time is greater than 1 hour",
+        ),
+        (
+            "elapsedTime",
+            "lteq",
+            json!("PT1H"),
+            "the elapsed time is at most 1 hour",
+        ),
+    ] {
+        let mut doc = policy(right);
+        doc["permission"][0]["constraint"][0]["leftOperand"] = json!(left);
+        doc["permission"][0]["constraint"][0]["operator"] = json!(op);
+        let text = doc.to_string();
+        let r = render(&text).unwrap();
+        assert_eq!(r.policies[0].rules[0].conditions[0].text, want);
+        let model = read_model(&text).unwrap();
+        assert_eq!(
+            sentences(&model)[0].rules[0].conditions.items[0]
+                .sentence
+                .plain(),
+            want
+        );
+    }
 }
