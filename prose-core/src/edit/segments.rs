@@ -133,6 +133,10 @@ pub struct ChoiceSlot {
     /// For an operator: how many right operands the constraint holds, which
     /// decides the operators it can be switched to; 0 otherwise.
     pub values: usize,
+    /// For an operator: whether the constraint's one right operand is a date
+    /// without a time of day, which words lt/lteq/gt/gteq of a temporal left
+    /// operand as the start or end of that day; false otherwise.
+    pub date_bound: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -726,6 +730,7 @@ fn policy_prose(ctx: &WordCtx, i: usize, p: &PolicyNode) -> PolicyProse {
                     display: conflict_display,
                     left_operand: String::new(),
                     values: 0,
+                    date_bound: false,
                 }),
                 text("."),
             ],
@@ -1119,6 +1124,7 @@ fn cond_prose(
                         RightOperand::Values(v) => v.len(),
                         _ => 0,
                     },
+                    date_bound: false,
                 }),
                 text(" "),
             ];
@@ -1196,6 +1202,7 @@ fn cond_prose(
                     display: l.op.phrase().to_string(),
                     left_operand: String::new(),
                     values: 0,
+                    date_bound: false,
                 })],
             };
             out.children = Some(ConditionList {

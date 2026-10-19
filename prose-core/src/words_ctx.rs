@@ -279,3 +279,8 @@ pub(crate) fn operator_with(w: &Wording, prefixes: &Prefixes, left: &str, op: &s
     };
     ctx.operator_for(left, op)
 }
+
+/// STUB (red): [`crate::wording::operator_with_date`].
+pub(crate) fn operator_with_date(w: &Wording, prefixes: &Prefixes, left: &str, op: &str) -> String {
+    operator_with(w, prefixes, left, op)
+}

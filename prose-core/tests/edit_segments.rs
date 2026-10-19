@@ -295,3 +295,65 @@ fn check_policy(doc: &EditDoc, p: &PolicyProse) {
     p.rules.iter().for_each(|r| check_rule(doc, r));
     assert_eq!(p.add_rule_lists.len(), 3);
 }
+
+#[test]
+fn date_bound_follows_the_operator_and_the_value() {
+    let mut doc = read_model(&fixture("offer")).unwrap();
+    let cond = |doc: &EditDoc| {
+        let p = &sentences(doc)[0];
+        let c = &p.rules[0].conditions.items[0];
+        let choice = c
+            .sentence
+            .segments
+            .iter()
+            .find_map(|s| match s {
+                Segment::Choice(c) => Some(c.clone()),
+                _ => None,
+            })
+            .unwrap();
+        (c.sentence.plain(), choice)
+    };
+    let (plain, choice) = cond(&doc);
+    assert_eq!(
+        plain,
+        "the date and time are before the start of 2026-12-31"
+    );
+    assert!(choice.date_bound);
+    assert_eq!(choice.display, "are before the start of");
+
+    let path = "policy[0].permission[0].constraint[0]";
+    let owner = id_of(&doc, path);
+    doc.apply(
+        &EditEvent::SetChoice {
+            slot: format!("{path}#operator").parse().unwrap(),
+            expect: owner,
+            value: "lteq".into(),
+        },
+        &EditRules::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        cond(&doc).0,
+        "the date and time are on or before the end of 2026-12-31"
+    );
+
+    doc.apply(
+        &EditEvent::SetText {
+            slot: format!("{path}#rightOperand[0]").parse().unwrap(),
+            expect: owner,
+            value: "2026-12-31T10:00:00Z".into(),
+        },
+        &EditRules::default(),
+    )
+    .unwrap();
+    let (plain, choice) = cond(&doc);
+    assert_eq!(
+        plain,
+        "the date and time are on or before 2026-12-31T10:00:00Z"
+    );
+    assert!(!choice.date_bound);
+    let written = write_jsonld(&doc);
+    let right = &written["permission"][0]["constraint"][0]["rightOperand"];
+    assert_eq!(right["@type"], "xsd:date");
+    assert_eq!(right["@value"], "2026-12-31T10:00:00Z");
+}

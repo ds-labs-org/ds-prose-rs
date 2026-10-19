@@ -1143,3 +1143,41 @@ async fn no_empty_other_operators_group() {
     // No group is empty: none closes right after its opening tag.
     assert!(!sel.contains("\"></optgroup>"), "{sel}");
 }
+
+#[tokio::test]
+async fn date_operator_options_follow_the_sentence() {
+    let html = render_view(props(
+        doc_of("offer"),
+        EditMode::Edit,
+        EditConfig::default(),
+    ))
+    .await;
+    for label in [
+        "are before the start of (lt)",
+        "are on or before the end of (lteq)",
+        "are after the end of (gt)",
+        "are on or after the start of (gteq)",
+        "are equal to (eq)",
+    ] {
+        assert!(html.contains(label), "{label}");
+    }
+    assert!(html.contains("title=\"are before the start of\""));
+}
+
+#[tokio::test]
+async fn instant_operator_options_have_no_bound() {
+    let json = r#"{
+        "@context": "http://www.w3.org/ns/odrl.jsonld",
+        "@type": "Offer", "uid": "urn:p",
+        "permission": [{"action": "use", "target": "urn:t", "constraint": [
+            {"leftOperand": "dateTime", "operator": "lt",
+             "rightOperand": {"@value": "2026-12-31T10:00:00Z", "@type": "xsd:dateTime"}},
+            {"leftOperand": "count", "operator": "lteq", "rightOperand": 5}
+        ]}]
+    }"#;
+    let doc = Rc::new(read_model(json).unwrap());
+    let html = render_view(props(doc, EditMode::Edit, EditConfig::default())).await;
+    assert!(html.contains("are before (lt)"));
+    assert!(!html.contains("start of"));
+    assert!(html.contains("is at most (lteq)"));
+}

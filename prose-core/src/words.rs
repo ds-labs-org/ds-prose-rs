@@ -144,6 +144,16 @@ pub(crate) fn operator_phrase(left: &str, op: &str, plural: bool) -> String {
     if plural { plural_verb(phrase) } else { phrase }
 }
 
+/// STUB (red): whether a right operand is a date without a time of day.
+pub(crate) fn date_only(_value: &str, _datatype: Option<&str>) -> bool {
+    false
+}
+
+/// STUB (red): [`operator_for`] for a date-only right operand.
+pub fn operator_for_date(left: &str, op: &str) -> String {
+    operator_for(left, op)
+}
+
 /// A leading "is" becomes "are" and "has" becomes "have".
 fn plural_verb(phrase: String) -> String {
     if let Some(rest) = phrase.strip_prefix("is ") {
@@ -314,5 +324,51 @@ mod tests {
     #[test]
     fn operator_is_unchanged() {
         assert_eq!(operator("lt"), "is less than");
+    }
+
+    #[test]
+    fn date_only_detects_dates_without_time() {
+        let xsd = "http://www.w3.org/2001/XMLSchema#";
+        for v in ["2026-12-31"] {
+            assert!(date_only(v, None), "{v}");
+        }
+        for v in [
+            "2026-12-31T10:00:00Z",
+            "2026-12-31Z",
+            "2026-1-31",
+            "20261231",
+            "P30D",
+            "",
+        ] {
+            assert!(!date_only(v, None), "{v}");
+        }
+        for dt in [format!("{xsd}date"), "xsd:date".into(), "xs:date".into()] {
+            for v in ["2026-12-31", "2026-12-31Z", "2026-12-31+02:00"] {
+                assert!(date_only(v, Some(&dt)), "{dt} {v}");
+            }
+            assert!(!date_only("2026-12-31T10:00:00Z", Some(&dt)), "{dt}");
+        }
+        assert!(!date_only("2026-12-31", Some(&format!("{xsd}dateTime"))));
+        assert!(!date_only("2026-12-31", Some(&format!("{xsd}string"))));
+    }
+
+    #[test]
+    fn operator_for_date_names_the_start_or_end_of_the_day() {
+        let cases = [
+            ("lt", "are before the start of"),
+            ("lteq", "are on or before the end of"),
+            ("gt", "are after the end of"),
+            ("gteq", "are on or after the start of"),
+            ("eq", "are equal to"),
+            ("neq", "are not equal to"),
+        ];
+        for (op, want) in cases {
+            assert_eq!(operator_for_date("dateTime", op), want, "{op}");
+        }
+        assert_eq!(
+            operator_for_date("timeInterval", "lt"),
+            "is before the start of"
+        );
+        assert_eq!(operator_for_date("count", "lt"), "is less than");
     }
 }
