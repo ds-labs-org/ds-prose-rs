@@ -10,9 +10,7 @@ use serde_json::json;
 const EX: &str = "https://example.org/odrl/profile/research/";
 
 fn profile() -> Wording {
-    let op = |id: &str, label: &str| {
-        json!({"@id": format!("ex:{id}"), "@type": "odrl:Operator", "rdfs:label": label})
-    };
+    let op = |id: &str, label: &str| json!({"@id": format!("ex:{id}"), "@type": "odrl:Operator", "rdfs:label": label});
     let v = ProfileVocab::from_value(
         &json!({
             "@context": {"odrl": "http://www.w3.org/ns/odrl/2/", "ex": EX,
@@ -106,7 +104,10 @@ fn table() -> String {
 
 #[test]
 fn every_operator_for_every_shape_and_number_reads_as_pinned() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/operator_table.txt");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/golden/operator_table.txt"
+    );
     if std::env::var_os("BLESS").is_some() {
         std::fs::write(path, table()).unwrap();
     }

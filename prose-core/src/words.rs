@@ -610,4 +610,50 @@ mod tests {
             "is less than"
         );
     }
+
+    #[test]
+    fn a_template_is_conjugated_by_number_in_one_place() {
+        let cases = [
+            (
+                "{be} before the start of",
+                "is before the start of",
+                "are before the start of",
+            ),
+            ("{have} as a part", "has as a part", "have as a part"),
+            ("{do} not overlap", "does not overlap", "do not overlap"),
+            ("{contain}", "contains", "contain"),
+            ("{match} window", "matches window", "match window"),
+            (
+                "{be} related by near to",
+                "is related by near to",
+                "are related by near to",
+            ),
+            ("on or before", "on or before", "on or before"),
+        ];
+        for (template, one, many) in cases {
+            let phrase = Phrase::parse(template);
+            assert_eq!(phrase.render(false), one, "{template}");
+            assert_eq!(phrase.render(true), many, "{template}");
+        }
+    }
+
+    #[test]
+    fn a_profile_label_keeps_its_own_words_and_is_never_read_as_a_template() {
+        let cases = [
+            ("is within region", "is within region", "are within region"),
+            ("has overlap with", "has overlap with", "have overlap with"),
+            ("does not overlap", "does not overlap", "do not overlap"),
+            ("contains", "contains", "contain"),
+            ("matches window", "matches window", "match window"),
+            ("are near", "are near", "are near"),
+            ("earlier than", "is earlier than", "are earlier than"),
+            ("{be} odd", "is {be} odd", "are {be} odd"),
+            ("is {have}", "is {have}", "are {have}"),
+        ];
+        for (label, one, many) in cases {
+            let phrase = Phrase::from_label(label);
+            assert_eq!(phrase.render(false), one, "{label}");
+            assert_eq!(phrase.render(true), many, "{label}");
+        }
+    }
 }
