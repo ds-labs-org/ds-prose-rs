@@ -445,7 +445,7 @@ order. A change to `@1` may only add keys; removing or renaming one is `@2`.
 
 ```json
 { "schema": "ds-prose/validation-report@1",
-  "tool": {"name": "ds-prose-rs", "version": "0.5.0"},
+  "tool": {"name": "ds-prose-rs", "version": "0.5.1"},
   "mode": "strict",
   "tiers": ["profile", "prose", "input"],
   "ruleset": 1,

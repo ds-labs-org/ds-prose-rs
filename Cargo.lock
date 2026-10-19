@@ -90,7 +90,7 @@ checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 
 [[package]]
 name = "compliance-catalog"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "oxrdf",
  "oxttl",
@@ -112,7 +112,7 @@ dependencies = [
 
 [[package]]
 name = "demo"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "gloo-net",
  "gloo-timers",
@@ -718,7 +718,7 @@ dependencies = [
 
 [[package]]
 name = "prose-core"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "getrandom",
  "oxrdf",
@@ -728,7 +728,7 @@ dependencies = [
 
 [[package]]
 name = "prose-wasm"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "gloo-timers",
  "js-sys",
@@ -743,7 +743,7 @@ dependencies = [
 
 [[package]]
 name = "prose-yew"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "gloo-timers",
  "prose-core",
