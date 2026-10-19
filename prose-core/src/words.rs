@@ -23,7 +23,11 @@ pub fn local_name(term: &str) -> &str {
 /// no letter; the whole IRI if that leaves nothing.
 /// `http://example.com/asset:9898.movie` gives `9898.movie`,
 /// `http://example.com/person:88` gives `person:88`.
+/// A DID (`did:…`) is kept whole: no segment of it reliably names the party.
 pub fn short_iri(iri: &str) -> &str {
+    if iri.starts_with("did:") {
+        return iri;
+    }
     let trimmed = iri.trim_end_matches(['/', '#', ':']);
     let cut = |s: &str| s.rfind(['/', '#', ':']).map_or(0, |i| i + 1);
     let mut start = cut(trimmed);

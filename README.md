@@ -654,6 +654,10 @@ The profile types can grow too: `ProfileVocab`, `Wording`, `Prefixes` and
 fields, and start from `ProfileLimits::default()` to change a limit. So is
 `edit::ChoiceSlot`: build one with `ChoiceSlot::new` and set its fields.
 
+Changed after 0.5.0 (wording): `wording::short_iri` keeps a DID (`did:…`)
+whole, so the HTML shows a party identified by a DID in full instead of its
+last segment ("the assigner did" for a `did:web:…:did`).
+
 Changed after 0.4.0 (wording): the rendered text changes, on purpose. "the
 date and time is before X" reads "are before X"; a date-only right operand
 reads "are before the start of X" (see above); a rule sentence reads "as

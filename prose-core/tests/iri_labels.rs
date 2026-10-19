@@ -259,6 +259,34 @@ fn the_short_label_is_the_last_meaningful_segment() {
     assert_eq!(short_iri("plain"), "plain");
 }
 
+#[test]
+fn a_did_is_never_shortened() {
+    // No segment of a DID reliably names the party (#58): the last one of a
+    // did:web is often `did`.
+    assert_eq!(
+        short_iri("did:web:dataspace.eona-x.org:dataappeal:ih:did"),
+        "did:web:dataspace.eona-x.org:dataappeal:ih:did"
+    );
+    assert_eq!(
+        short_iri("did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"),
+        "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+    );
+}
+
+#[test]
+fn an_assigner_named_by_a_did_is_shown_whole() {
+    let r = read(&graph(
+        json!({"action": "use", "target": "http://example.com/asset:1",
+            "assigner": "did:web:dataspace.eona-x.org:dataappeal:ih:did"}),
+        vec![],
+    ));
+    let m = mention(&r, "did:web:dataspace.eona-x.org:dataappeal:ih:did");
+    assert_eq!(
+        m.short_label(),
+        "did:web:dataspace.eona-x.org:dataappeal:ih:did"
+    );
+}
+
 /// A node that does more than label an IRI is not read as a label only: a
 /// labelled rule, or a dataset holding a policy, left out of the reading
 /// is still reported (#45 review).
