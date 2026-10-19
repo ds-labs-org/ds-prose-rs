@@ -117,23 +117,49 @@ pub fn operator(term: &str) -> String {
     .to_string()
 }
 
-/// Operators read better with a different phrase for time: "the date and
-/// time is before X" rather than "is less than X".
-pub fn operator_for(left: &str, op: &str) -> String {
+/// Left operands whose noun phrase is plural: "the date and time" is two
+/// nouns, so its operator reads "are before", not "is before".
+pub(crate) const PLURAL_OPERANDS: &[&str] = &["dateTime"];
+
+/// Whether `term`'s built-in noun phrase is plural.
+pub(crate) fn plural_operand(term: &str) -> bool {
+    PLURAL_OPERANDS.contains(&local_name(term))
+}
+
+/// The verb phrase after `left`: singular as [`operator`] has it, with a
+/// different phrase for time ("is before" rather than "is less than"), then
+/// made plural when `plural`.
+pub(crate) fn operator_phrase(left: &str, op: &str, plural: bool) -> String {
     let temporal = matches!(
         local_name(left),
         "dateTime" | "timeInterval" | "delayPeriod"
     );
-    if temporal {
-        match local_name(op) {
-            "lt" => return "is before".into(),
-            "lteq" => return "is on or before".into(),
-            "gt" => return "is after".into(),
-            "gteq" => return "is on or after".into(),
-            _ => {}
-        }
+    let phrase = match (temporal, local_name(op)) {
+        (true, "lt") => "is before".to_string(),
+        (true, "lteq") => "is on or before".to_string(),
+        (true, "gt") => "is after".to_string(),
+        (true, "gteq") => "is on or after".to_string(),
+        _ => operator(op),
+    };
+    if plural { plural_verb(phrase) } else { phrase }
+}
+
+/// A leading "is" becomes "are" and "has" becomes "have".
+fn plural_verb(phrase: String) -> String {
+    if let Some(rest) = phrase.strip_prefix("is ") {
+        format!("are {rest}")
+    } else if let Some(rest) = phrase.strip_prefix("has ") {
+        format!("have {rest}")
+    } else {
+        phrase
     }
-    operator(op)
+}
+
+/// The phrase that follows `left`: time reads "is before" rather than "is
+/// less than", and the verb agrees in number with the operand's noun phrase
+/// ("the date and time are before").
+pub fn operator_for(left: &str, op: &str) -> String {
+    operator_phrase(left, op, plural_operand(left))
 }
 
 /// An action as a base-form verb phrase ("use", "attribute", "grant use").

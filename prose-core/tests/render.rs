@@ -22,7 +22,7 @@ fn offer_reads_as_permission_with_date_limit_and_duty() {
     );
     assert_eq!(
         r.conditions[0].text,
-        "the date and time is before 2026-12-31"
+        "the date and time are before 2026-12-31"
     );
     let duty = &r.follow_ups[0].rules[0];
     assert_eq!(duty.kind, RuleKind::Obligation);

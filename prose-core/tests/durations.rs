@@ -186,7 +186,7 @@ fn several_durations_and_other_values() {
             "the delay period is equal to 60 minutes",
             "the metered time is at most 10 hours",
             "the number of times used is at most 30",
-            "the date and time is before 2026-12-31",
+            "the date and time are before 2026-12-31",
         ]
     );
 }

@@ -116,7 +116,12 @@ impl<'a> WordCtx<'a> {
                     _ => format!("is {label}"),
                 }
             }
-            None => words::operator_for(left, op),
+            None => {
+                // Plural only when the noun phrase used is the built-in one.
+                let plural = self.worded(left, TermKind::LeftOperand).is_none()
+                    && words::plural_operand(left);
+                words::operator_phrase(left, op, plural)
+            }
         }
     }
 
