@@ -162,3 +162,29 @@ fn a_profile_operator_label_agrees_with_the_date_and_time() {
         }
     }
 }
+
+#[test]
+fn operator_with_date_words_a_day_bound_and_agrees_with_a_profile_label() {
+    use prose_core::profile::Prefixes;
+    use prose_core::wording::{operator_with, operator_with_date};
+    let w = operator_profile();
+    let prefixes = Prefixes::of_document(
+        &json!({"@context": {"ex": "https://example.org/odrl/profile/research/"}}),
+    );
+    // A built-in phrase with a date-only value names the start of the day.
+    assert_eq!(
+        operator_with_date(&w, &prefixes, "dateTime", "lt"),
+        "are before the start of"
+    );
+    assert_eq!(operator_with(&w, &prefixes, "dateTime", "lt"), "are before");
+    // A duration left operand takes the quantity wording whatever the value.
+    assert_eq!(
+        operator_with_date(&w, &prefixes, "timeInterval", "lt"),
+        "is less than"
+    );
+    // A profile label keeps its own words and still agrees in number.
+    assert_eq!(
+        operator_with_date(&w, &prefixes, "dateTime", "ex:earlierThan"),
+        "are earlier than"
+    );
+}
