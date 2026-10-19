@@ -4,7 +4,7 @@
 #   @ds-labs/prose-angular  (ng-packagr; depends on the wasm package)
 #
 #   scripts/build-npm-packages.sh
-#   PROSE_WASM_VERSION=0.4.0 PROSE_ANGULAR_VERSION=0.4.0 scripts/build-npm-packages.sh
+#   PROSE_WASM_VERSION=0.5.0 PROSE_ANGULAR_VERSION=0.5.0 scripts/build-npm-packages.sh
 #
 # The versions default to the ones in prose-wasm/npm/package.json and
 # prose-angular/package.json; the release workflow sets them from the tag.
