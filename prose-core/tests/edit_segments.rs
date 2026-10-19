@@ -297,7 +297,7 @@ fn check_policy(doc: &EditDoc, p: &PolicyProse) {
 }
 
 #[test]
-fn date_bound_follows_the_operator_and_the_value() {
+fn value_shape_follows_the_operator_and_the_value() {
     let mut doc = read_model(&fixture("offer")).unwrap();
     let cond = |doc: &EditDoc| {
         let p = &sentences(doc)[0];
@@ -318,7 +318,7 @@ fn date_bound_follows_the_operator_and_the_value() {
         plain,
         "the date and time are before the start of 2026-12-31"
     );
-    assert!(choice.date_bound);
+    assert_eq!(choice.value_shape, ValueShape::DateOnly);
     assert_eq!(choice.display, "are before the start of");
 
     let path = "policy[0].permission[0].constraint[0]";
@@ -351,9 +351,108 @@ fn date_bound_follows_the_operator_and_the_value() {
         plain,
         "the date and time are on or before 2026-12-31T10:00:00Z"
     );
-    assert!(!choice.date_bound);
+    assert_eq!(choice.value_shape, ValueShape::Other);
     let written = write_jsonld(&doc);
     let right = &written["permission"][0]["constraint"][0]["rightOperand"];
     assert_eq!(right["@type"], "xsd:date");
     assert_eq!(right["@value"], "2026-12-31T10:00:00Z");
+}
+
+fn operator_choice(constraint: serde_json::Value) -> ChoiceSlot {
+    let json = serde_json::json!({
+        "@context": ["http://www.w3.org/ns/odrl.jsonld", {"xsd": "http://www.w3.org/2001/XMLSchema#"}],
+        "@type": "Set", "uid": "urn:p",
+        "permission": [{"action": "use", "target": "urn:t", "constraint": [constraint]}]
+    });
+    let doc = read_model(&json.to_string()).unwrap();
+    let p = &sentences(&doc)[0];
+    p.rules[0].conditions.items[0]
+        .sentence
+        .segments
+        .iter()
+        .find_map(|s| match s {
+            Segment::Choice(c) => Some(c.clone()),
+            _ => None,
+        })
+        .unwrap()
+}
+
+#[test]
+fn value_shape_of_instants_durations_and_lists() {
+    use serde_json::json;
+    let shape = |left: &str, op: &str, right: serde_json::Value| {
+        operator_choice(json!({"leftOperand": left, "operator": op, "rightOperand": right}))
+            .value_shape
+    };
+    assert_eq!(
+        shape(
+            "dateTime",
+            "lt",
+            json!({"@value": "2026-12-31T10:00:00Z", "@type": "xsd:dateTime"})
+        ),
+        ValueShape::Instant
+    );
+    assert_eq!(
+        shape("delayPeriod", "lt", json!("PT60M")),
+        ValueShape::Duration
+    );
+    assert_eq!(
+        shape("dateTime", "lt", json!(["2026-12-31", "2027-01-01"])),
+        ValueShape::Other
+    );
+    assert_eq!(
+        operator_choice(json!({
+            "leftOperand": "dateTime", "operator": "lt", "rightOperandReference": "urn:r"
+        }))
+        .value_shape,
+        ValueShape::Other
+    );
+    // A logical operator and a conflict strategy are not operators.
+    let json = serde_json::json!({
+        "@context": "http://www.w3.org/ns/odrl.jsonld",
+        "@type": "Set", "uid": "urn:p", "conflict": "perm",
+        "permission": [{"action": "use", "target": "urn:t", "constraint": [{
+            "and": [{"leftOperand": "count", "operator": "lt", "rightOperand": 1}]
+        }]}]
+    });
+    let doc = read_model(&json.to_string()).unwrap();
+    let p = &sentences(&doc)[0];
+    let mut seen = 0;
+    for sentence in p
+        .notes
+        .iter()
+        .chain(std::iter::once(&p.intro))
+        .chain(p.rules[0].conditions.items.iter().map(|c| &c.sentence))
+    {
+        for seg in &sentence.segments {
+            if let Segment::Choice(c) = seg {
+                assert_eq!(c.value_shape, ValueShape::Other, "{:?}", c.kind);
+                seen += 1;
+            }
+        }
+    }
+    assert!(seen >= 1);
+}
+
+#[test]
+fn choice_slot_new_has_empty_operator_fields() {
+    let doc = read_model(&fixture("offer")).unwrap();
+    let owner = id_of(&doc, "policy[0].permission[0].constraint[0]");
+    let path: SlotPath = "policy[0].permission[0].constraint[0]#operator"
+        .parse()
+        .unwrap();
+    let c = ChoiceSlot::new(
+        path.clone(),
+        owner,
+        ChoiceKind::Operator,
+        "lt",
+        "is less than",
+    );
+    assert_eq!(c.path, path);
+    assert_eq!(c.owner, owner);
+    assert_eq!(c.kind, ChoiceKind::Operator);
+    assert_eq!((c.raw.as_str(), c.display.as_str()), ("lt", "is less than"));
+    assert_eq!(c.left_operand, "");
+    assert_eq!(c.values, 0);
+    assert_eq!(c.value_shape, ValueShape::Other);
 }
