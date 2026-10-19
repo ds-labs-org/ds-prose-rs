@@ -83,6 +83,26 @@ fn a_dated_zone_is_kept_as_written() {
     );
 }
 
+/// A plain string is a date only when it is exactly YYYY-MM-DD: nothing
+/// before it, after it, or in the wrong places.
+#[test]
+fn a_plain_string_must_be_exactly_a_date() {
+    for v in [
+        "2026-12-319",
+        "2026-12-3",
+        "2026/12/31",
+        "2026-12-31Z",
+        "2026-12-31T",
+    ] {
+        let got = condition(&atom("dateTime", "lt", json!(v)));
+        assert!(
+            got.starts_with("the date and time are before "),
+            "{v}: {got}"
+        );
+        assert!(!got.contains("the start of"), "{v}: {got}");
+    }
+}
+
 #[test]
 fn eq_and_neq_are_unchanged() {
     assert_eq!(
