@@ -1,0 +1,34 @@
+# The Turtle twin of plural-operand.jsonld.
+# tests/profile_plural.rs checks that both read as the same vocabulary.
+
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix prose: <https://ds-labs-org.github.io/ds-prose-rs/profile#> .
+@prefix ex: <https://example.org/odrl/profile/research/> .
+
+<https://example.org/odrl/profile/plural>
+    a owl:Ontology ;
+    rdfs:label "Plural operand profile"@en .
+
+ex:timeWindows
+    a odrl:LeftOperand ;
+    rdfs:label "Time windows"@en ;
+    prose:plural true .
+
+ex:window
+    a odrl:LeftOperand ;
+    rdfs:label "Time window"@en .
+
+ex:dateTime
+    a odrl:LeftOperand ;
+    rdfs:label "Moments"@en ;
+    prose:plural true .
+
+ex:earlierThan
+    a odrl:Operator ;
+    rdfs:label "Earlier than"@en .
+
+ex:hasOverlap
+    a odrl:Operator ;
+    rdfs:label "Has overlap with"@en .

@@ -629,8 +629,9 @@ fn literal(text: &str, lang: Option<&str>, datatype: Option<&str>) -> Object {
 /// that says so.
 fn iri_valued(p: &str) -> bool {
     if let Some(local) = p.strip_prefix(ns::PROSE) {
-        // `prose:closed` is a boolean; the hints name terms.
-        return local != "closed";
+        // `prose:closed` and `prose:plural` are booleans; the other hints
+        // name terms.
+        return !matches!(local, "closed" | "plural");
     }
     let local =
         |base: &str, names: &[&str]| p.strip_prefix(base).is_some_and(|l| names.contains(&l));

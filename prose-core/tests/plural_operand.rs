@@ -104,7 +104,7 @@ fn operator_profile() -> Wording {
 fn a_profile_operator_label_agrees_with_the_date_and_time() {
     use prose_core::edit::{read_model, sentences_with};
     use prose_core::profile::Prefixes;
-    use prose_core::wording::operator_with;
+    use prose_core::wording::{OperatorQuery, operator_phrase};
     let w = operator_profile();
     let prefixes = Prefixes::of_document(
         &json!({"@context": {"ex": "https://example.org/odrl/profile/research/"}}),
@@ -155,7 +155,7 @@ fn a_profile_operator_label_agrees_with_the_date_and_time() {
                 "editor {left} {op}"
             );
             assert_eq!(
-                operator_with(&w, &prefixes, left, op),
+                operator_phrase(&OperatorQuery::new(left, op).wording(&w, &prefixes)),
                 phrase,
                 "{left} {op}"
             );
@@ -166,25 +166,40 @@ fn a_profile_operator_label_agrees_with_the_date_and_time() {
 #[test]
 fn operator_with_date_words_a_day_bound_and_agrees_with_a_profile_label() {
     use prose_core::profile::Prefixes;
-    use prose_core::wording::{operator_with, operator_with_date};
+    use prose_core::wording::{OperatorQuery, ValueShape, operator_phrase};
     let w = operator_profile();
     let prefixes = Prefixes::of_document(
         &json!({"@context": {"ex": "https://example.org/odrl/profile/research/"}}),
     );
     // A built-in phrase with a date-only value names the start of the day.
     assert_eq!(
-        operator_with_date(&w, &prefixes, "dateTime", "lt"),
+        operator_phrase(
+            &OperatorQuery::new("dateTime", "lt")
+                .value(ValueShape::DateOnly)
+                .wording(&w, &prefixes)
+        ),
         "are before the start of"
     );
-    assert_eq!(operator_with(&w, &prefixes, "dateTime", "lt"), "are before");
+    assert_eq!(
+        operator_phrase(&OperatorQuery::new("dateTime", "lt").wording(&w, &prefixes)),
+        "are before"
+    );
     // A duration left operand takes the quantity wording whatever the value.
     assert_eq!(
-        operator_with_date(&w, &prefixes, "timeInterval", "lt"),
+        operator_phrase(
+            &OperatorQuery::new("timeInterval", "lt")
+                .value(ValueShape::DateOnly)
+                .wording(&w, &prefixes)
+        ),
         "is less than"
     );
     // A profile label keeps its own words and still agrees in number.
     assert_eq!(
-        operator_with_date(&w, &prefixes, "dateTime", "ex:earlierThan"),
+        operator_phrase(
+            &OperatorQuery::new("dateTime", "ex:earlierThan")
+                .value(ValueShape::DateOnly)
+                .wording(&w, &prefixes)
+        ),
         "are earlier than"
     );
 }

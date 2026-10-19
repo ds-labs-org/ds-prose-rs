@@ -38,7 +38,8 @@
 //! convention, not ODRL: on a left operand it orders the editor's
 //! suggestions ([`OperandHints`]) and never restricts them. Only
 //! `prose:closed true` on the left operand makes them binding, and only in
-//! strict validation ([`crate::validate`]).
+//! strict validation ([`crate::validate`]). `prose:plural true` says a left
+//! operand's label is a plural noun phrase, so its operators read "are".
 //!
 //! Every read is bounded by [`ProfileLimits`]; past a limit the profile is
 //! refused, never half read.
@@ -142,6 +143,7 @@ fn same_term(a: &Term, b: &Term) -> bool {
         && a.hints.datatype == b.hints.datatype
         && same_set(&a.hints.units, &b.hints.units)
         && a.hints.closed == b.hints.closed
+        && a.hints.plural == b.hints.plural
 }
 
 impl ProfileVocab {
@@ -383,6 +385,11 @@ pub struct OperandHints {
     /// validation its operators, values, units and datatype above are then
     /// binding rather than suggested; nothing else changes.
     pub closed: bool,
+    /// `prose:plural true`: the left operand's label is a plural noun phrase
+    /// ("Time windows"), so its operators agree in the plural: "the time
+    /// windows are earlier than". Read on a term outside ODRL's namespace;
+    /// ODRL's own terms keep their built-in number.
+    pub plural: bool,
     /// `values` with their descendants within the profile (right operands
     /// whose `skos:broader` or `rdfs:subClassOf` leads to them), depth
     /// first, each with its depth below the suggested value (0). Each value

@@ -2,7 +2,6 @@
 //! strategy, and the kind of a rule.
 use yew::prelude::*;
 
-use prose_core::edit::ValueShape;
 use prose_core::edit::{
     ChoiceKind, ChoiceSlot, EditEvent, Field, LogicalOp, RuleKindSlot, RuleList, Severity, SlotPath,
 };
@@ -96,16 +95,14 @@ fn options(env: &Env, c: &ChoiceSlot, severity: Option<Severity>) -> (Vec<Opt>, 
                 .iter()
                 .map(|op| {
                     let op = written_form(op, &env.prefixes).to_string();
-                    let phrase = match (w.is_empty(), (c.value_shape == ValueShape::DateOnly)) {
-                        (true, false) => wording::operator_for(&c.left_operand, &op),
-                        (true, true) => wording::operator_for_date(&c.left_operand, &op),
-                        (false, false) => {
-                            wording::operator_with(w, &env.prefixes, &c.left_operand, &op)
-                        }
-                        (false, true) => {
-                            wording::operator_with_date(w, &env.prefixes, &c.left_operand, &op)
-                        }
+                    let query =
+                        wording::OperatorQuery::new(&c.left_operand, &op).value(c.value_shape);
+                    let query = if w.is_empty() {
+                        query
+                    } else {
+                        query.wording(w, &env.prefixes)
                     };
+                    let phrase = wording::operator_phrase(&query);
                     let label = if env.cfg.show_raw_terms {
                         fill(
                             &labels.operator_option,

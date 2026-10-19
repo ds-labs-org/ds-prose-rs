@@ -301,35 +301,40 @@ fn compact_prefers_the_longest_namespace() {
 
 #[test]
 fn operator_with_uses_the_profile_label_outside_odrl() {
-    use prose_core::wording::{operator_for, operator_with};
+    use prose_core::wording::{OperatorQuery, operator_phrase};
     let w = Wording::new().with_profile(research());
     let p = Prefixes::of_document(&json!({"@context": {"ex": EX}}));
     assert_eq!(
-        operator_with(&w, &p, "ex:region", "ex:withinRegion"),
+        operator_phrase(&OperatorQuery::new("ex:region", "ex:withinRegion").wording(&w, &p)),
         "is within region"
     );
     assert_eq!(
-        operator_with(&w, &p, "x", &format!("{EX}withinRegion")),
+        operator_phrase(&OperatorQuery::new("x", &format!("{EX}withinRegion")).wording(&w, &p)),
         "is within region"
     );
     // ODRL operators and an empty wording read as operator_for has them.
     assert_eq!(
-        operator_with(&w, &p, "count", "gteq"),
-        operator_for("count", "gteq")
+        operator_phrase(&OperatorQuery::new("count", "gteq").wording(&w, &p)),
+        operator_phrase(&OperatorQuery::new("count", "gteq"))
     );
     assert_eq!(
-        operator_with(&Wording::default(), &p, "count", "ex:withinRegion"),
-        operator_for("count", "ex:withinRegion")
+        operator_phrase(
+            &OperatorQuery::new("count", "ex:withinRegion").wording(&Wording::default(), &p)
+        ),
+        operator_phrase(&OperatorQuery::new("count", "ex:withinRegion"))
     );
 }
 
 #[test]
 fn operator_with_agrees_unless_a_profile_labels_the_operand() {
-    use prose_core::wording::operator_with;
+    use prose_core::wording::{OperatorQuery, operator_phrase};
     let p = Prefixes::of_document(&json!({"@context": {"ex": EX}}));
     let w = Wording::new().with_profile(research());
     // An ODRL term keeps its built-in noun phrase, so it keeps the plural.
-    assert_eq!(operator_with(&w, &p, "dateTime", "lt"), "are before");
+    assert_eq!(
+        operator_phrase(&OperatorQuery::new("dateTime", "lt").wording(&w, &p)),
+        "are before"
+    );
     let moment = ProfileVocab::from_value(
         &json!({
             "@context": {"odrl": ODRL, "ex": EX, "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
@@ -343,11 +348,14 @@ fn operator_with_agrees_unless_a_profile_labels_the_operand() {
     )
     .unwrap();
     let w = Wording::new().with_profile(moment);
-    assert_eq!(operator_with(&w, &p, "ex:dateTime", "lt"), "is before");
+    assert_eq!(
+        operator_phrase(&OperatorQuery::new("ex:dateTime", "lt").wording(&w, &p)),
+        "is before"
+    );
     // A profile operator label agrees with the plural subject.
     let w = Wording::new().with_profile(research());
     assert_eq!(
-        operator_with(&w, &p, "dateTime", "ex:withinRegion"),
+        operator_phrase(&OperatorQuery::new("dateTime", "ex:withinRegion").wording(&w, &p)),
         "are within region"
     );
 }

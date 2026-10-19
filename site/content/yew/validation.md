@@ -19,6 +19,7 @@ A `Wording` holds the loaded profiles. A `Validator` pairs a wording with `Optio
 - `Wording::new().with_profile(ProfileVocab::parse(text)?)` loads a profile from JSON-LD text. Turtle is read when `prose-core` is built with its `turtle` feature.
 - `Options::advisory()` is the default. Profiles widen and annotate the reading, and nothing is an error.
 - `Options::strict()` reads the vocabulary as closed: ODRL plus the loaded profiles. The structural rules of the ODRL Information Model stay off until `Options::structural(true)`.
+- A left operand a profile labels with a plural noun phrase says so with `prose:plural true`, in JSON-LD or Turtle. Its operators then agree in the plural ("the time windows are earlier than"), in the reader, the editor sentence and the operator select. ODRL's own terms keep their built-in number.
 - `Validator::new(Arc<Wording>, Options)`, then `validate(&EditDoc) -> Report` or `validate_json(&str) -> Report`.
 
 `Report` has `mode`, `verdict`, `findings` and `gaps`, and is `#[non_exhaustive]`. `Verdict` is `Conforms`, `Violations` or `Incomplete`, also `#[non_exhaustive]`. Always match with a wildcard arm.

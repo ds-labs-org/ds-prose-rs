@@ -425,10 +425,13 @@ impl Builder<'_, '_> {
             t.hints.values = prose("rightOperand");
             t.hints.datatype = prose("datatype").into_iter().next();
             t.hints.units = prose("unit");
-            t.hints.closed = g
-                .literals(s, &format!("{}closed", ns::PROSE))
-                .iter()
-                .any(|(_, v)| matches!(*v, "true" | "1"));
+            let flag = |local: &str| {
+                g.literals(s, &format!("{}{local}", ns::PROSE))
+                    .iter()
+                    .any(|(_, v)| matches!(*v, "true" | "1"))
+            };
+            t.hints.closed = flag("closed");
+            t.hints.plural = flag("plural");
         }
         t
     }
