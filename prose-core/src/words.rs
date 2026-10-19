@@ -369,10 +369,36 @@ mod tests {
 
     #[test]
     fn other_operands_stay_singular() {
-        assert_eq!(operator_for("timeInterval", "lt"), "is before");
+        assert_eq!(operator_for("timeInterval", "lt"), "is less than");
         assert_eq!(operator_for("delayPeriod", "eq"), "is equal to");
         assert_eq!(operator_for("count", "lteq"), "is at most");
         assert_eq!(operator_for("elapsedTime", "gteq"), "is at least");
+    }
+
+    #[test]
+    fn duration_operands_read_as_quantities() {
+        let cases = [
+            ("lt", "is less than"),
+            ("lteq", "is at most"),
+            ("gt", "is greater than"),
+            ("gteq", "is at least"),
+            ("eq", "is equal to"),
+        ];
+        for left in [
+            "timeInterval",
+            "delayPeriod",
+            "elapsedTime",
+            "odrl:timeInterval",
+        ] {
+            for (op, want) in cases {
+                for got in [operator_for(left, op), operator_for_date(left, op)] {
+                    assert_eq!(got, want, "{left} {op}");
+                    for bad in ["before", "after", "start of", "end of", "are "] {
+                        assert!(!got.contains(bad), "{left} {op}: {got}");
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -417,10 +443,7 @@ mod tests {
         for (op, want) in cases {
             assert_eq!(operator_for_date("dateTime", op), want, "{op}");
         }
-        assert_eq!(
-            operator_for_date("timeInterval", "lt"),
-            "is before the start of"
-        );
+        assert_eq!(operator_for_date("timeInterval", "lt"), "is less than");
         assert_eq!(operator_for_date("count", "lt"), "is less than");
     }
 }

@@ -1181,3 +1181,26 @@ async fn instant_operator_options_have_no_bound() {
     assert!(!html.contains("start of"));
     assert!(html.contains("is at most (lteq)"));
 }
+
+#[tokio::test]
+async fn duration_operator_options_are_quantities() {
+    let json = r#"{
+        "@context": "http://www.w3.org/ns/odrl.jsonld",
+        "@type": "Offer", "uid": "urn:p",
+        "permission": [{"action": "use", "target": "urn:t", "constraint": [
+            {"leftOperand": "timeInterval", "operator": "lt",
+             "rightOperand": {"@value": "P30D", "@type": "xsd:duration"}}
+        ]}]
+    }"#;
+    let doc = Rc::new(read_model(json).unwrap());
+    let html = render_view(props(doc, EditMode::Edit, EditConfig::default())).await;
+    for label in [
+        "is less than (lt)",
+        "is at most (lteq)",
+        "is greater than (gt)",
+        "is at least (gteq)",
+    ] {
+        assert!(html.contains(label), "{label}");
+    }
+    assert!(!html.contains("before"));
+}

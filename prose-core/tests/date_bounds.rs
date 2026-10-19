@@ -116,14 +116,14 @@ fn eq_and_neq_are_unchanged() {
 }
 
 #[test]
-fn other_temporal_operands() {
+fn duration_operands_take_no_bound() {
     assert_eq!(
         condition(&atom("timeInterval", "lt", json!("2026-12-31"))),
-        "the time interval is before the start of 2026-12-31"
+        "the time interval is less than 2026-12-31"
     );
     assert_eq!(
         condition(&atom("delayPeriod", "lt", json!("PT60M"))),
-        "the delay period is before 60 minutes"
+        "the delay period is less than 60 minutes"
     );
 }
 
