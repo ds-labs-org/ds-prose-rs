@@ -1207,3 +1207,23 @@ async fn duration_operator_options_are_quantities() {
     assert!(!html.contains("on or before"));
     assert!(!html.contains("start of"));
 }
+
+#[tokio::test]
+async fn profile_operator_options_agree_with_the_subject() {
+    let profile = ProfileVocab::parse(
+        r#"{
+            "@context": {"odrl": "http://www.w3.org/ns/odrl/2/",
+                         "ex": "https://example.org/odrl/profile/research/",
+                         "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+                         "owl": "http://www.w3.org/2002/07/owl#"},
+            "@graph": [
+                {"@id": "https://example.org/ops", "@type": "owl:Ontology"},
+                {"@id": "ex:earlierThan", "@type": "odrl:Operator", "rdfs:label": "Earlier than"}
+            ]
+        }"#,
+    )
+    .unwrap();
+    let cfg = EditConfig::default().with_wording(Rc::new(Wording::new().with_profile(profile)));
+    let html = render_view(props(doc_of("offer"), EditMode::Edit, cfg)).await;
+    assert!(html.contains("are earlier than (ex:earlierThan)"), "{html}");
+}

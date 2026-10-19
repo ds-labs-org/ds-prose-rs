@@ -344,10 +344,10 @@ fn operator_with_agrees_unless_a_profile_labels_the_operand() {
     .unwrap();
     let w = Wording::new().with_profile(moment);
     assert_eq!(operator_with(&w, &p, "ex:dateTime", "lt"), "is before");
-    // A profile operator label is used as is.
+    // A profile operator label agrees with the plural subject.
     let w = Wording::new().with_profile(research());
     assert_eq!(
         operator_with(&w, &p, "dateTime", "ex:withinRegion"),
-        "is within region"
+        "are within region"
     );
 }

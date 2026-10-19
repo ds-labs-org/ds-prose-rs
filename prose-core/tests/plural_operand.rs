@@ -73,3 +73,92 @@ fn a_profile_label_for_the_operand_keeps_the_singular() {
         .clone();
     assert_eq!(got, "the moment is before 2026-12-31T10:00:00Z");
 }
+
+/// A profile with operator labels of each leading verb, and a relabelled
+/// `ex:dateTime`.
+fn operator_profile() -> Wording {
+    let profile = ProfileVocab::from_value(
+        &json!({
+            "@context": {"odrl": "http://www.w3.org/ns/odrl/2/",
+                         "ex": "https://example.org/odrl/profile/research/",
+                         "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+                         "owl": "http://www.w3.org/2002/07/owl#"},
+            "@graph": [
+                {"@id": "https://example.org/ops", "@type": "owl:Ontology"},
+                {"@id": "ex:dateTime", "@type": "odrl:LeftOperand", "rdfs:label": "Moment"},
+                {"@id": "ex:earlierThan", "@type": "odrl:Operator", "rdfs:label": "Earlier than"},
+                {"@id": "ex:hasOverlap", "@type": "odrl:Operator", "rdfs:label": "Has overlap with"},
+                {"@id": "ex:doesNotOverlap", "@type": "odrl:Operator", "rdfs:label": "Does not overlap"},
+                {"@id": "ex:containsDay", "@type": "odrl:Operator", "rdfs:label": "Contains"},
+                {"@id": "ex:matchesWindow", "@type": "odrl:Operator", "rdfs:label": "Matches window"},
+                {"@id": "ex:areNear", "@type": "odrl:Operator", "rdfs:label": "Are near"}
+            ]
+        }),
+        &ProfileLimits::default(),
+    )
+    .unwrap();
+    Wording::new().with_profile(profile)
+}
+
+#[test]
+fn a_profile_operator_label_agrees_with_the_date_and_time() {
+    use prose_core::edit::{read_model, sentences_with};
+    use prose_core::profile::Prefixes;
+    use prose_core::wording::operator_with;
+    let w = operator_profile();
+    let prefixes = Prefixes::of_document(
+        &json!({"@context": {"ex": "https://example.org/odrl/profile/research/"}}),
+    );
+    let value = json!("2026-12-31T10:00:00Z");
+    for (left, cases) in [
+        (
+            "dateTime",
+            [
+                ("ex:earlierThan", "are earlier than"),
+                ("ex:hasOverlap", "have overlap with"),
+                ("ex:doesNotOverlap", "do not overlap"),
+                ("ex:containsDay", "contain"),
+                ("ex:matchesWindow", "match window"),
+                ("ex:areNear", "are near"),
+            ],
+        ),
+        (
+            "ex:dateTime",
+            [
+                ("ex:earlierThan", "is earlier than"),
+                ("ex:hasOverlap", "has overlap with"),
+                ("ex:doesNotOverlap", "does not overlap"),
+                ("ex:containsDay", "contains"),
+                ("ex:matchesWindow", "matches window"),
+                ("ex:areNear", "are near"),
+            ],
+        ),
+    ] {
+        let subject = if left == "dateTime" {
+            "the date and time"
+        } else {
+            "the moment"
+        };
+        for (op, phrase) in cases {
+            let want = format!("{subject} {phrase} 2026-12-31T10:00:00Z");
+            let text = offer(left, op, value.clone());
+            let read = render_with(&text, &w).unwrap().document.policies[0].rules[0].conditions[0]
+                .text
+                .clone();
+            assert_eq!(read, want, "reader {left} {op}");
+            let doc = read_model(&text).unwrap();
+            assert_eq!(
+                sentences_with(&doc, &w)[0].rules[0].conditions.items[0]
+                    .sentence
+                    .plain(),
+                want,
+                "editor {left} {op}"
+            );
+            assert_eq!(
+                operator_with(&w, &prefixes, left, op),
+                phrase,
+                "{left} {op}"
+            );
+        }
+    }
+}

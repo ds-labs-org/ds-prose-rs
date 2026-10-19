@@ -401,6 +401,21 @@ mod tests {
     }
 
     #[test]
+    fn profile_label_verbs_take_the_plural() {
+        for (label, want) in [
+            ("is within region", "are within region"),
+            ("has overlap with", "have overlap with"),
+            ("does not overlap", "do not overlap"),
+            ("contains", "contain"),
+            ("matches window", "match window"),
+            ("are near", "are near"),
+            ("earlier than", "are earlier than"),
+        ] {
+            assert_eq!(plural_label(label), want, "{label}");
+        }
+    }
+
+    #[test]
     fn operator_is_unchanged() {
         assert_eq!(operator("lt"), "is less than");
     }
