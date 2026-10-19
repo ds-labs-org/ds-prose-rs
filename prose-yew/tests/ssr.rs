@@ -1202,5 +1202,8 @@ async fn duration_operator_options_are_quantities() {
     ] {
         assert!(html.contains(label), "{label}");
     }
-    assert!(!html.contains("before"));
+    // The page has other "before" text; the operator options have none.
+    assert!(!html.contains("is before"));
+    assert!(!html.contains("on or before"));
+    assert!(!html.contains("start of"));
 }

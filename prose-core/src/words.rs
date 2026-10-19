@@ -127,13 +127,12 @@ pub(crate) fn plural_operand(term: &str) -> bool {
 }
 
 /// The verb phrase after `left`: singular as [`operator`] has it, with a
-/// different phrase for time ("is before" rather than "is less than"), then
-/// made plural when `plural`.
+/// different phrase for a point in time ("is before" rather than "is less
+/// than"), then made plural when `plural`. Only a date and time is a point
+/// in time: a time interval, a delay period or an elapsed time is a
+/// quantity and keeps the quantity wording.
 pub(crate) fn operator_phrase(left: &str, op: &str, plural: bool, date: bool) -> String {
-    let temporal = matches!(
-        local_name(left),
-        "dateTime" | "timeInterval" | "delayPeriod"
-    );
+    let temporal = local_name(left) == "dateTime";
     let phrase = match (temporal, date, local_name(op)) {
         (true, true, "lt") => "is before the start of".to_string(),
         (true, true, "lteq") => "is on or before the end of".to_string(),
@@ -219,8 +218,8 @@ fn plural_verb(phrase: String) -> String {
     }
 }
 
-/// The phrase that follows `left`: time reads "is before" rather than "is
-/// less than", and the verb agrees in number with the operand's noun phrase
+/// The phrase that follows `left`: a date and time reads "is before" rather
+/// than "is less than" (a duration stays a quantity), and the verb agrees in number with the operand's noun phrase
 /// ("the date and time are before").
 pub fn operator_for(left: &str, op: &str) -> String {
     operator_phrase(left, op, plural_operand(left), false)
