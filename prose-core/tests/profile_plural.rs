@@ -159,7 +159,15 @@ fn a_plural_label_takes_plural_operators_in_reader_editor_and_dropdown() {
             ("ex:earlierThan", format!("{verb_is} earlier than")),
             ("ex:hasOverlap", format!("{verb_has} overlap with")),
             ("eq", format!("{verb_is} equal to")),
-            ("lt", format!("{verb_is} less than")),
+            // A local name of dateTime is a point in time, whoever declares it.
+            (
+                "lt",
+                if left == "ex:dateTime" {
+                    format!("{verb_is} before")
+                } else {
+                    format!("{verb_is} less than")
+                },
+            ),
         ] {
             let want = format!("{subject} {tail} 5");
             assert_eq!(read(left, op), want, "reader {left} {op}");

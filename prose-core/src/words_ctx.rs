@@ -103,6 +103,20 @@ impl<'a> WordCtx<'a> {
         }
     }
 
+    /// Whether the noun phrase used for `left` is plural: a profile's label
+    /// when the profile says `prose:plural`, otherwise the built-in phrase
+    /// when it is plural ("the date and time").
+    fn plural_subject(&self, left: &str) -> bool {
+        match self.resolve(left) {
+            Some((t, _))
+                if !t.iri.starts_with(ODRL_NS) && t.kinds.contains(&TermKind::LeftOperand) =>
+            {
+                t.hints.plural
+            }
+            _ => words::plural_operand(left),
+        }
+    }
+
     /// An operator as the verb phrase that follows `left`. A label that is
     /// already a verb phrase ("Has part") is kept; otherwise it follows
     /// "is" ("Greater than" reads "is greater than"). The verb agrees in
@@ -110,9 +124,7 @@ impl<'a> WordCtx<'a> {
     /// phrase ("the date and time"), "is" reads "are", "has" "have", and so
     /// on, for a profile label as for a built-in phrase.
     pub(crate) fn operator_for(&self, left: &str, op: &str, shape: ValueShape) -> String {
-        // Plural only when the noun phrase used is the built-in one.
-        let plural =
-            self.worded(left, TermKind::LeftOperand).is_none() && words::plural_operand(left);
+        let plural = self.plural_subject(left);
         match self.worded(op, TermKind::Operator) {
             Some(label) => Phrase::from_label(&lower_first(&label)).render(plural),
             None => words::built_in_phrase(left, op, plural, shape),
@@ -264,7 +276,7 @@ pub(crate) fn gloss(w: &Wording, prefixes: &Prefixes, written: &str) -> Option<G
     Some(ctx.gloss_of(written, t, p, kind))
 }
 
-/// What [`operator_phrase`] words: an operator after its left operand, for
+/// What [`crate::wording::operator_phrase`] words: an operator after its left operand, for
 /// one kind of right operand, optionally with the loaded profiles. Build one
 /// with [`OperatorQuery::new`] and the builder methods; fields may be added
 /// later without breaking callers.

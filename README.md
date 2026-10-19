@@ -84,7 +84,8 @@ interval, a delay period and an elapsed time are quantities: `lt` reads "is
 less than", `lteq` "is at most", `gt` "is greater than" and `gteq` "is at
 least", whether the right operand is a duration or a date. A profile's
 operator label agrees with the subject too: "Earlier than" reads "the date
-and time are earlier than", and a relabelled operand stays singular.
+and time are earlier than". A relabelled operand stays singular, unless its
+profile declares `prose:plural true` (see The `prose:` extension).
 A rule sentence names its assigner by role: "as permitted by the
 assigner X", "as prohibited by the assigners X and Y".
 
@@ -212,7 +213,7 @@ policies, not a vocabulary), `LooksLikePolicy`, `NoTerms`, `Json`, `Turtle`,
 ODRL has no machine-readable link from a left operand to the operators and
 values that suit it; profiles say it in `skos:note` prose, which this crate
 never parses. A profile author who wants narrowed suggestions in the editor
-can add four properties to a left operand, in the namespace
+can add properties to a left operand, in the namespace
 `https://ds-labs-org.github.io/ds-prose-rs/profile#`:
 
 | property | meaning |
@@ -222,6 +223,7 @@ can add four properties to a left operand, in the namespace
 | `prose:datatype` | an xsd datatype IRI: the value slot's placeholder, and an advisory lexical check (integer, decimal, boolean, date, dateTime, duration) |
 | `prose:unit` | unit suggestions |
 | `prose:closed` | `true` makes the four properties above binding on this left operand, in strict validation only (see Strict validation) |
+| `prose:plural` | `true` says the left operand's label is a plural noun phrase ("Time windows"), so its operators agree in the plural: "the time windows are earlier than" |
 
 ```json
 { "@context": { "odrl": "http://www.w3.org/ns/odrl/2/",
@@ -236,7 +238,10 @@ The extension only orders and groups suggestions. Every other operator and
 any free value stay available, and nothing a profile says through it is
 enforced, unless the left operand also says `prose:closed true` and the host
 asks for strict validation (see Strict validation). It is read on left
-operands only. A profile without it still
+operands only. `prose:plural` is read on a term the profile declares outside
+ODRL's namespace; ODRL's own terms keep their built-in number ("the date and
+time" is plural). It is a boolean like `prose:closed`: `true` or `1`, and
+anything else counts as absent. A profile without it still
 fills the editor's lists with all its actions, operands, operators, values
 and conflict terms, just not narrowed per operand. Other tools ignore these
 triples, as RDF allows.
@@ -663,6 +668,12 @@ most", `gt` "is greater than", `gteq` "is at least"). A profile operator
 label agrees with a plural subject ("the date and time are earlier than").
 `ChoiceSlot` is now `#[non_exhaustive]` and gained `value_shape` (a
 `ValueShape`); build one with `ChoiceSlot::new` and set the fields. `ValueShape::of` is new.
+`wording::operator_phrase(&OperatorQuery)` is the one entry point for
+operator wording: `OperatorQuery::new(left, op)` with `.value(ValueShape)` and
+`.wording(&Wording, &Prefixes)`. `wording::operator_for`, `operator_for_date`,
+`operator_with` and `operator_with_date` are deprecated since 0.5.0 and give
+the same text. (The entry point is not called `operator`, which is already
+the phrase for a term alone.) `OperandHints::plural` is new (`prose:plural`).
 
 Changed after 0.4.0 (additive except for struct literals): `Condition`
 gained `reference` (the IRI of a constraint referred to and not declared),
