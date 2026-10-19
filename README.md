@@ -84,8 +84,9 @@ interval, a delay period and an elapsed time are quantities: `lt` reads "is
 less than", `lteq` "is at most", `gt` "is greater than" and `gteq` "is at
 least", whether the right operand is a duration or a date. A profile's
 operator label agrees with the subject too: "Earlier than" reads "the date
-and time are earlier than", and a relabelled operand stays singular. A rule sentence names its assigner by role: "as
-permitted by the assigner X", "as prohibited by the assigners X and Y".
+and time are earlier than", and a relabelled operand stays singular.
+A rule sentence names its assigner by role: "as permitted by the
+assigner X", "as prohibited by the assigners X and Y".
 
 A constraint can be declared once, as a node of its own with an identifier,
 and referred to by that identifier (`"constraint": [{"@id": "urn:c:1"}]`, or
@@ -661,8 +662,7 @@ than", as do `delayPeriod` and the other ordering operators (`lteq` "is at
 most", `gt` "is greater than", `gteq` "is at least"). A profile operator
 label agrees with a plural subject ("the date and time are earlier than").
 `ChoiceSlot` is now `#[non_exhaustive]` and gained `value_shape` (a
-`ValueShape`, in place of the `date_bound` of an earlier draft); build one with
-`ChoiceSlot::new` and set the fields. `ValueShape::of` is new.
+`ValueShape`); build one with `ChoiceSlot::new` and set the fields. `ValueShape::of` is new.
 
 Changed after 0.4.0 (additive except for struct literals): `Condition`
 gained `reference` (the IRI of a constraint referred to and not declared),
