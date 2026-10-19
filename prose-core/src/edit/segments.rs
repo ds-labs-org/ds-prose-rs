@@ -5,7 +5,7 @@ use super::model::*;
 use super::path::*;
 use super::rules::odrl_position;
 use crate::read::join_with;
-use crate::words::{self, local_name};
+use crate::words::{self, ValueShape, local_name};
 use crate::words_ctx::WordCtx;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -120,7 +120,10 @@ pub enum SlotKind {
     Reference,
 }
 
-/// A pick from a closed list.
+/// A pick from a closed list. Build one with [`ChoiceSlot::new`] and set the
+/// operator fields; the struct is `#[non_exhaustive]` so a later field does
+/// not break a caller.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChoiceSlot {
     pub path: SlotPath,
@@ -133,10 +136,32 @@ pub struct ChoiceSlot {
     /// For an operator: how many right operands the constraint holds, which
     /// decides the operators it can be switched to; 0 otherwise.
     pub values: usize,
-    /// For an operator: whether the constraint's one right operand is a date
-    /// without a time of day, which words lt/lteq/gt/gteq of a temporal left
-    /// operand as the start or end of that day; false otherwise.
-    pub date_bound: bool,
+    /// For an operator: the shape of the constraint's one right operand,
+    /// which picks its wording (a date reads as the start or end of that
+    /// day); [`ValueShape::Other`] otherwise.
+    pub value_shape: ValueShape,
+}
+
+impl ChoiceSlot {
+    /// A choice with no left operand, no values and [`ValueShape::Other`].
+    pub fn new(
+        path: SlotPath,
+        owner: NodeId,
+        kind: ChoiceKind,
+        raw: impl Into<String>,
+        display: impl Into<String>,
+    ) -> ChoiceSlot {
+        ChoiceSlot {
+            path,
+            owner,
+            kind,
+            raw: raw.into(),
+            display: display.into(),
+            left_operand: String::new(),
+            values: 0,
+            value_shape: ValueShape::Other,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -719,19 +744,16 @@ fn policy_prose(ctx: &WordCtx, i: usize, p: &PolicyNode) -> PolicyProse {
         Sentence {
             segments: vec![
                 text("If a permission and a prohibition conflict: "),
-                Segment::Choice(ChoiceSlot {
-                    path: SlotPath {
+                Segment::Choice(ChoiceSlot::new(
+                    SlotPath {
                         node: path.clone(),
                         field: Field::Conflict,
                     },
-                    owner: p.id,
-                    kind: ChoiceKind::Conflict,
-                    raw: conflict_raw,
-                    display: conflict_display,
-                    left_operand: String::new(),
-                    values: 0,
-                    date_bound: false,
-                }),
+                    p.id,
+                    ChoiceKind::Conflict,
+                    conflict_raw,
+                    conflict_display,
+                )),
                 text("."),
             ],
         },
@@ -1069,12 +1091,18 @@ fn cond_items(
         .collect()
 }
 
-/// Whether a right operand is a date without a time of day.
-fn literal_is_date(ctx: &WordCtx, l: &Literal) -> bool {
-    match l {
-        Literal::Str(s) => words::date_only(s, None),
-        Literal::Typed { value, datatype } => words::date_only(value, Some(&ctx.expand(datatype))),
-        _ => false,
+/// The shape of a constraint's right operand: that of its one literal, and
+/// [`ValueShape::Other`] for no value, several, or a reference.
+fn right_shape(ctx: &WordCtx, right: &RightOperand) -> ValueShape {
+    match right {
+        RightOperand::Values(v) if v.len() == 1 => match &v[0] {
+            Literal::Str(s) => ValueShape::of(s, None),
+            Literal::Typed { value, datatype } => {
+                ValueShape::of(value, Some(&ctx.expand(datatype)))
+            }
+            _ => ValueShape::Other,
+        },
+        _ => ValueShape::Other,
     }
 }
 
@@ -1104,14 +1132,11 @@ fn cond_prose(
             } else {
                 ctx.operand(&a.left)
             };
-            let date = matches!(
-                &a.right,
-                RightOperand::Values(v) if v.len() == 1 && literal_is_date(ctx, &v[0])
-            );
+            let shape = right_shape(ctx, &a.right);
             let op_display = if a.operator.is_empty() {
                 String::new()
             } else {
-                ctx.operator_for(&a.left, &a.operator, date)
+                ctx.operator_for(&a.left, &a.operator, shape)
             };
             let mut segs = vec![
                 Segment::Slot(slot(
@@ -1123,21 +1148,24 @@ fn cond_prose(
                     left_display,
                 )),
                 text(" "),
-                Segment::Choice(ChoiceSlot {
-                    path: SlotPath {
-                        node: path.clone(),
-                        field: Field::Operator,
-                    },
-                    owner: a.id,
-                    kind: ChoiceKind::Operator,
-                    raw: a.operator.clone(),
-                    display: op_display,
-                    left_operand: a.left.clone(),
-                    values: match &a.right {
+                Segment::Choice({
+                    let mut c = ChoiceSlot::new(
+                        SlotPath {
+                            node: path.clone(),
+                            field: Field::Operator,
+                        },
+                        a.id,
+                        ChoiceKind::Operator,
+                        a.operator.clone(),
+                        op_display,
+                    );
+                    c.left_operand = a.left.clone();
+                    c.values = match &a.right {
                         RightOperand::Values(v) => v.len(),
                         _ => 0,
-                    },
-                    date_bound: date,
+                    };
+                    c.value_shape = shape;
+                    c
                 }),
                 text(" "),
             ];
@@ -1204,19 +1232,16 @@ fn cond_prose(
         }
         ConstraintNode::Logical(l) => {
             out.sentence = Sentence {
-                segments: vec![Segment::Choice(ChoiceSlot {
-                    path: SlotPath {
+                segments: vec![Segment::Choice(ChoiceSlot::new(
+                    SlotPath {
                         node: path.clone(),
                         field: Field::LogicalOp,
                     },
-                    owner: l.id,
-                    kind: ChoiceKind::LogicalOp,
-                    raw: l.op.as_str().to_string(),
-                    display: l.op.phrase().to_string(),
-                    left_operand: String::new(),
-                    values: 0,
-                    date_bound: false,
-                })],
+                    l.id,
+                    ChoiceKind::LogicalOp,
+                    l.op.as_str(),
+                    l.op.phrase(),
+                ))],
             };
             out.children = Some(ConditionList {
                 list: ListPath::of(&path, ListKind::Children),

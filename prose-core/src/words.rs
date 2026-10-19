@@ -131,7 +131,8 @@ pub(crate) fn plural_operand(term: &str) -> bool {
 /// than"), then made plural when `plural`. Only a date and time is a point
 /// in time: a time interval, a delay period or an elapsed time is a
 /// quantity and keeps the quantity wording.
-pub(crate) fn operator_phrase(left: &str, op: &str, plural: bool, date: bool) -> String {
+pub(crate) fn operator_phrase(left: &str, op: &str, plural: bool, shape: ValueShape) -> String {
+    let date = shape == ValueShape::DateOnly;
     let temporal = local_name(left) == "dateTime";
     let phrase = match (temporal, date, local_name(op)) {
         (true, true, "lt") => "is before the start of".to_string(),
@@ -151,12 +152,12 @@ const XSD_DATE: &str = "http://www.w3.org/2001/XMLSchema#date";
 
 /// Whether a literal's datatype, expanded as far as the policy's prefixes
 /// go, is xsd:date: the full IRI, or `xsd:`/`xs:` left unbound.
-pub(crate) fn is_date_type(datatype: &str) -> bool {
+fn is_date_type(datatype: &str) -> bool {
     matches!(datatype, XSD_DATE | "xsd:date" | "xs:date")
 }
 
 /// Exactly `YYYY-MM-DD`: ASCII digits, no zone, no range check.
-pub(crate) fn is_plain_date(s: &str) -> bool {
+fn is_plain_date(s: &str) -> bool {
     let b = s.as_bytes();
     b.len() == 10
         && b.iter().enumerate().all(|(i, c)| match i {
@@ -194,17 +195,124 @@ fn is_date_with_zone(s: &str) -> bool {
 /// the value must also look like a date, since editing a typed literal can
 /// leave a time of day in it. Nothing is computed: the zone, if any, is not
 /// read and the date is never rewritten.
-pub(crate) fn date_only(value: &str, datatype: Option<&str>) -> bool {
+fn date_only(value: &str, datatype: Option<&str>) -> bool {
     match datatype {
         None => is_plain_date(value),
         Some(t) => is_date_type(t) && is_date_with_zone(value),
     }
 }
 
+/// What a constraint's one right operand is, as far as wording goes. Compute
+/// it once with [`ValueShape::of`]; the reader, the editor sentence and the
+/// editor's operator dropdown all read the same shape, so they agree.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ValueShape {
+    /// A date with a time of day: xsd:dateTime or xsd:dateTimeStamp, or an
+    /// untyped string shaped `YYYY-MM-DDThh:mm(:ss(.s)?)?(zone)?`.
+    Instant,
+    /// A whole day: `YYYY-MM-DD` untyped, or xsd:date with a date-shaped
+    /// value (an optional zone is allowed).
+    DateOnly,
+    /// An xsd:duration, or an untyped string that reads as an ISO 8601
+    /// duration.
+    Duration,
+    /// Anything else: a number, a reference, several values, no value.
+    #[default]
+    Other,
+}
+
+impl ValueShape {
+    /// The shape of one literal. `datatype` is the `@type` expanded as far
+    /// as the policy's prefixes go, `None` for a plain string or an untyped
+    /// `@value`. Shape only: nothing is computed and no range is checked.
+    pub fn of(value: &str, datatype: Option<&str>) -> ValueShape {
+        if date_only(value, datatype) {
+            return ValueShape::DateOnly;
+        }
+        match datatype {
+            Some(t) if is_duration_type(t) => {
+                if duration(value).is_some() {
+                    ValueShape::Duration
+                } else {
+                    ValueShape::Other
+                }
+            }
+            Some(t) if is_date_time_type(t) => ValueShape::Instant,
+            Some(_) => ValueShape::Other,
+            None if duration(value).is_some() => ValueShape::Duration,
+            None if is_instant(value) => ValueShape::Instant,
+            None => ValueShape::Other,
+        }
+    }
+}
+
+/// xsd:dateTime or xsd:dateTimeStamp, the full IRI or `xsd:`/`xs:` unbound.
+fn is_date_time_type(datatype: &str) -> bool {
+    let local = datatype
+        .strip_prefix("http://www.w3.org/2001/XMLSchema#")
+        .or_else(|| datatype.strip_prefix("xsd:"))
+        .or_else(|| datatype.strip_prefix("xs:"));
+    matches!(local, Some("dateTime" | "dateTimeStamp"))
+}
+
+/// `YYYY-MM-DDThh:mm(:ss(.s)?)?` then nothing, `Z` or `+hh:mm`/`-hh:mm`.
+fn is_instant(s: &str) -> bool {
+    let Some(date) = s.get(..10) else {
+        return false;
+    };
+    let Some(rest) = s[10..].strip_prefix('T') else {
+        return false;
+    };
+    if !is_plain_date(date) {
+        return false;
+    }
+    let digits = |t: &str| t.len() == 2 && t.bytes().all(|c| c.is_ascii_digit());
+    let (Some(hh), Some(rest)) = (rest.get(..2), rest.get(2..)) else {
+        return false;
+    };
+    let Some(rest) = rest.strip_prefix(':') else {
+        return false;
+    };
+    let (Some(mm), mut rest) = (rest.get(..2), rest.get(2..).unwrap_or("")) else {
+        return false;
+    };
+    if !digits(hh) || !digits(mm) {
+        return false;
+    }
+    if let Some(sec) = rest.strip_prefix(':') {
+        let Some(ss) = sec.get(..2) else {
+            return false;
+        };
+        if !digits(ss) {
+            return false;
+        }
+        rest = &sec[2..];
+        if let Some(frac) = rest.strip_prefix('.') {
+            let n = frac.bytes().take_while(u8::is_ascii_digit).count();
+            if n == 0 {
+                return false;
+            }
+            rest = &frac[n..];
+        }
+    }
+    match rest {
+        "" | "Z" => true,
+        zone => {
+            let z = zone.as_bytes();
+            z.len() == 6
+                && (z[0] == b'+' || z[0] == b'-')
+                && digits(&zone[1..3])
+                && z[3] == b':'
+                && digits(&zone[4..6])
+        }
+    }
+}
+
 /// [`operator_for`] when the one right operand is a date without a time of
 /// day: a bound on a whole day says whether it means the start or the end.
 pub fn operator_for_date(left: &str, op: &str) -> String {
-    operator_phrase(left, op, plural_operand(left), true)
+    operator_phrase(left, op, plural_operand(left), ValueShape::DateOnly)
 }
 
 /// A leading "is" becomes "are", "has" "have", "does" "do", "contains"
@@ -244,7 +352,7 @@ pub(crate) fn plural_label(label: &str) -> String {
 /// than "is less than" (a duration stays a quantity), and the verb agrees in number with the operand's noun phrase
 /// ("the date and time are before").
 pub fn operator_for(left: &str, op: &str) -> String {
-    operator_phrase(left, op, plural_operand(left), false)
+    operator_phrase(left, op, plural_operand(left), ValueShape::Other)
 }
 
 /// An action as a base-form verb phrase ("use", "attribute", "grant use").

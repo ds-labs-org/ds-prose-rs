@@ -38,6 +38,7 @@ mod words_ctx;
 /// The wording helpers the reader uses, public so an editor can show the
 /// same phrases for the same terms.
 pub mod wording {
+    pub use crate::words::ValueShape;
     pub use crate::words::{
         action, humanise, join, local_name, operand, operator, operator_for, operator_for_date,
         short_iri,

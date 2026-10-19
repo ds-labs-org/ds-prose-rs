@@ -3,7 +3,7 @@
 //! `words` module phrases it.
 use crate::Gloss;
 use crate::profile::{Prefixes, ProfileVocab, Term, TermKind, Wording};
-use crate::words::{self, local_name};
+use crate::words::{self, ValueShape, local_name};
 use std::borrow::Cow;
 use std::collections::HashMap;
 
@@ -109,7 +109,7 @@ impl<'a> WordCtx<'a> {
     /// number with the subject: when the subject is the built-in plural noun
     /// phrase ("the date and time"), "is" reads "are", "has" "have", and so
     /// on, for a profile label as for a built-in phrase.
-    pub(crate) fn operator_for(&self, left: &str, op: &str, date: bool) -> String {
+    pub(crate) fn operator_for(&self, left: &str, op: &str, shape: ValueShape) -> String {
         // Plural only when the noun phrase used is the built-in one.
         let plural =
             self.worded(left, TermKind::LeftOperand).is_none() && words::plural_operand(left);
@@ -125,7 +125,7 @@ impl<'a> WordCtx<'a> {
                     _ => format!("is {label}"),
                 }
             }
-            None => words::operator_phrase(left, op, plural, date),
+            None => words::operator_phrase(left, op, plural, shape),
         }
     }
 
@@ -281,7 +281,7 @@ pub(crate) fn operator_with(w: &Wording, prefixes: &Prefixes, left: &str, op: &s
         prefixes: Cow::Borrowed(prefixes),
         namespaces: HashMap::new(),
     };
-    ctx.operator_for(left, op, false)
+    ctx.operator_for(left, op, ValueShape::Other)
 }
 
 /// [`crate::wording::operator_with_date`].
@@ -291,5 +291,5 @@ pub(crate) fn operator_with_date(w: &Wording, prefixes: &Prefixes, left: &str, o
         prefixes: Cow::Borrowed(prefixes),
         namespaces: HashMap::new(),
     };
-    ctx.operator_for(left, op, true)
+    ctx.operator_for(left, op, ValueShape::DateOnly)
 }

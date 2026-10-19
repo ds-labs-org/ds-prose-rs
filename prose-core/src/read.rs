@@ -2,7 +2,7 @@
 use crate::ProseError;
 use crate::model::*;
 use crate::profile::{Budget, Prefixes, TermKind, Wording};
-use crate::words::{date_only, duration, humanise, is_duration_type, join, local_name};
+use crate::words::{ValueShape, duration, humanise, is_duration_type, join, local_name};
 use crate::words_ctx::{WordCtx, profile_name};
 use serde_json::{Map, Value};
 use std::sync::Arc;
@@ -1850,14 +1850,11 @@ impl<'a> Reader<'a> {
             self.warn("a constraint is missing its rightOperand");
             "an unspecified value".to_string()
         };
-        let date = match o.get("rightOperand") {
-            Some(r) => matches!(items(r).as_slice(), [one] if self.is_date_literal(one)),
-            None => false,
-        };
+        let shape = self.value_shape(o.get("rightOperand"));
         Condition::leaf(format!(
             "{} {} {}",
             self.ctx.operand(&left),
-            self.ctx.operator_for(&left, &op, date),
+            self.ctx.operator_for(&left, &op, shape),
             right
         ))
     }
@@ -1908,18 +1905,22 @@ impl<'a> Reader<'a> {
         is_duration_type(&self.iris.expand(datatype))
     }
 
-    /// Whether a right operand is a date without a time of day.
-    fn is_date_literal(&self, v: &Value) -> bool {
-        match v {
-            Value::String(s) => date_only(s, None),
-            Value::Object(o) => match o.get("@value") {
-                Some(Value::String(s)) => match o.get("@type").and_then(Value::as_str) {
-                    Some(t) => date_only(s, Some(&self.iris.expand(t))),
-                    None => date_only(s, None),
-                },
-                _ => false,
+    /// The shape of a constraint's right operand: that of its one literal,
+    /// and [`ValueShape::Other`] for no value, several, or a non-string one.
+    fn value_shape(&self, right: Option<&Value>) -> ValueShape {
+        let Some(right) = right else {
+            return ValueShape::Other;
+        };
+        match items(right).as_slice() {
+            [Value::String(s)] => ValueShape::of(s, None),
+            [Value::Object(o)] => match o.get("@value") {
+                Some(Value::String(s)) => {
+                    let datatype = o.get("@type").and_then(Value::as_str);
+                    ValueShape::of(s, datatype.map(|t| self.iris.expand(t)).as_deref())
+                }
+                _ => ValueShape::Other,
             },
-            _ => false,
+            _ => ValueShape::Other,
         }
     }
 
