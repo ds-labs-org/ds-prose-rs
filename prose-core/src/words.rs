@@ -98,23 +98,166 @@ pub fn operand(term: &str) -> String {
 
 /// An operator as a verb phrase that follows its left operand.
 pub fn operator(term: &str) -> String {
-    let local = local_name(term);
-    match local {
-        "eq" => "is equal to",
-        "neq" => "is not equal to",
-        "gt" => "is greater than",
-        "gteq" => "is at least",
-        "lt" => "is less than",
-        "lteq" => "is at most",
-        "isA" => "is a kind of",
-        "hasPart" => "has as a part",
-        "isPartOf" => "is part of",
-        "isAllOf" => "is all of",
-        "isAnyOf" => "is any of",
-        "isNoneOf" => "is none of",
-        _ => return format!("is related by {} to", humanise(local)),
+    generic_phrase(term).render(false)
+}
+
+/// A verb that agrees in number with its subject. A phrase writes it as a
+/// slot, `{be}`, `{have}`, `{do}`, `{contain}` or `{match}`, and
+/// [`Phrase::render`] fills the slot for the number: one place conjugates
+/// every built-in phrase and every profile label.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Verb {
+    Be,
+    Have,
+    Do,
+    Contain,
+    Match,
+}
+
+impl Verb {
+    /// (slot name, singular, plural).
+    const ALL: [(Verb, &'static str, &'static str, &'static str); 5] = [
+        (Verb::Be, "be", "is", "are"),
+        (Verb::Have, "have", "has", "have"),
+        (Verb::Do, "do", "does", "do"),
+        (Verb::Contain, "contain", "contains", "contain"),
+        (Verb::Match, "match", "matches", "match"),
+    ];
+
+    fn of_slot(name: &str) -> Option<Verb> {
+        Verb::ALL.iter().find(|v| v.1 == name).map(|v| v.0)
     }
-    .to_string()
+
+    /// The verb a label opens with, written in the singular. "are" is not
+    /// one: a label that opens with it keeps its words.
+    fn of_word(word: &str) -> Option<Verb> {
+        Verb::ALL.iter().find(|v| v.2 == word).map(|v| v.0)
+    }
+
+    fn form(self, plural: bool) -> &'static str {
+        let v = Verb::ALL.iter().find(|v| v.0 == self).expect("every verb");
+        if plural { v.3 } else { v.2 }
+    }
+}
+
+/// A verb phrase: an optional leading verb that agrees in number, then the
+/// words after it, which never change.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Phrase {
+    verb: Option<Verb>,
+    rest: String,
+}
+
+impl Phrase {
+    /// A built-in template: `{be} before the start of`. Only a slot at the
+    /// very start is read; what follows is text.
+    pub(crate) fn parse(template: &str) -> Phrase {
+        let slot = template
+            .strip_prefix('{')
+            .and_then(|t| t.split_once('}'))
+            .and_then(|(name, rest)| Verb::of_slot(name).map(|v| (v, rest)));
+        match slot {
+            Some((verb, rest)) => Phrase {
+                verb: Some(verb),
+                rest: rest.trim_start().to_string(),
+            },
+            None => Phrase {
+                verb: None,
+                rest: template.to_string(),
+            },
+        }
+    }
+
+    /// A profile operator label, already lower-cased. A label that opens
+    /// with a verb in the singular ("is", "has", "does", "contains",
+    /// "matches") has that verb conjugated. "are" and any other opening
+    /// keep their words: "are near" stays, and "earlier than" follows "is"
+    /// or "are". The label is text, never a template.
+    pub(crate) fn from_label(label: &str) -> Phrase {
+        let (first, rest) = label.split_once(' ').unwrap_or((label, ""));
+        if let Some(verb) = Verb::of_word(first) {
+            return Phrase {
+                verb: Some(verb),
+                rest: rest.to_string(),
+            };
+        }
+        if first == "are" {
+            return Phrase {
+                verb: None,
+                rest: label.to_string(),
+            };
+        }
+        Phrase {
+            verb: Some(Verb::Be),
+            rest: label.to_string(),
+        }
+    }
+
+    /// The phrase for a subject of the given number.
+    pub(crate) fn render(&self, plural: bool) -> String {
+        match (self.verb, self.rest.is_empty()) {
+            (Some(v), true) => v.form(plural).to_string(),
+            (Some(v), false) => format!("{} {}", v.form(plural), self.rest),
+            (None, _) => self.rest.clone(),
+        }
+    }
+}
+
+/// The built-in operator phrases, as templates. Private, and one value so a
+/// host override can replace it later.
+struct PhraseTable {
+    /// Operator -> template, for any left operand.
+    generic: &'static [(&'static str, &'static str)],
+    /// The template for an operator this table does not list; `{op}` is
+    /// the operator's name, humanised.
+    unknown: &'static str,
+    /// A point in time compared with a point in time.
+    instant: &'static [(&'static str, &'static str)],
+    /// A point in time compared with a whole day.
+    day: &'static [(&'static str, &'static str)],
+}
+
+const PHRASES: PhraseTable = PhraseTable {
+    generic: &[
+        ("eq", "{be} equal to"),
+        ("neq", "{be} not equal to"),
+        ("gt", "{be} greater than"),
+        ("gteq", "{be} at least"),
+        ("lt", "{be} less than"),
+        ("lteq", "{be} at most"),
+        ("isA", "{be} a kind of"),
+        ("hasPart", "{have} as a part"),
+        ("isPartOf", "{be} part of"),
+        ("isAllOf", "{be} all of"),
+        ("isAnyOf", "{be} any of"),
+        ("isNoneOf", "{be} none of"),
+    ],
+    unknown: "{be} related by {op} to",
+    instant: &[
+        ("lt", "{be} before"),
+        ("lteq", "{be} on or before"),
+        ("gt", "{be} after"),
+        ("gteq", "{be} on or after"),
+    ],
+    day: &[
+        ("lt", "{be} before the start of"),
+        ("lteq", "{be} on or before the end of"),
+        ("gt", "{be} after the end of"),
+        ("gteq", "{be} on or after the start of"),
+    ],
+};
+
+fn find(table: &'static [(&'static str, &'static str)], op: &str) -> Option<&'static str> {
+    table.iter().find(|(o, _)| *o == op).map(|(_, t)| *t)
+}
+
+/// The phrase for `term` that does not depend on its left operand.
+fn generic_phrase(term: &str) -> Phrase {
+    let local = local_name(term);
+    match find(PHRASES.generic, local) {
+        Some(t) => Phrase::parse(t),
+        None => Phrase::parse(&PHRASES.unknown.replacen("{op}", &humanise(local), 1)),
+    }
 }
 
 /// Left operands whose noun phrase is plural: "the date and time" is two
@@ -126,26 +269,21 @@ pub(crate) fn plural_operand(term: &str) -> bool {
     PLURAL_OPERANDS.contains(&local_name(term))
 }
 
-/// The verb phrase after `left`: singular as [`operator`] has it, with a
-/// different phrase for a point in time ("is before" rather than "is less
-/// than"), then made plural when `plural`. Only a date and time is a point
-/// in time: a time interval, a delay period or an elapsed time is a
+/// The verb phrase after `left`, for the number of its noun phrase: the
+/// generic phrase, or a point in time's own ("is before" rather than "is
+/// less than", the start or end of a whole day). Only a date and time is a
+/// point in time: a time interval, a delay period or an elapsed time is a
 /// quantity and keeps the quantity wording.
 pub(crate) fn built_in_phrase(left: &str, op: &str, plural: bool, shape: ValueShape) -> String {
-    let date = shape == ValueShape::DateOnly;
-    let temporal = local_name(left) == "dateTime";
-    let phrase = match (temporal, date, local_name(op)) {
-        (true, true, "lt") => "is before the start of".to_string(),
-        (true, true, "lteq") => "is on or before the end of".to_string(),
-        (true, true, "gt") => "is after the end of".to_string(),
-        (true, true, "gteq") => "is on or after the start of".to_string(),
-        (true, false, "lt") => "is before".to_string(),
-        (true, false, "lteq") => "is on or before".to_string(),
-        (true, false, "gt") => "is after".to_string(),
-        (true, false, "gteq") => "is on or after".to_string(),
-        _ => operator(op),
+    let table = match (local_name(left) == "dateTime", shape) {
+        (true, ValueShape::DateOnly) => Some(PHRASES.day),
+        (true, _) => Some(PHRASES.instant),
+        (false, _) => None,
     };
-    if plural { plural_verb(phrase) } else { phrase }
+    table
+        .and_then(|t| find(t, local_name(op)))
+        .map_or_else(|| generic_phrase(op), Phrase::parse)
+        .render(plural)
 }
 
 const XSD_DATE: &str = "http://www.w3.org/2001/XMLSchema#date";
@@ -306,39 +444,6 @@ fn is_instant(s: &str) -> bool {
                 && z[3] == b':'
                 && digits(&zone[4..6])
         }
-    }
-}
-
-/// A leading "is" becomes "are", "has" "have", "does" "do", "contains"
-/// "contain" and "matches" "match". Anything else is kept.
-fn plural_verb(phrase: String) -> String {
-    let (verb, rest) = match phrase.split_once(' ') {
-        Some((v, r)) => (v, Some(r)),
-        None => (phrase.as_str(), None),
-    };
-    let plural = match verb {
-        "is" => "are",
-        "has" => "have",
-        "does" => "do",
-        "contains" => "contain",
-        "matches" => "match",
-        _ => return phrase,
-    };
-    match rest {
-        Some(r) => format!("{plural} {r}"),
-        None => plural.to_string(),
-    }
-}
-
-/// A profile operator label (already lower-cased, with its verb) made plural
-/// to agree with a plural subject. A label that does not start with a verb
-/// follows "are" ("earlier than" reads "are earlier than"); "are" is kept.
-pub(crate) fn plural_label(label: &str) -> String {
-    let verb = label.split_whitespace().next().unwrap_or("");
-    match verb {
-        "is" | "has" | "does" | "contains" | "matches" => plural_verb(label.to_string()),
-        "are" => label.to_string(),
-        _ => format!("are {label}"),
     }
 }
 
@@ -537,21 +642,6 @@ mod tests {
                     }
                 }
             }
-        }
-    }
-
-    #[test]
-    fn profile_label_verbs_take_the_plural() {
-        for (label, want) in [
-            ("is within region", "are within region"),
-            ("has overlap with", "have overlap with"),
-            ("does not overlap", "do not overlap"),
-            ("contains", "contain"),
-            ("matches window", "match window"),
-            ("are near", "are near"),
-            ("earlier than", "are earlier than"),
-        ] {
-            assert_eq!(plural_label(label), want, "{label}");
         }
     }
 

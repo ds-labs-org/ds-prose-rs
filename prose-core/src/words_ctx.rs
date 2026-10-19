@@ -3,7 +3,7 @@
 //! `words` module phrases it.
 use crate::Gloss;
 use crate::profile::{Prefixes, ProfileVocab, Term, TermKind, Wording};
-use crate::words::{self, ValueShape, local_name};
+use crate::words::{self, Phrase, ValueShape, local_name};
 use std::borrow::Cow;
 use std::collections::HashMap;
 
@@ -114,17 +114,7 @@ impl<'a> WordCtx<'a> {
         let plural =
             self.worded(left, TermKind::LeftOperand).is_none() && words::plural_operand(left);
         match self.worded(op, TermKind::Operator) {
-            Some(label) => {
-                let label = lower_first(&label);
-                if plural {
-                    return words::plural_label(&label);
-                }
-                let verb = label.split_whitespace().next().unwrap_or("");
-                match verb {
-                    "is" | "has" | "are" | "does" | "contains" | "matches" => label,
-                    _ => format!("is {label}"),
-                }
-            }
+            Some(label) => Phrase::from_label(&lower_first(&label)).render(plural),
             None => words::built_in_phrase(left, op, plural, shape),
         }
     }
