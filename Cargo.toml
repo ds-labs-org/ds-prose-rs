@@ -14,7 +14,7 @@ resolver = "2"
 members = ["prose-core", "prose-yew", "prose-wasm", "demo", "catalog"]
 
 [workspace.package]
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 # Let-chains (`if let ... && let ...`) are used throughout; stable since 1.88.
 rust-version = "1.88"
