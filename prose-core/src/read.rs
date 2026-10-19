@@ -1555,9 +1555,10 @@ impl<'a> Reader<'a> {
         if !aside.is_empty() {
             target_text.push_str(&format!(" ({})", aside.join("; ")));
         }
-        let by = |verb: &str| match assigner.is_empty() {
-            true => String::new(),
-            false => format!(", as {verb} by {}", join(assigner)),
+        let by = |verb: &str| match assigner.len() {
+            0 => String::new(),
+            1 => format!(", as {verb} by the assigner {}", join(assigner)),
+            _ => format!(", as {verb} by the assigners {}", join(assigner)),
         };
         let mut sentence = match kind {
             RuleKind::Permission => {

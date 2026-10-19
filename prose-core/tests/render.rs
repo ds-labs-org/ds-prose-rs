@@ -18,7 +18,7 @@ fn offer_reads_as_permission_with_date_limit_and_duty() {
     assert_eq!(r.kind, RuleKind::Permission);
     assert_eq!(
         r.sentence,
-        "Anyone may display http://example.com/asset:9898.movie, as permitted by http://example.com/org:abc."
+        "Anyone may display http://example.com/asset:9898.movie, as permitted by the assigner http://example.com/org:abc."
     );
     assert_eq!(
         r.conditions[0].text,

@@ -33,7 +33,7 @@ Ok(
                     Rule {
                         kind: Obligation,
                         uid: None,
-                        sentence: "urn:party:y must delete urn:asset:2, as required by urn:party:x.",
+                        sentence: "urn:party:y must delete urn:asset:2, as required by the assigner urn:party:x.",
                         refinements: [],
                         conditions: [],
                         follow_ups: [],

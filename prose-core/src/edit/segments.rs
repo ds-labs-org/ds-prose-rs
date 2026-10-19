@@ -879,11 +879,22 @@ fn rule_prose(
     let own = |own_empty: bool, inherited: &Vec<Slot>| {
         if own_empty { inherited.clone() } else { vec![] }
     };
-    let by = match list {
-        RuleList::Permission => ", as permitted by ",
-        RuleList::Prohibition => ", as prohibited by ",
-        _ => ", as required by ",
+    let shown = if r.assigner.is_empty() {
+        inh.assigner.len()
+    } else {
+        r.assigner.len()
     };
+    let role = if shown > 1 {
+        "the assigners "
+    } else {
+        "the assigner "
+    };
+    let verb = match list {
+        RuleList::Permission => "permitted",
+        RuleList::Prohibition => "prohibited",
+        _ => "required",
+    };
+    let by = format!(", as {verb} by {role}");
     let mut segs = vec![
         slot_list(
             &path,
@@ -976,7 +987,7 @@ fn rule_prose(
         own(r.assigner.is_empty(), &inh.assigner),
         Conj::And,
         EmptyText::Nothing,
-        Some(by),
+        Some(by.as_str()),
     ));
     segs.push(text("."));
     out.sentence = Sentence { segments: segs };

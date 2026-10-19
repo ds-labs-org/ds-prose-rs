@@ -74,7 +74,7 @@ fn action_label() {
     let rule = &r.document.policies[0].rules[0];
     assert_eq!(
         rule.sentence,
-        format!("{UNIVERSITY} may fine-tune {COHORT}, as permitted by {HOSPITAL}.")
+        format!("{UNIVERSITY} may fine-tune {COHORT}, as permitted by the assigner {HOSPITAL}.")
     );
     assert_eq!(
         rule.refinements[0].text,
@@ -83,7 +83,7 @@ fn action_label() {
     let ob = &r.document.policies[0].rules[3];
     assert_eq!(
         ob.sentence,
-        format!("{UNIVERSITY} must pseudonymise {COHORT}, as required by {HOSPITAL}.")
+        format!("{UNIVERSITY} must pseudonymise {COHORT}, as required by the assigner {HOSPITAL}.")
     );
 }
 
@@ -387,7 +387,7 @@ fn undeclared_in_profile_namespace_warns() {
     // Still read, with the built-in wording.
     assert_eq!(
         r.document.policies[0].rules[1].sentence,
-        format!("{UNIVERSITY} may distill {COHORT}, as permitted by {HOSPITAL}.")
+        format!("{UNIVERSITY} may distill {COHORT}, as permitted by the assigner {HOSPITAL}.")
     );
     let p = policy_with(json!({
         "target": "urn:asset:1", "action": "use",

@@ -16,7 +16,7 @@ Ok(
                         Rule {
                             kind: Permission,
                             uid: None,
-                            sentence: "http://example.com/org:university may fine-tune http://example.com/data:cohort-2026, as permitted by http://example.com/org:hospital.",
+                            sentence: "http://example.com/org:university may fine-tune http://example.com/data:cohort-2026, as permitted by the assigner http://example.com/org:hospital.",
                             refinements: [
                                 Condition {
                                     text: "The action \"fine-tune\" is limited to cases where",
@@ -48,7 +48,7 @@ Ok(
                         Rule {
                             kind: Permission,
                             uid: None,
-                            sentence: "http://example.com/org:university may distill http://example.com/data:cohort-2026, as permitted by http://example.com/org:hospital.",
+                            sentence: "http://example.com/org:university may distill http://example.com/data:cohort-2026, as permitted by the assigner http://example.com/org:hospital.",
                             refinements: [],
                             conditions: [],
                             follow_ups: [],
@@ -57,7 +57,7 @@ Ok(
                         Rule {
                             kind: Prohibition,
                             uid: None,
-                            sentence: "http://example.com/org:university must not commercialize http://example.com/data:cohort-2026, as prohibited by http://example.com/org:hospital.",
+                            sentence: "http://example.com/org:university must not commercialize http://example.com/data:cohort-2026, as prohibited by the assigner http://example.com/org:hospital.",
                             refinements: [],
                             conditions: [],
                             follow_ups: [],
@@ -66,7 +66,7 @@ Ok(
                         Rule {
                             kind: Obligation,
                             uid: None,
-                            sentence: "http://example.com/org:university must pseudonymise http://example.com/data:cohort-2026, as required by http://example.com/org:hospital.",
+                            sentence: "http://example.com/org:university must pseudonymise http://example.com/data:cohort-2026, as required by the assigner http://example.com/org:hospital.",
                             refinements: [],
                             conditions: [],
                             follow_ups: [],
@@ -273,8 +273,8 @@ Ok(
                                 mention: 2,
                             },
                             NameSpan {
-                                start: 101,
-                                end: 132,
+                                start: 114,
+                                end: 145,
                                 mention: 0,
                             },
                         ],
@@ -314,8 +314,8 @@ Ok(
                                 mention: 2,
                             },
                             NameSpan {
-                                start: 99,
-                                end: 130,
+                                start: 112,
+                                end: 143,
                                 mention: 0,
                             },
                         ],
@@ -336,8 +336,8 @@ Ok(
                                 mention: 2,
                             },
                             NameSpan {
-                                start: 111,
-                                end: 142,
+                                start: 124,
+                                end: 155,
                                 mention: 0,
                             },
                         ],
@@ -358,8 +358,8 @@ Ok(
                                 mention: 2,
                             },
                             NameSpan {
-                                start: 104,
-                                end: 135,
+                                start: 117,
+                                end: 148,
                                 mention: 0,
                             },
                         ],

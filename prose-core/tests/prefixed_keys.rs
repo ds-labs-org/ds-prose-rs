@@ -116,7 +116,7 @@ fn edc_compacted_offer_reads_its_rules() {
     assert_eq!(rules.len(), 2);
     assert_eq!(
         rules[0].sentence,
-        "Anyone may use urn:asset:1, as permitted by did:web:provider."
+        "Anyone may use urn:asset:1, as permitted by the assigner did:web:provider."
     );
     assert_eq!(
         rules[0].conditions[0].text,

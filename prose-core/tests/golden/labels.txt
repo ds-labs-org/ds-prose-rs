@@ -13,7 +13,7 @@ Ok(
                     Rule {
                         kind: Permission,
                         uid: None,
-                        sentence: "http://example.com/party:person:billie may play The Movie, as permitted by ABC Pictures.",
+                        sentence: "http://example.com/party:person:billie may play The Movie, as permitted by the assigner ABC Pictures.",
                         refinements: [],
                         conditions: [
                             Condition {

@@ -51,12 +51,12 @@ fn w3c_attributed_and_tracking_parties_are_named() {
     let duty = &only_rule(&doc).follow_ups[0].rules[0];
     assert_eq!(
         duty.sentence,
-        "http://example.com/person:88 must attribute the asset to http://australia.gov.au/, as required by http://example.com/org:99."
+        "http://example.com/person:88 must attribute the asset to http://australia.gov.au/, as required by the assigner http://example.com/org:99."
     );
     let consequence = &duty.follow_ups[0].rules[0];
     assert_eq!(
         consequence.sentence,
-        "http://example.com/person:88 must accept tracking by http://example.com/dept:100, as required by http://example.com/org:99."
+        "http://example.com/person:88 must accept tracking by http://example.com/dept:100, as required by the assigner http://example.com/org:99."
     );
     assert!(doc.warnings.is_empty(), "{:?}", doc.warnings);
 }
@@ -83,7 +83,7 @@ fn w3c_compensated_party_is_the_object_of_compensate() {
     let consequence = &only_rule(&doc).follow_ups[0].rules[0];
     assert_eq!(
         consequence.sentence,
-        "urn:person:b must compensate http://wwf.org, as required by urn:org:a."
+        "urn:person:b must compensate http://wwf.org, as required by the assigner urn:org:a."
     );
     assert_eq!(
         consequence.refinements[0].children[0].text,
@@ -97,27 +97,27 @@ fn a_party_function_reads_with_its_action_and_the_target() {
     let cases = [
         (
             json!({"action": "attribute", "target": "urn:asset:1", "attributedParty": "urn:p"}),
-            "urn:person:b must attribute urn:asset:1 to urn:p, as required by urn:org:a.",
+            "urn:person:b must attribute urn:asset:1 to urn:p, as required by the assigner urn:org:a.",
         ),
         (
             json!({"action": "compensate", "target": "urn:asset:1", "compensatedParty": "urn:p"}),
-            "urn:person:b must compensate urn:p for urn:asset:1, as required by urn:org:a.",
+            "urn:person:b must compensate urn:p for urn:asset:1, as required by the assigner urn:org:a.",
         ),
         (
             json!({"action": "inform", "target": "urn:asset:1", "informedParty": "urn:p"}),
-            "urn:person:b must inform urn:p about urn:asset:1, as required by urn:org:a.",
+            "urn:person:b must inform urn:p about urn:asset:1, as required by the assigner urn:org:a.",
         ),
         (
             json!({"action": "inform", "informedParty": "urn:p"}),
-            "urn:person:b must inform urn:p, as required by urn:org:a.",
+            "urn:person:b must inform urn:p, as required by the assigner urn:org:a.",
         ),
         (
             json!({"action": "obtainConsent", "consentingParty": "urn:p"}),
-            "urn:person:b must obtain consent from urn:p, as required by urn:org:a.",
+            "urn:person:b must obtain consent from urn:p, as required by the assigner urn:org:a.",
         ),
         (
             json!({"action": "acceptTracking", "target": "urn:asset:1", "trackingParty": "urn:p"}),
-            "urn:person:b must accept tracking urn:asset:1 by urn:p, as required by urn:org:a.",
+            "urn:person:b must accept tracking urn:asset:1 by urn:p, as required by the assigner urn:org:a.",
         ),
     ];
     for (rule, want) in cases {
@@ -177,7 +177,7 @@ fn several_functions_without_a_phrasing_share_one_parenthesis() {
     }));
     assert_eq!(
         only_rule(&doc).sentence,
-        "urn:person:b may attribute urn:asset:1 to urn:p1 (attributing party: urn:p2; contracted party: urn:p3), as permitted by urn:org:a."
+        "urn:person:b may attribute urn:asset:1 to urn:p1 (attributing party: urn:p2; contracted party: urn:p3), as permitted by the assigner urn:org:a."
     );
 }
 
@@ -190,7 +190,7 @@ fn more_than_one_action_takes_the_generic_clause() {
     }])));
     assert_eq!(
         only_rule(&doc).sentence,
-        "urn:person:b must attribute and inform urn:asset:1 (attributed party: urn:p), as required by urn:org:a."
+        "urn:person:b must attribute and inform urn:asset:1 (attributed party: urn:p), as required by the assigner urn:org:a."
     );
 }
 
@@ -212,9 +212,9 @@ fn prefixed_and_full_iri_keys_arrays_and_party_objects_are_read() {
     assert_eq!(
         sentences,
         [
-            "urn:person:b must attribute urn:asset:1 to urn:p1 and urn:p2, as required by urn:org:a.",
-            "urn:person:b must compensate urn:p3, as required by urn:org:a.",
-            "urn:person:b must inform any party in the collection urn:team, as required by urn:org:a.",
+            "urn:person:b must attribute urn:asset:1 to urn:p1 and urn:p2, as required by the assigner urn:org:a.",
+            "urn:person:b must compensate urn:p3, as required by the assigner urn:org:a.",
+            "urn:person:b must inform any party in the collection urn:team, as required by the assigner urn:org:a.",
         ]
     );
     assert!(doc.warnings.is_empty(), "{:?}", doc.warnings);
@@ -235,7 +235,7 @@ fn a_refined_party_reads_its_refinement_and_carries_its_references() {
     let rule = only_rule(&doc);
     assert_eq!(
         rule.sentence,
-        "urn:person:b must inform urn:p where the industry is equal to \"press\"; the constraint defined at http://example.com/c7 holds, as required by urn:org:a."
+        "urn:person:b must inform urn:p where the industry is equal to \"press\"; the constraint defined at http://example.com/c7 holds, as required by the assigner urn:org:a."
     );
     assert_eq!(rule.references, ["http://example.com/c7"]);
     assert!(doc.warnings.is_empty(), "{:?}", doc.warnings);
@@ -316,7 +316,7 @@ fn a_refined_informed_party_comes_after_the_target() {
     }])));
     assert_eq!(
         only_rule(&doc).sentence,
-        "urn:person:b must inform, about urn:t, urn:q and urn:p where the industry is equal to \"press\", as required by urn:org:a."
+        "urn:person:b must inform, about urn:t, urn:q and urn:p where the industry is equal to \"press\", as required by the assigner urn:org:a."
     );
     assert!(doc.warnings.is_empty(), "{:?}", doc.warnings);
 }
@@ -331,6 +331,6 @@ fn an_unrefined_object_party_keeps_the_target_after_it() {
     }])));
     assert_eq!(
         only_rule(&doc).sentence,
-        "urn:person:b must compensate urn:p for urn:t, as required by urn:org:a."
+        "urn:person:b must compensate urn:p for urn:t, as required by the assigner urn:org:a."
     );
 }

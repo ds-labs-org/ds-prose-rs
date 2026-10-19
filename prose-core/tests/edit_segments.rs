@@ -20,7 +20,7 @@ fn offer_reads_as_in_v01() {
     let rule = &p.rules[0];
     assert_eq!(
         rule.sentence.plain(),
-        "Anyone may display http://example.com/asset:9898.movie, as permitted by http://example.com/org:abc."
+        "Anyone may display http://example.com/asset:9898.movie, as permitted by the assigner http://example.com/org:abc."
     );
     assert_eq!(
         rule.conditions.items[0].sentence.plain(),
@@ -29,7 +29,7 @@ fn offer_reads_as_in_v01() {
     let duty = &rule.follow_ups[0].rules[0];
     assert_eq!(
         duty.sentence.plain(),
-        "The assignee must attribute http://example.com/asset:9898.movie, as required by http://example.com/org:abc."
+        "The assignee must attribute http://example.com/asset:9898.movie, as required by the assigner http://example.com/org:abc."
     );
 }
 
