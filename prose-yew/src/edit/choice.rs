@@ -95,10 +95,15 @@ fn options(env: &Env, c: &ChoiceSlot, severity: Option<Severity>) -> (Vec<Opt>, 
                 .iter()
                 .map(|op| {
                     let op = written_form(op, &env.prefixes).to_string();
-                    let phrase = if w.is_empty() {
-                        wording::operator_for(&c.left_operand, &op)
-                    } else {
-                        wording::operator_with(w, &env.prefixes, &c.left_operand, &op)
+                    let phrase = match (w.is_empty(), c.date_bound) {
+                        (true, false) => wording::operator_for(&c.left_operand, &op),
+                        (true, true) => wording::operator_for_date(&c.left_operand, &op),
+                        (false, false) => {
+                            wording::operator_with(w, &env.prefixes, &c.left_operand, &op)
+                        }
+                        (false, true) => {
+                            wording::operator_with_date(w, &env.prefixes, &c.left_operand, &op)
+                        }
                     };
                     let label = if env.cfg.show_raw_terms {
                         fill(

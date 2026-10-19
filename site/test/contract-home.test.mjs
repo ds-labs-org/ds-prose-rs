@@ -29,7 +29,7 @@ test('the rendered block is the stored renderer output, and every sentence in it
 
 test('the sentences are not typed into the markdown: the page source holds none of them', () => {
   const md = content('index.md');
-  for (const s of ['may display', 'must attribute', 'is before 2026-12-31']) assert.ok(!md.includes(s), `index.md hand-types "${s}"`);
+  for (const s of ['may display', 'must attribute', 'are before the start of 2026-12-31']) assert.ok(!md.includes(s), `index.md hand-types "${s}"`);
 });
 
 test('the page loads the example stylesheet and the build ships it', () => {

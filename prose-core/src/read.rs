@@ -2,7 +2,7 @@
 use crate::ProseError;
 use crate::model::*;
 use crate::profile::{Budget, Prefixes, TermKind, Wording};
-use crate::words::{duration, humanise, is_duration_type, join, local_name};
+use crate::words::{date_only, duration, humanise, is_duration_type, join, local_name};
 use crate::words_ctx::{WordCtx, profile_name};
 use serde_json::{Map, Value};
 use std::sync::Arc;
@@ -1850,10 +1850,14 @@ impl<'a> Reader<'a> {
             self.warn("a constraint is missing its rightOperand");
             "an unspecified value".to_string()
         };
+        let date = match o.get("rightOperand") {
+            Some(r) => matches!(items(r).as_slice(), [one] if self.is_date_literal(one)),
+            None => false,
+        };
         Condition::leaf(format!(
             "{} {} {}",
             self.ctx.operand(&left),
-            self.ctx.operator_for(&left, &op),
+            self.ctx.operator_for(&left, &op, date),
             right
         ))
     }
@@ -1902,6 +1906,21 @@ impl<'a> Reader<'a> {
     /// Whether a literal's `@type` names xsd:duration.
     fn is_duration(&self, datatype: &str) -> bool {
         is_duration_type(&self.iris.expand(datatype))
+    }
+
+    /// Whether a right operand is a date without a time of day.
+    fn is_date_literal(&self, v: &Value) -> bool {
+        match v {
+            Value::String(s) => date_only(s, None),
+            Value::Object(o) => match o.get("@value") {
+                Some(Value::String(s)) => match o.get("@type").and_then(Value::as_str) {
+                    Some(t) => date_only(s, Some(&self.iris.expand(t))),
+                    None => date_only(s, None),
+                },
+                _ => false,
+            },
+            _ => false,
+        }
     }
 
     fn literal(&mut self, v: &Value) -> String {

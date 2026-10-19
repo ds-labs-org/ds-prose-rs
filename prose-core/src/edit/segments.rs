@@ -1069,6 +1069,15 @@ fn cond_items(
         .collect()
 }
 
+/// Whether a right operand is a date without a time of day.
+fn literal_is_date(ctx: &WordCtx, l: &Literal) -> bool {
+    match l {
+        Literal::Str(s) => words::date_only(s, None),
+        Literal::Typed { value, datatype } => words::date_only(value, Some(&ctx.expand(datatype))),
+        _ => false,
+    }
+}
+
 fn is_or_operator(op: &str) -> bool {
     matches!(local_name(op), "isAnyOf" | "isNoneOf")
 }
@@ -1095,10 +1104,14 @@ fn cond_prose(
             } else {
                 ctx.operand(&a.left)
             };
+            let date = matches!(
+                &a.right,
+                RightOperand::Values(v) if v.len() == 1 && literal_is_date(ctx, &v[0])
+            );
             let op_display = if a.operator.is_empty() {
                 String::new()
             } else {
-                ctx.operator_for(&a.left, &a.operator)
+                ctx.operator_for(&a.left, &a.operator, date)
             };
             let mut segs = vec![
                 Segment::Slot(slot(
@@ -1124,7 +1137,7 @@ fn cond_prose(
                         RightOperand::Values(v) => v.len(),
                         _ => 0,
                     },
-                    date_bound: false,
+                    date_bound: date,
                 }),
                 text(" "),
             ];

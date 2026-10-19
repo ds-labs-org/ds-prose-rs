@@ -24,7 +24,7 @@ fn offer_reads_as_in_v01() {
     );
     assert_eq!(
         rule.conditions.items[0].sentence.plain(),
-        "the date and time are before 2026-12-31"
+        "the date and time are before the start of 2026-12-31"
     );
     let duty = &rule.follow_ups[0].rules[0];
     assert_eq!(

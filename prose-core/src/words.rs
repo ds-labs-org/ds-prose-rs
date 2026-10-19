@@ -129,29 +129,83 @@ pub(crate) fn plural_operand(term: &str) -> bool {
 /// The verb phrase after `left`: singular as [`operator`] has it, with a
 /// different phrase for time ("is before" rather than "is less than"), then
 /// made plural when `plural`.
-pub(crate) fn operator_phrase(left: &str, op: &str, plural: bool) -> String {
+pub(crate) fn operator_phrase(left: &str, op: &str, plural: bool, date: bool) -> String {
     let temporal = matches!(
         local_name(left),
         "dateTime" | "timeInterval" | "delayPeriod"
     );
-    let phrase = match (temporal, local_name(op)) {
-        (true, "lt") => "is before".to_string(),
-        (true, "lteq") => "is on or before".to_string(),
-        (true, "gt") => "is after".to_string(),
-        (true, "gteq") => "is on or after".to_string(),
+    let phrase = match (temporal, date, local_name(op)) {
+        (true, true, "lt") => "is before the start of".to_string(),
+        (true, true, "lteq") => "is on or before the end of".to_string(),
+        (true, true, "gt") => "is after the end of".to_string(),
+        (true, true, "gteq") => "is on or after the start of".to_string(),
+        (true, false, "lt") => "is before".to_string(),
+        (true, false, "lteq") => "is on or before".to_string(),
+        (true, false, "gt") => "is after".to_string(),
+        (true, false, "gteq") => "is on or after".to_string(),
         _ => operator(op),
     };
     if plural { plural_verb(phrase) } else { phrase }
 }
 
-/// STUB (red): whether a right operand is a date without a time of day.
-pub(crate) fn date_only(_value: &str, _datatype: Option<&str>) -> bool {
-    false
+const XSD_DATE: &str = "http://www.w3.org/2001/XMLSchema#date";
+
+/// Whether a literal's datatype, expanded as far as the policy's prefixes
+/// go, is xsd:date: the full IRI, or `xsd:`/`xs:` left unbound.
+pub(crate) fn is_date_type(datatype: &str) -> bool {
+    matches!(datatype, XSD_DATE | "xsd:date" | "xs:date")
 }
 
-/// STUB (red): [`operator_for`] for a date-only right operand.
+/// Exactly `YYYY-MM-DD`: ASCII digits, no zone, no range check.
+pub(crate) fn is_plain_date(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 10
+        && b.iter().enumerate().all(|(i, c)| match i {
+            4 | 7 => *c == b'-',
+            _ => c.is_ascii_digit(),
+        })
+}
+
+/// `YYYY-MM-DD` followed by nothing, `Z`, or `+hh:mm`/`-hh:mm`. Shape only.
+fn is_date_with_zone(s: &str) -> bool {
+    let Some(date) = s.get(..10) else {
+        return false;
+    };
+    if !is_plain_date(date) {
+        return false;
+    }
+    match &s[10..] {
+        "" | "Z" => true,
+        zone => {
+            let z = zone.as_bytes();
+            z.len() == 6
+                && (z[0] == b'+' || z[0] == b'-')
+                && z[1].is_ascii_digit()
+                && z[2].is_ascii_digit()
+                && z[3] == b':'
+                && z[4].is_ascii_digit()
+                && z[5].is_ascii_digit()
+        }
+    }
+}
+
+/// Whether a right operand is a date without a time of day. `datatype` is
+/// the expanded `@type`, `None` for a plain string or an untyped `@value`.
+/// Without a datatype the value must be exactly `YYYY-MM-DD`; with xsd:date
+/// the value must also look like a date, since editing a typed literal can
+/// leave a time of day in it. Nothing is computed: the zone, if any, is not
+/// read and the date is never rewritten.
+pub(crate) fn date_only(value: &str, datatype: Option<&str>) -> bool {
+    match datatype {
+        None => is_plain_date(value),
+        Some(t) => is_date_type(t) && is_date_with_zone(value),
+    }
+}
+
+/// [`operator_for`] when the one right operand is a date without a time of
+/// day: a bound on a whole day says whether it means the start or the end.
 pub fn operator_for_date(left: &str, op: &str) -> String {
-    operator_for(left, op)
+    operator_phrase(left, op, plural_operand(left), true)
 }
 
 /// A leading "is" becomes "are" and "has" becomes "have".
@@ -169,7 +223,7 @@ fn plural_verb(phrase: String) -> String {
 /// less than", and the verb agrees in number with the operand's noun phrase
 /// ("the date and time are before").
 pub fn operator_for(left: &str, op: &str) -> String {
-    operator_phrase(left, op, plural_operand(left))
+    operator_phrase(left, op, plural_operand(left), false)
 }
 
 /// An action as a base-form verb phrase ("use", "attribute", "grant use").
@@ -329,9 +383,7 @@ mod tests {
     #[test]
     fn date_only_detects_dates_without_time() {
         let xsd = "http://www.w3.org/2001/XMLSchema#";
-        for v in ["2026-12-31"] {
-            assert!(date_only(v, None), "{v}");
-        }
+        assert!(date_only("2026-12-31", None));
         for v in [
             "2026-12-31T10:00:00Z",
             "2026-12-31Z",

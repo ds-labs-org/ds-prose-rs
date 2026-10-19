@@ -106,7 +106,7 @@ impl<'a> WordCtx<'a> {
     /// An operator as the verb phrase that follows `left`. A label that is
     /// already a verb phrase ("Has part") is kept; otherwise it follows
     /// "is" ("Greater than" reads "is greater than").
-    pub(crate) fn operator_for(&self, left: &str, op: &str) -> String {
+    pub(crate) fn operator_for(&self, left: &str, op: &str, date: bool) -> String {
         match self.worded(op, TermKind::Operator) {
             Some(label) => {
                 let label = lower_first(&label);
@@ -120,7 +120,7 @@ impl<'a> WordCtx<'a> {
                 // Plural only when the noun phrase used is the built-in one.
                 let plural = self.worded(left, TermKind::LeftOperand).is_none()
                     && words::plural_operand(left);
-                words::operator_phrase(left, op, plural)
+                words::operator_phrase(left, op, plural, date)
             }
         }
     }
@@ -277,10 +277,15 @@ pub(crate) fn operator_with(w: &Wording, prefixes: &Prefixes, left: &str, op: &s
         prefixes: Cow::Borrowed(prefixes),
         namespaces: HashMap::new(),
     };
-    ctx.operator_for(left, op)
+    ctx.operator_for(left, op, false)
 }
 
-/// STUB (red): [`crate::wording::operator_with_date`].
+/// [`crate::wording::operator_with_date`].
 pub(crate) fn operator_with_date(w: &Wording, prefixes: &Prefixes, left: &str, op: &str) -> String {
-    operator_with(w, prefixes, left, op)
+    let ctx = WordCtx {
+        wording: (!w.is_empty()).then_some(w),
+        prefixes: Cow::Borrowed(prefixes),
+        namespaces: HashMap::new(),
+    };
+    ctx.operator_for(left, op, true)
 }
