@@ -248,3 +248,45 @@ fn duration_parts(s: &str, units: &[(char, &'static str)]) -> Option<Vec<(String
     }
     Some(out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn operator_for_agrees_with_the_date_and_time() {
+        let cases = [
+            ("lt", "are before"),
+            ("lteq", "are on or before"),
+            ("gt", "are after"),
+            ("gteq", "are on or after"),
+            ("eq", "are equal to"),
+            ("neq", "are not equal to"),
+            ("isAllOf", "are all of"),
+            ("isAnyOf", "are any of"),
+            ("isNoneOf", "are none of"),
+            ("isPartOf", "are part of"),
+            ("hasPart", "have as a part"),
+            ("ex:near", "are related by near to"),
+            ("odrl:lt", "are before"),
+            ("http://www.w3.org/ns/odrl/2/lt", "are before"),
+        ];
+        for (op, want) in cases {
+            assert_eq!(operator_for("dateTime", op), want, "{op}");
+        }
+        assert_eq!(operator_for("odrl:dateTime", "lt"), "are before");
+    }
+
+    #[test]
+    fn other_operands_stay_singular() {
+        assert_eq!(operator_for("timeInterval", "lt"), "is before");
+        assert_eq!(operator_for("delayPeriod", "eq"), "is equal to");
+        assert_eq!(operator_for("count", "lteq"), "is at most");
+        assert_eq!(operator_for("elapsedTime", "gteq"), "is at least");
+    }
+
+    #[test]
+    fn operator_is_unchanged() {
+        assert_eq!(operator("lt"), "is less than");
+    }
+}
