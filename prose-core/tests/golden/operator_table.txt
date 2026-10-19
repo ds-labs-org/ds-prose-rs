@@ -1,0 +1,1408 @@
+builtin | dateTime | eq | instant | are equal to
+builtin | dateTime | eq | day | are equal to
+builtin | dateTime | eq | duration | are equal to
+builtin | dateTime | eq | other | are equal to
+builtin | dateTime | neq | instant | are not equal to
+builtin | dateTime | neq | day | are not equal to
+builtin | dateTime | neq | duration | are not equal to
+builtin | dateTime | neq | other | are not equal to
+builtin | dateTime | gt | instant | are after
+builtin | dateTime | gt | day | are after the end of
+builtin | dateTime | gt | duration | are after
+builtin | dateTime | gt | other | are after
+builtin | dateTime | gteq | instant | are on or after
+builtin | dateTime | gteq | day | are on or after the start of
+builtin | dateTime | gteq | duration | are on or after
+builtin | dateTime | gteq | other | are on or after
+builtin | dateTime | lt | instant | are before
+builtin | dateTime | lt | day | are before the start of
+builtin | dateTime | lt | duration | are before
+builtin | dateTime | lt | other | are before
+builtin | dateTime | lteq | instant | are on or before
+builtin | dateTime | lteq | day | are on or before the end of
+builtin | dateTime | lteq | duration | are on or before
+builtin | dateTime | lteq | other | are on or before
+builtin | dateTime | isA | instant | are a kind of
+builtin | dateTime | isA | day | are a kind of
+builtin | dateTime | isA | duration | are a kind of
+builtin | dateTime | isA | other | are a kind of
+builtin | dateTime | hasPart | instant | have as a part
+builtin | dateTime | hasPart | day | have as a part
+builtin | dateTime | hasPart | duration | have as a part
+builtin | dateTime | hasPart | other | have as a part
+builtin | dateTime | isPartOf | instant | are part of
+builtin | dateTime | isPartOf | day | are part of
+builtin | dateTime | isPartOf | duration | are part of
+builtin | dateTime | isPartOf | other | are part of
+builtin | dateTime | isAllOf | instant | are all of
+builtin | dateTime | isAllOf | day | are all of
+builtin | dateTime | isAllOf | duration | are all of
+builtin | dateTime | isAllOf | other | are all of
+builtin | dateTime | isAnyOf | instant | are any of
+builtin | dateTime | isAnyOf | day | are any of
+builtin | dateTime | isAnyOf | duration | are any of
+builtin | dateTime | isAnyOf | other | are any of
+builtin | dateTime | isNoneOf | instant | are none of
+builtin | dateTime | isNoneOf | day | are none of
+builtin | dateTime | isNoneOf | duration | are none of
+builtin | dateTime | isNoneOf | other | are none of
+builtin | dateTime | odrl:lt | instant | are before
+builtin | dateTime | odrl:lt | day | are before the start of
+builtin | dateTime | odrl:lt | duration | are before
+builtin | dateTime | odrl:lt | other | are before
+builtin | dateTime | ex:near | instant | are related by near to
+builtin | dateTime | ex:near | day | are related by near to
+builtin | dateTime | ex:near | duration | are related by near to
+builtin | dateTime | ex:near | other | are related by near to
+builtin | dateTime | ex:earlierThan | instant | are related by earlier than to
+builtin | dateTime | ex:earlierThan | day | are related by earlier than to
+builtin | dateTime | ex:earlierThan | duration | are related by earlier than to
+builtin | dateTime | ex:earlierThan | other | are related by earlier than to
+builtin | dateTime | ex:hasOverlap | instant | are related by has overlap to
+builtin | dateTime | ex:hasOverlap | day | are related by has overlap to
+builtin | dateTime | ex:hasOverlap | duration | are related by has overlap to
+builtin | dateTime | ex:hasOverlap | other | are related by has overlap to
+builtin | dateTime | ex:doesNotOverlap | instant | are related by does not overlap to
+builtin | dateTime | ex:doesNotOverlap | day | are related by does not overlap to
+builtin | dateTime | ex:doesNotOverlap | duration | are related by does not overlap to
+builtin | dateTime | ex:doesNotOverlap | other | are related by does not overlap to
+builtin | dateTime | ex:containsDay | instant | are related by contains day to
+builtin | dateTime | ex:containsDay | day | are related by contains day to
+builtin | dateTime | ex:containsDay | duration | are related by contains day to
+builtin | dateTime | ex:containsDay | other | are related by contains day to
+builtin | dateTime | ex:matchesWindow | instant | are related by matches window to
+builtin | dateTime | ex:matchesWindow | day | are related by matches window to
+builtin | dateTime | ex:matchesWindow | duration | are related by matches window to
+builtin | dateTime | ex:matchesWindow | other | are related by matches window to
+builtin | dateTime | ex:areNear | instant | are related by are near to
+builtin | dateTime | ex:areNear | day | are related by are near to
+builtin | dateTime | ex:areNear | duration | are related by are near to
+builtin | dateTime | ex:areNear | other | are related by are near to
+builtin | dateTime | ex:withinRegion | instant | are related by within region to
+builtin | dateTime | ex:withinRegion | day | are related by within region to
+builtin | dateTime | ex:withinRegion | duration | are related by within region to
+builtin | dateTime | ex:withinRegion | other | are related by within region to
+builtin | dateTime | ex:bare | instant | are related by bare to
+builtin | dateTime | ex:bare | day | are related by bare to
+builtin | dateTime | ex:bare | duration | are related by bare to
+builtin | dateTime | ex:bare | other | are related by bare to
+builtin | odrl:dateTime | eq | instant | are equal to
+builtin | odrl:dateTime | eq | day | are equal to
+builtin | odrl:dateTime | eq | duration | are equal to
+builtin | odrl:dateTime | eq | other | are equal to
+builtin | odrl:dateTime | neq | instant | are not equal to
+builtin | odrl:dateTime | neq | day | are not equal to
+builtin | odrl:dateTime | neq | duration | are not equal to
+builtin | odrl:dateTime | neq | other | are not equal to
+builtin | odrl:dateTime | gt | instant | are after
+builtin | odrl:dateTime | gt | day | are after the end of
+builtin | odrl:dateTime | gt | duration | are after
+builtin | odrl:dateTime | gt | other | are after
+builtin | odrl:dateTime | gteq | instant | are on or after
+builtin | odrl:dateTime | gteq | day | are on or after the start of
+builtin | odrl:dateTime | gteq | duration | are on or after
+builtin | odrl:dateTime | gteq | other | are on or after
+builtin | odrl:dateTime | lt | instant | are before
+builtin | odrl:dateTime | lt | day | are before the start of
+builtin | odrl:dateTime | lt | duration | are before
+builtin | odrl:dateTime | lt | other | are before
+builtin | odrl:dateTime | lteq | instant | are on or before
+builtin | odrl:dateTime | lteq | day | are on or before the end of
+builtin | odrl:dateTime | lteq | duration | are on or before
+builtin | odrl:dateTime | lteq | other | are on or before
+builtin | odrl:dateTime | isA | instant | are a kind of
+builtin | odrl:dateTime | isA | day | are a kind of
+builtin | odrl:dateTime | isA | duration | are a kind of
+builtin | odrl:dateTime | isA | other | are a kind of
+builtin | odrl:dateTime | hasPart | instant | have as a part
+builtin | odrl:dateTime | hasPart | day | have as a part
+builtin | odrl:dateTime | hasPart | duration | have as a part
+builtin | odrl:dateTime | hasPart | other | have as a part
+builtin | odrl:dateTime | isPartOf | instant | are part of
+builtin | odrl:dateTime | isPartOf | day | are part of
+builtin | odrl:dateTime | isPartOf | duration | are part of
+builtin | odrl:dateTime | isPartOf | other | are part of
+builtin | odrl:dateTime | isAllOf | instant | are all of
+builtin | odrl:dateTime | isAllOf | day | are all of
+builtin | odrl:dateTime | isAllOf | duration | are all of
+builtin | odrl:dateTime | isAllOf | other | are all of
+builtin | odrl:dateTime | isAnyOf | instant | are any of
+builtin | odrl:dateTime | isAnyOf | day | are any of
+builtin | odrl:dateTime | isAnyOf | duration | are any of
+builtin | odrl:dateTime | isAnyOf | other | are any of
+builtin | odrl:dateTime | isNoneOf | instant | are none of
+builtin | odrl:dateTime | isNoneOf | day | are none of
+builtin | odrl:dateTime | isNoneOf | duration | are none of
+builtin | odrl:dateTime | isNoneOf | other | are none of
+builtin | odrl:dateTime | odrl:lt | instant | are before
+builtin | odrl:dateTime | odrl:lt | day | are before the start of
+builtin | odrl:dateTime | odrl:lt | duration | are before
+builtin | odrl:dateTime | odrl:lt | other | are before
+builtin | odrl:dateTime | ex:near | instant | are related by near to
+builtin | odrl:dateTime | ex:near | day | are related by near to
+builtin | odrl:dateTime | ex:near | duration | are related by near to
+builtin | odrl:dateTime | ex:near | other | are related by near to
+builtin | odrl:dateTime | ex:earlierThan | instant | are related by earlier than to
+builtin | odrl:dateTime | ex:earlierThan | day | are related by earlier than to
+builtin | odrl:dateTime | ex:earlierThan | duration | are related by earlier than to
+builtin | odrl:dateTime | ex:earlierThan | other | are related by earlier than to
+builtin | odrl:dateTime | ex:hasOverlap | instant | are related by has overlap to
+builtin | odrl:dateTime | ex:hasOverlap | day | are related by has overlap to
+builtin | odrl:dateTime | ex:hasOverlap | duration | are related by has overlap to
+builtin | odrl:dateTime | ex:hasOverlap | other | are related by has overlap to
+builtin | odrl:dateTime | ex:doesNotOverlap | instant | are related by does not overlap to
+builtin | odrl:dateTime | ex:doesNotOverlap | day | are related by does not overlap to
+builtin | odrl:dateTime | ex:doesNotOverlap | duration | are related by does not overlap to
+builtin | odrl:dateTime | ex:doesNotOverlap | other | are related by does not overlap to
+builtin | odrl:dateTime | ex:containsDay | instant | are related by contains day to
+builtin | odrl:dateTime | ex:containsDay | day | are related by contains day to
+builtin | odrl:dateTime | ex:containsDay | duration | are related by contains day to
+builtin | odrl:dateTime | ex:containsDay | other | are related by contains day to
+builtin | odrl:dateTime | ex:matchesWindow | instant | are related by matches window to
+builtin | odrl:dateTime | ex:matchesWindow | day | are related by matches window to
+builtin | odrl:dateTime | ex:matchesWindow | duration | are related by matches window to
+builtin | odrl:dateTime | ex:matchesWindow | other | are related by matches window to
+builtin | odrl:dateTime | ex:areNear | instant | are related by are near to
+builtin | odrl:dateTime | ex:areNear | day | are related by are near to
+builtin | odrl:dateTime | ex:areNear | duration | are related by are near to
+builtin | odrl:dateTime | ex:areNear | other | are related by are near to
+builtin | odrl:dateTime | ex:withinRegion | instant | are related by within region to
+builtin | odrl:dateTime | ex:withinRegion | day | are related by within region to
+builtin | odrl:dateTime | ex:withinRegion | duration | are related by within region to
+builtin | odrl:dateTime | ex:withinRegion | other | are related by within region to
+builtin | odrl:dateTime | ex:bare | instant | are related by bare to
+builtin | odrl:dateTime | ex:bare | day | are related by bare to
+builtin | odrl:dateTime | ex:bare | duration | are related by bare to
+builtin | odrl:dateTime | ex:bare | other | are related by bare to
+builtin | timeInterval | eq | instant | is equal to
+builtin | timeInterval | eq | day | is equal to
+builtin | timeInterval | eq | duration | is equal to
+builtin | timeInterval | eq | other | is equal to
+builtin | timeInterval | neq | instant | is not equal to
+builtin | timeInterval | neq | day | is not equal to
+builtin | timeInterval | neq | duration | is not equal to
+builtin | timeInterval | neq | other | is not equal to
+builtin | timeInterval | gt | instant | is greater than
+builtin | timeInterval | gt | day | is greater than
+builtin | timeInterval | gt | duration | is greater than
+builtin | timeInterval | gt | other | is greater than
+builtin | timeInterval | gteq | instant | is at least
+builtin | timeInterval | gteq | day | is at least
+builtin | timeInterval | gteq | duration | is at least
+builtin | timeInterval | gteq | other | is at least
+builtin | timeInterval | lt | instant | is less than
+builtin | timeInterval | lt | day | is less than
+builtin | timeInterval | lt | duration | is less than
+builtin | timeInterval | lt | other | is less than
+builtin | timeInterval | lteq | instant | is at most
+builtin | timeInterval | lteq | day | is at most
+builtin | timeInterval | lteq | duration | is at most
+builtin | timeInterval | lteq | other | is at most
+builtin | timeInterval | isA | instant | is a kind of
+builtin | timeInterval | isA | day | is a kind of
+builtin | timeInterval | isA | duration | is a kind of
+builtin | timeInterval | isA | other | is a kind of
+builtin | timeInterval | hasPart | instant | has as a part
+builtin | timeInterval | hasPart | day | has as a part
+builtin | timeInterval | hasPart | duration | has as a part
+builtin | timeInterval | hasPart | other | has as a part
+builtin | timeInterval | isPartOf | instant | is part of
+builtin | timeInterval | isPartOf | day | is part of
+builtin | timeInterval | isPartOf | duration | is part of
+builtin | timeInterval | isPartOf | other | is part of
+builtin | timeInterval | isAllOf | instant | is all of
+builtin | timeInterval | isAllOf | day | is all of
+builtin | timeInterval | isAllOf | duration | is all of
+builtin | timeInterval | isAllOf | other | is all of
+builtin | timeInterval | isAnyOf | instant | is any of
+builtin | timeInterval | isAnyOf | day | is any of
+builtin | timeInterval | isAnyOf | duration | is any of
+builtin | timeInterval | isAnyOf | other | is any of
+builtin | timeInterval | isNoneOf | instant | is none of
+builtin | timeInterval | isNoneOf | day | is none of
+builtin | timeInterval | isNoneOf | duration | is none of
+builtin | timeInterval | isNoneOf | other | is none of
+builtin | timeInterval | odrl:lt | instant | is less than
+builtin | timeInterval | odrl:lt | day | is less than
+builtin | timeInterval | odrl:lt | duration | is less than
+builtin | timeInterval | odrl:lt | other | is less than
+builtin | timeInterval | ex:near | instant | is related by near to
+builtin | timeInterval | ex:near | day | is related by near to
+builtin | timeInterval | ex:near | duration | is related by near to
+builtin | timeInterval | ex:near | other | is related by near to
+builtin | timeInterval | ex:earlierThan | instant | is related by earlier than to
+builtin | timeInterval | ex:earlierThan | day | is related by earlier than to
+builtin | timeInterval | ex:earlierThan | duration | is related by earlier than to
+builtin | timeInterval | ex:earlierThan | other | is related by earlier than to
+builtin | timeInterval | ex:hasOverlap | instant | is related by has overlap to
+builtin | timeInterval | ex:hasOverlap | day | is related by has overlap to
+builtin | timeInterval | ex:hasOverlap | duration | is related by has overlap to
+builtin | timeInterval | ex:hasOverlap | other | is related by has overlap to
+builtin | timeInterval | ex:doesNotOverlap | instant | is related by does not overlap to
+builtin | timeInterval | ex:doesNotOverlap | day | is related by does not overlap to
+builtin | timeInterval | ex:doesNotOverlap | duration | is related by does not overlap to
+builtin | timeInterval | ex:doesNotOverlap | other | is related by does not overlap to
+builtin | timeInterval | ex:containsDay | instant | is related by contains day to
+builtin | timeInterval | ex:containsDay | day | is related by contains day to
+builtin | timeInterval | ex:containsDay | duration | is related by contains day to
+builtin | timeInterval | ex:containsDay | other | is related by contains day to
+builtin | timeInterval | ex:matchesWindow | instant | is related by matches window to
+builtin | timeInterval | ex:matchesWindow | day | is related by matches window to
+builtin | timeInterval | ex:matchesWindow | duration | is related by matches window to
+builtin | timeInterval | ex:matchesWindow | other | is related by matches window to
+builtin | timeInterval | ex:areNear | instant | is related by are near to
+builtin | timeInterval | ex:areNear | day | is related by are near to
+builtin | timeInterval | ex:areNear | duration | is related by are near to
+builtin | timeInterval | ex:areNear | other | is related by are near to
+builtin | timeInterval | ex:withinRegion | instant | is related by within region to
+builtin | timeInterval | ex:withinRegion | day | is related by within region to
+builtin | timeInterval | ex:withinRegion | duration | is related by within region to
+builtin | timeInterval | ex:withinRegion | other | is related by within region to
+builtin | timeInterval | ex:bare | instant | is related by bare to
+builtin | timeInterval | ex:bare | day | is related by bare to
+builtin | timeInterval | ex:bare | duration | is related by bare to
+builtin | timeInterval | ex:bare | other | is related by bare to
+builtin | delayPeriod | eq | instant | is equal to
+builtin | delayPeriod | eq | day | is equal to
+builtin | delayPeriod | eq | duration | is equal to
+builtin | delayPeriod | eq | other | is equal to
+builtin | delayPeriod | neq | instant | is not equal to
+builtin | delayPeriod | neq | day | is not equal to
+builtin | delayPeriod | neq | duration | is not equal to
+builtin | delayPeriod | neq | other | is not equal to
+builtin | delayPeriod | gt | instant | is greater than
+builtin | delayPeriod | gt | day | is greater than
+builtin | delayPeriod | gt | duration | is greater than
+builtin | delayPeriod | gt | other | is greater than
+builtin | delayPeriod | gteq | instant | is at least
+builtin | delayPeriod | gteq | day | is at least
+builtin | delayPeriod | gteq | duration | is at least
+builtin | delayPeriod | gteq | other | is at least
+builtin | delayPeriod | lt | instant | is less than
+builtin | delayPeriod | lt | day | is less than
+builtin | delayPeriod | lt | duration | is less than
+builtin | delayPeriod | lt | other | is less than
+builtin | delayPeriod | lteq | instant | is at most
+builtin | delayPeriod | lteq | day | is at most
+builtin | delayPeriod | lteq | duration | is at most
+builtin | delayPeriod | lteq | other | is at most
+builtin | delayPeriod | isA | instant | is a kind of
+builtin | delayPeriod | isA | day | is a kind of
+builtin | delayPeriod | isA | duration | is a kind of
+builtin | delayPeriod | isA | other | is a kind of
+builtin | delayPeriod | hasPart | instant | has as a part
+builtin | delayPeriod | hasPart | day | has as a part
+builtin | delayPeriod | hasPart | duration | has as a part
+builtin | delayPeriod | hasPart | other | has as a part
+builtin | delayPeriod | isPartOf | instant | is part of
+builtin | delayPeriod | isPartOf | day | is part of
+builtin | delayPeriod | isPartOf | duration | is part of
+builtin | delayPeriod | isPartOf | other | is part of
+builtin | delayPeriod | isAllOf | instant | is all of
+builtin | delayPeriod | isAllOf | day | is all of
+builtin | delayPeriod | isAllOf | duration | is all of
+builtin | delayPeriod | isAllOf | other | is all of
+builtin | delayPeriod | isAnyOf | instant | is any of
+builtin | delayPeriod | isAnyOf | day | is any of
+builtin | delayPeriod | isAnyOf | duration | is any of
+builtin | delayPeriod | isAnyOf | other | is any of
+builtin | delayPeriod | isNoneOf | instant | is none of
+builtin | delayPeriod | isNoneOf | day | is none of
+builtin | delayPeriod | isNoneOf | duration | is none of
+builtin | delayPeriod | isNoneOf | other | is none of
+builtin | delayPeriod | odrl:lt | instant | is less than
+builtin | delayPeriod | odrl:lt | day | is less than
+builtin | delayPeriod | odrl:lt | duration | is less than
+builtin | delayPeriod | odrl:lt | other | is less than
+builtin | delayPeriod | ex:near | instant | is related by near to
+builtin | delayPeriod | ex:near | day | is related by near to
+builtin | delayPeriod | ex:near | duration | is related by near to
+builtin | delayPeriod | ex:near | other | is related by near to
+builtin | delayPeriod | ex:earlierThan | instant | is related by earlier than to
+builtin | delayPeriod | ex:earlierThan | day | is related by earlier than to
+builtin | delayPeriod | ex:earlierThan | duration | is related by earlier than to
+builtin | delayPeriod | ex:earlierThan | other | is related by earlier than to
+builtin | delayPeriod | ex:hasOverlap | instant | is related by has overlap to
+builtin | delayPeriod | ex:hasOverlap | day | is related by has overlap to
+builtin | delayPeriod | ex:hasOverlap | duration | is related by has overlap to
+builtin | delayPeriod | ex:hasOverlap | other | is related by has overlap to
+builtin | delayPeriod | ex:doesNotOverlap | instant | is related by does not overlap to
+builtin | delayPeriod | ex:doesNotOverlap | day | is related by does not overlap to
+builtin | delayPeriod | ex:doesNotOverlap | duration | is related by does not overlap to
+builtin | delayPeriod | ex:doesNotOverlap | other | is related by does not overlap to
+builtin | delayPeriod | ex:containsDay | instant | is related by contains day to
+builtin | delayPeriod | ex:containsDay | day | is related by contains day to
+builtin | delayPeriod | ex:containsDay | duration | is related by contains day to
+builtin | delayPeriod | ex:containsDay | other | is related by contains day to
+builtin | delayPeriod | ex:matchesWindow | instant | is related by matches window to
+builtin | delayPeriod | ex:matchesWindow | day | is related by matches window to
+builtin | delayPeriod | ex:matchesWindow | duration | is related by matches window to
+builtin | delayPeriod | ex:matchesWindow | other | is related by matches window to
+builtin | delayPeriod | ex:areNear | instant | is related by are near to
+builtin | delayPeriod | ex:areNear | day | is related by are near to
+builtin | delayPeriod | ex:areNear | duration | is related by are near to
+builtin | delayPeriod | ex:areNear | other | is related by are near to
+builtin | delayPeriod | ex:withinRegion | instant | is related by within region to
+builtin | delayPeriod | ex:withinRegion | day | is related by within region to
+builtin | delayPeriod | ex:withinRegion | duration | is related by within region to
+builtin | delayPeriod | ex:withinRegion | other | is related by within region to
+builtin | delayPeriod | ex:bare | instant | is related by bare to
+builtin | delayPeriod | ex:bare | day | is related by bare to
+builtin | delayPeriod | ex:bare | duration | is related by bare to
+builtin | delayPeriod | ex:bare | other | is related by bare to
+builtin | elapsedTime | eq | instant | is equal to
+builtin | elapsedTime | eq | day | is equal to
+builtin | elapsedTime | eq | duration | is equal to
+builtin | elapsedTime | eq | other | is equal to
+builtin | elapsedTime | neq | instant | is not equal to
+builtin | elapsedTime | neq | day | is not equal to
+builtin | elapsedTime | neq | duration | is not equal to
+builtin | elapsedTime | neq | other | is not equal to
+builtin | elapsedTime | gt | instant | is greater than
+builtin | elapsedTime | gt | day | is greater than
+builtin | elapsedTime | gt | duration | is greater than
+builtin | elapsedTime | gt | other | is greater than
+builtin | elapsedTime | gteq | instant | is at least
+builtin | elapsedTime | gteq | day | is at least
+builtin | elapsedTime | gteq | duration | is at least
+builtin | elapsedTime | gteq | other | is at least
+builtin | elapsedTime | lt | instant | is less than
+builtin | elapsedTime | lt | day | is less than
+builtin | elapsedTime | lt | duration | is less than
+builtin | elapsedTime | lt | other | is less than
+builtin | elapsedTime | lteq | instant | is at most
+builtin | elapsedTime | lteq | day | is at most
+builtin | elapsedTime | lteq | duration | is at most
+builtin | elapsedTime | lteq | other | is at most
+builtin | elapsedTime | isA | instant | is a kind of
+builtin | elapsedTime | isA | day | is a kind of
+builtin | elapsedTime | isA | duration | is a kind of
+builtin | elapsedTime | isA | other | is a kind of
+builtin | elapsedTime | hasPart | instant | has as a part
+builtin | elapsedTime | hasPart | day | has as a part
+builtin | elapsedTime | hasPart | duration | has as a part
+builtin | elapsedTime | hasPart | other | has as a part
+builtin | elapsedTime | isPartOf | instant | is part of
+builtin | elapsedTime | isPartOf | day | is part of
+builtin | elapsedTime | isPartOf | duration | is part of
+builtin | elapsedTime | isPartOf | other | is part of
+builtin | elapsedTime | isAllOf | instant | is all of
+builtin | elapsedTime | isAllOf | day | is all of
+builtin | elapsedTime | isAllOf | duration | is all of
+builtin | elapsedTime | isAllOf | other | is all of
+builtin | elapsedTime | isAnyOf | instant | is any of
+builtin | elapsedTime | isAnyOf | day | is any of
+builtin | elapsedTime | isAnyOf | duration | is any of
+builtin | elapsedTime | isAnyOf | other | is any of
+builtin | elapsedTime | isNoneOf | instant | is none of
+builtin | elapsedTime | isNoneOf | day | is none of
+builtin | elapsedTime | isNoneOf | duration | is none of
+builtin | elapsedTime | isNoneOf | other | is none of
+builtin | elapsedTime | odrl:lt | instant | is less than
+builtin | elapsedTime | odrl:lt | day | is less than
+builtin | elapsedTime | odrl:lt | duration | is less than
+builtin | elapsedTime | odrl:lt | other | is less than
+builtin | elapsedTime | ex:near | instant | is related by near to
+builtin | elapsedTime | ex:near | day | is related by near to
+builtin | elapsedTime | ex:near | duration | is related by near to
+builtin | elapsedTime | ex:near | other | is related by near to
+builtin | elapsedTime | ex:earlierThan | instant | is related by earlier than to
+builtin | elapsedTime | ex:earlierThan | day | is related by earlier than to
+builtin | elapsedTime | ex:earlierThan | duration | is related by earlier than to
+builtin | elapsedTime | ex:earlierThan | other | is related by earlier than to
+builtin | elapsedTime | ex:hasOverlap | instant | is related by has overlap to
+builtin | elapsedTime | ex:hasOverlap | day | is related by has overlap to
+builtin | elapsedTime | ex:hasOverlap | duration | is related by has overlap to
+builtin | elapsedTime | ex:hasOverlap | other | is related by has overlap to
+builtin | elapsedTime | ex:doesNotOverlap | instant | is related by does not overlap to
+builtin | elapsedTime | ex:doesNotOverlap | day | is related by does not overlap to
+builtin | elapsedTime | ex:doesNotOverlap | duration | is related by does not overlap to
+builtin | elapsedTime | ex:doesNotOverlap | other | is related by does not overlap to
+builtin | elapsedTime | ex:containsDay | instant | is related by contains day to
+builtin | elapsedTime | ex:containsDay | day | is related by contains day to
+builtin | elapsedTime | ex:containsDay | duration | is related by contains day to
+builtin | elapsedTime | ex:containsDay | other | is related by contains day to
+builtin | elapsedTime | ex:matchesWindow | instant | is related by matches window to
+builtin | elapsedTime | ex:matchesWindow | day | is related by matches window to
+builtin | elapsedTime | ex:matchesWindow | duration | is related by matches window to
+builtin | elapsedTime | ex:matchesWindow | other | is related by matches window to
+builtin | elapsedTime | ex:areNear | instant | is related by are near to
+builtin | elapsedTime | ex:areNear | day | is related by are near to
+builtin | elapsedTime | ex:areNear | duration | is related by are near to
+builtin | elapsedTime | ex:areNear | other | is related by are near to
+builtin | elapsedTime | ex:withinRegion | instant | is related by within region to
+builtin | elapsedTime | ex:withinRegion | day | is related by within region to
+builtin | elapsedTime | ex:withinRegion | duration | is related by within region to
+builtin | elapsedTime | ex:withinRegion | other | is related by within region to
+builtin | elapsedTime | ex:bare | instant | is related by bare to
+builtin | elapsedTime | ex:bare | day | is related by bare to
+builtin | elapsedTime | ex:bare | duration | is related by bare to
+builtin | elapsedTime | ex:bare | other | is related by bare to
+builtin | count | eq | instant | is equal to
+builtin | count | eq | day | is equal to
+builtin | count | eq | duration | is equal to
+builtin | count | eq | other | is equal to
+builtin | count | neq | instant | is not equal to
+builtin | count | neq | day | is not equal to
+builtin | count | neq | duration | is not equal to
+builtin | count | neq | other | is not equal to
+builtin | count | gt | instant | is greater than
+builtin | count | gt | day | is greater than
+builtin | count | gt | duration | is greater than
+builtin | count | gt | other | is greater than
+builtin | count | gteq | instant | is at least
+builtin | count | gteq | day | is at least
+builtin | count | gteq | duration | is at least
+builtin | count | gteq | other | is at least
+builtin | count | lt | instant | is less than
+builtin | count | lt | day | is less than
+builtin | count | lt | duration | is less than
+builtin | count | lt | other | is less than
+builtin | count | lteq | instant | is at most
+builtin | count | lteq | day | is at most
+builtin | count | lteq | duration | is at most
+builtin | count | lteq | other | is at most
+builtin | count | isA | instant | is a kind of
+builtin | count | isA | day | is a kind of
+builtin | count | isA | duration | is a kind of
+builtin | count | isA | other | is a kind of
+builtin | count | hasPart | instant | has as a part
+builtin | count | hasPart | day | has as a part
+builtin | count | hasPart | duration | has as a part
+builtin | count | hasPart | other | has as a part
+builtin | count | isPartOf | instant | is part of
+builtin | count | isPartOf | day | is part of
+builtin | count | isPartOf | duration | is part of
+builtin | count | isPartOf | other | is part of
+builtin | count | isAllOf | instant | is all of
+builtin | count | isAllOf | day | is all of
+builtin | count | isAllOf | duration | is all of
+builtin | count | isAllOf | other | is all of
+builtin | count | isAnyOf | instant | is any of
+builtin | count | isAnyOf | day | is any of
+builtin | count | isAnyOf | duration | is any of
+builtin | count | isAnyOf | other | is any of
+builtin | count | isNoneOf | instant | is none of
+builtin | count | isNoneOf | day | is none of
+builtin | count | isNoneOf | duration | is none of
+builtin | count | isNoneOf | other | is none of
+builtin | count | odrl:lt | instant | is less than
+builtin | count | odrl:lt | day | is less than
+builtin | count | odrl:lt | duration | is less than
+builtin | count | odrl:lt | other | is less than
+builtin | count | ex:near | instant | is related by near to
+builtin | count | ex:near | day | is related by near to
+builtin | count | ex:near | duration | is related by near to
+builtin | count | ex:near | other | is related by near to
+builtin | count | ex:earlierThan | instant | is related by earlier than to
+builtin | count | ex:earlierThan | day | is related by earlier than to
+builtin | count | ex:earlierThan | duration | is related by earlier than to
+builtin | count | ex:earlierThan | other | is related by earlier than to
+builtin | count | ex:hasOverlap | instant | is related by has overlap to
+builtin | count | ex:hasOverlap | day | is related by has overlap to
+builtin | count | ex:hasOverlap | duration | is related by has overlap to
+builtin | count | ex:hasOverlap | other | is related by has overlap to
+builtin | count | ex:doesNotOverlap | instant | is related by does not overlap to
+builtin | count | ex:doesNotOverlap | day | is related by does not overlap to
+builtin | count | ex:doesNotOverlap | duration | is related by does not overlap to
+builtin | count | ex:doesNotOverlap | other | is related by does not overlap to
+builtin | count | ex:containsDay | instant | is related by contains day to
+builtin | count | ex:containsDay | day | is related by contains day to
+builtin | count | ex:containsDay | duration | is related by contains day to
+builtin | count | ex:containsDay | other | is related by contains day to
+builtin | count | ex:matchesWindow | instant | is related by matches window to
+builtin | count | ex:matchesWindow | day | is related by matches window to
+builtin | count | ex:matchesWindow | duration | is related by matches window to
+builtin | count | ex:matchesWindow | other | is related by matches window to
+builtin | count | ex:areNear | instant | is related by are near to
+builtin | count | ex:areNear | day | is related by are near to
+builtin | count | ex:areNear | duration | is related by are near to
+builtin | count | ex:areNear | other | is related by are near to
+builtin | count | ex:withinRegion | instant | is related by within region to
+builtin | count | ex:withinRegion | day | is related by within region to
+builtin | count | ex:withinRegion | duration | is related by within region to
+builtin | count | ex:withinRegion | other | is related by within region to
+builtin | count | ex:bare | instant | is related by bare to
+builtin | count | ex:bare | day | is related by bare to
+builtin | count | ex:bare | duration | is related by bare to
+builtin | count | ex:bare | other | is related by bare to
+builtin | ex:moment | eq | instant | is equal to
+builtin | ex:moment | eq | day | is equal to
+builtin | ex:moment | eq | duration | is equal to
+builtin | ex:moment | eq | other | is equal to
+builtin | ex:moment | neq | instant | is not equal to
+builtin | ex:moment | neq | day | is not equal to
+builtin | ex:moment | neq | duration | is not equal to
+builtin | ex:moment | neq | other | is not equal to
+builtin | ex:moment | gt | instant | is greater than
+builtin | ex:moment | gt | day | is greater than
+builtin | ex:moment | gt | duration | is greater than
+builtin | ex:moment | gt | other | is greater than
+builtin | ex:moment | gteq | instant | is at least
+builtin | ex:moment | gteq | day | is at least
+builtin | ex:moment | gteq | duration | is at least
+builtin | ex:moment | gteq | other | is at least
+builtin | ex:moment | lt | instant | is less than
+builtin | ex:moment | lt | day | is less than
+builtin | ex:moment | lt | duration | is less than
+builtin | ex:moment | lt | other | is less than
+builtin | ex:moment | lteq | instant | is at most
+builtin | ex:moment | lteq | day | is at most
+builtin | ex:moment | lteq | duration | is at most
+builtin | ex:moment | lteq | other | is at most
+builtin | ex:moment | isA | instant | is a kind of
+builtin | ex:moment | isA | day | is a kind of
+builtin | ex:moment | isA | duration | is a kind of
+builtin | ex:moment | isA | other | is a kind of
+builtin | ex:moment | hasPart | instant | has as a part
+builtin | ex:moment | hasPart | day | has as a part
+builtin | ex:moment | hasPart | duration | has as a part
+builtin | ex:moment | hasPart | other | has as a part
+builtin | ex:moment | isPartOf | instant | is part of
+builtin | ex:moment | isPartOf | day | is part of
+builtin | ex:moment | isPartOf | duration | is part of
+builtin | ex:moment | isPartOf | other | is part of
+builtin | ex:moment | isAllOf | instant | is all of
+builtin | ex:moment | isAllOf | day | is all of
+builtin | ex:moment | isAllOf | duration | is all of
+builtin | ex:moment | isAllOf | other | is all of
+builtin | ex:moment | isAnyOf | instant | is any of
+builtin | ex:moment | isAnyOf | day | is any of
+builtin | ex:moment | isAnyOf | duration | is any of
+builtin | ex:moment | isAnyOf | other | is any of
+builtin | ex:moment | isNoneOf | instant | is none of
+builtin | ex:moment | isNoneOf | day | is none of
+builtin | ex:moment | isNoneOf | duration | is none of
+builtin | ex:moment | isNoneOf | other | is none of
+builtin | ex:moment | odrl:lt | instant | is less than
+builtin | ex:moment | odrl:lt | day | is less than
+builtin | ex:moment | odrl:lt | duration | is less than
+builtin | ex:moment | odrl:lt | other | is less than
+builtin | ex:moment | ex:near | instant | is related by near to
+builtin | ex:moment | ex:near | day | is related by near to
+builtin | ex:moment | ex:near | duration | is related by near to
+builtin | ex:moment | ex:near | other | is related by near to
+builtin | ex:moment | ex:earlierThan | instant | is related by earlier than to
+builtin | ex:moment | ex:earlierThan | day | is related by earlier than to
+builtin | ex:moment | ex:earlierThan | duration | is related by earlier than to
+builtin | ex:moment | ex:earlierThan | other | is related by earlier than to
+builtin | ex:moment | ex:hasOverlap | instant | is related by has overlap to
+builtin | ex:moment | ex:hasOverlap | day | is related by has overlap to
+builtin | ex:moment | ex:hasOverlap | duration | is related by has overlap to
+builtin | ex:moment | ex:hasOverlap | other | is related by has overlap to
+builtin | ex:moment | ex:doesNotOverlap | instant | is related by does not overlap to
+builtin | ex:moment | ex:doesNotOverlap | day | is related by does not overlap to
+builtin | ex:moment | ex:doesNotOverlap | duration | is related by does not overlap to
+builtin | ex:moment | ex:doesNotOverlap | other | is related by does not overlap to
+builtin | ex:moment | ex:containsDay | instant | is related by contains day to
+builtin | ex:moment | ex:containsDay | day | is related by contains day to
+builtin | ex:moment | ex:containsDay | duration | is related by contains day to
+builtin | ex:moment | ex:containsDay | other | is related by contains day to
+builtin | ex:moment | ex:matchesWindow | instant | is related by matches window to
+builtin | ex:moment | ex:matchesWindow | day | is related by matches window to
+builtin | ex:moment | ex:matchesWindow | duration | is related by matches window to
+builtin | ex:moment | ex:matchesWindow | other | is related by matches window to
+builtin | ex:moment | ex:areNear | instant | is related by are near to
+builtin | ex:moment | ex:areNear | day | is related by are near to
+builtin | ex:moment | ex:areNear | duration | is related by are near to
+builtin | ex:moment | ex:areNear | other | is related by are near to
+builtin | ex:moment | ex:withinRegion | instant | is related by within region to
+builtin | ex:moment | ex:withinRegion | day | is related by within region to
+builtin | ex:moment | ex:withinRegion | duration | is related by within region to
+builtin | ex:moment | ex:withinRegion | other | is related by within region to
+builtin | ex:moment | ex:bare | instant | is related by bare to
+builtin | ex:moment | ex:bare | day | is related by bare to
+builtin | ex:moment | ex:bare | duration | is related by bare to
+builtin | ex:moment | ex:bare | other | is related by bare to
+builtin | ex:other | eq | instant | is equal to
+builtin | ex:other | eq | day | is equal to
+builtin | ex:other | eq | duration | is equal to
+builtin | ex:other | eq | other | is equal to
+builtin | ex:other | neq | instant | is not equal to
+builtin | ex:other | neq | day | is not equal to
+builtin | ex:other | neq | duration | is not equal to
+builtin | ex:other | neq | other | is not equal to
+builtin | ex:other | gt | instant | is greater than
+builtin | ex:other | gt | day | is greater than
+builtin | ex:other | gt | duration | is greater than
+builtin | ex:other | gt | other | is greater than
+builtin | ex:other | gteq | instant | is at least
+builtin | ex:other | gteq | day | is at least
+builtin | ex:other | gteq | duration | is at least
+builtin | ex:other | gteq | other | is at least
+builtin | ex:other | lt | instant | is less than
+builtin | ex:other | lt | day | is less than
+builtin | ex:other | lt | duration | is less than
+builtin | ex:other | lt | other | is less than
+builtin | ex:other | lteq | instant | is at most
+builtin | ex:other | lteq | day | is at most
+builtin | ex:other | lteq | duration | is at most
+builtin | ex:other | lteq | other | is at most
+builtin | ex:other | isA | instant | is a kind of
+builtin | ex:other | isA | day | is a kind of
+builtin | ex:other | isA | duration | is a kind of
+builtin | ex:other | isA | other | is a kind of
+builtin | ex:other | hasPart | instant | has as a part
+builtin | ex:other | hasPart | day | has as a part
+builtin | ex:other | hasPart | duration | has as a part
+builtin | ex:other | hasPart | other | has as a part
+builtin | ex:other | isPartOf | instant | is part of
+builtin | ex:other | isPartOf | day | is part of
+builtin | ex:other | isPartOf | duration | is part of
+builtin | ex:other | isPartOf | other | is part of
+builtin | ex:other | isAllOf | instant | is all of
+builtin | ex:other | isAllOf | day | is all of
+builtin | ex:other | isAllOf | duration | is all of
+builtin | ex:other | isAllOf | other | is all of
+builtin | ex:other | isAnyOf | instant | is any of
+builtin | ex:other | isAnyOf | day | is any of
+builtin | ex:other | isAnyOf | duration | is any of
+builtin | ex:other | isAnyOf | other | is any of
+builtin | ex:other | isNoneOf | instant | is none of
+builtin | ex:other | isNoneOf | day | is none of
+builtin | ex:other | isNoneOf | duration | is none of
+builtin | ex:other | isNoneOf | other | is none of
+builtin | ex:other | odrl:lt | instant | is less than
+builtin | ex:other | odrl:lt | day | is less than
+builtin | ex:other | odrl:lt | duration | is less than
+builtin | ex:other | odrl:lt | other | is less than
+builtin | ex:other | ex:near | instant | is related by near to
+builtin | ex:other | ex:near | day | is related by near to
+builtin | ex:other | ex:near | duration | is related by near to
+builtin | ex:other | ex:near | other | is related by near to
+builtin | ex:other | ex:earlierThan | instant | is related by earlier than to
+builtin | ex:other | ex:earlierThan | day | is related by earlier than to
+builtin | ex:other | ex:earlierThan | duration | is related by earlier than to
+builtin | ex:other | ex:earlierThan | other | is related by earlier than to
+builtin | ex:other | ex:hasOverlap | instant | is related by has overlap to
+builtin | ex:other | ex:hasOverlap | day | is related by has overlap to
+builtin | ex:other | ex:hasOverlap | duration | is related by has overlap to
+builtin | ex:other | ex:hasOverlap | other | is related by has overlap to
+builtin | ex:other | ex:doesNotOverlap | instant | is related by does not overlap to
+builtin | ex:other | ex:doesNotOverlap | day | is related by does not overlap to
+builtin | ex:other | ex:doesNotOverlap | duration | is related by does not overlap to
+builtin | ex:other | ex:doesNotOverlap | other | is related by does not overlap to
+builtin | ex:other | ex:containsDay | instant | is related by contains day to
+builtin | ex:other | ex:containsDay | day | is related by contains day to
+builtin | ex:other | ex:containsDay | duration | is related by contains day to
+builtin | ex:other | ex:containsDay | other | is related by contains day to
+builtin | ex:other | ex:matchesWindow | instant | is related by matches window to
+builtin | ex:other | ex:matchesWindow | day | is related by matches window to
+builtin | ex:other | ex:matchesWindow | duration | is related by matches window to
+builtin | ex:other | ex:matchesWindow | other | is related by matches window to
+builtin | ex:other | ex:areNear | instant | is related by are near to
+builtin | ex:other | ex:areNear | day | is related by are near to
+builtin | ex:other | ex:areNear | duration | is related by are near to
+builtin | ex:other | ex:areNear | other | is related by are near to
+builtin | ex:other | ex:withinRegion | instant | is related by within region to
+builtin | ex:other | ex:withinRegion | day | is related by within region to
+builtin | ex:other | ex:withinRegion | duration | is related by within region to
+builtin | ex:other | ex:withinRegion | other | is related by within region to
+builtin | ex:other | ex:bare | instant | is related by bare to
+builtin | ex:other | ex:bare | day | is related by bare to
+builtin | ex:other | ex:bare | duration | is related by bare to
+builtin | ex:other | ex:bare | other | is related by bare to
+profile | dateTime | eq | instant | are equal to
+profile | dateTime | eq | day | are equal to
+profile | dateTime | eq | duration | are equal to
+profile | dateTime | eq | other | are equal to
+profile | dateTime | neq | instant | are not equal to
+profile | dateTime | neq | day | are not equal to
+profile | dateTime | neq | duration | are not equal to
+profile | dateTime | neq | other | are not equal to
+profile | dateTime | gt | instant | are after
+profile | dateTime | gt | day | are after the end of
+profile | dateTime | gt | duration | are after
+profile | dateTime | gt | other | are after
+profile | dateTime | gteq | instant | are on or after
+profile | dateTime | gteq | day | are on or after the start of
+profile | dateTime | gteq | duration | are on or after
+profile | dateTime | gteq | other | are on or after
+profile | dateTime | lt | instant | are before
+profile | dateTime | lt | day | are before the start of
+profile | dateTime | lt | duration | are before
+profile | dateTime | lt | other | are before
+profile | dateTime | lteq | instant | are on or before
+profile | dateTime | lteq | day | are on or before the end of
+profile | dateTime | lteq | duration | are on or before
+profile | dateTime | lteq | other | are on or before
+profile | dateTime | isA | instant | are a kind of
+profile | dateTime | isA | day | are a kind of
+profile | dateTime | isA | duration | are a kind of
+profile | dateTime | isA | other | are a kind of
+profile | dateTime | hasPart | instant | have as a part
+profile | dateTime | hasPart | day | have as a part
+profile | dateTime | hasPart | duration | have as a part
+profile | dateTime | hasPart | other | have as a part
+profile | dateTime | isPartOf | instant | are part of
+profile | dateTime | isPartOf | day | are part of
+profile | dateTime | isPartOf | duration | are part of
+profile | dateTime | isPartOf | other | are part of
+profile | dateTime | isAllOf | instant | are all of
+profile | dateTime | isAllOf | day | are all of
+profile | dateTime | isAllOf | duration | are all of
+profile | dateTime | isAllOf | other | are all of
+profile | dateTime | isAnyOf | instant | are any of
+profile | dateTime | isAnyOf | day | are any of
+profile | dateTime | isAnyOf | duration | are any of
+profile | dateTime | isAnyOf | other | are any of
+profile | dateTime | isNoneOf | instant | are none of
+profile | dateTime | isNoneOf | day | are none of
+profile | dateTime | isNoneOf | duration | are none of
+profile | dateTime | isNoneOf | other | are none of
+profile | dateTime | odrl:lt | instant | are before
+profile | dateTime | odrl:lt | day | are before the start of
+profile | dateTime | odrl:lt | duration | are before
+profile | dateTime | odrl:lt | other | are before
+profile | dateTime | ex:near | instant | are related by near to
+profile | dateTime | ex:near | day | are related by near to
+profile | dateTime | ex:near | duration | are related by near to
+profile | dateTime | ex:near | other | are related by near to
+profile | dateTime | ex:earlierThan | instant | are earlier than
+profile | dateTime | ex:earlierThan | day | are earlier than
+profile | dateTime | ex:earlierThan | duration | are earlier than
+profile | dateTime | ex:earlierThan | other | are earlier than
+profile | dateTime | ex:hasOverlap | instant | have overlap with
+profile | dateTime | ex:hasOverlap | day | have overlap with
+profile | dateTime | ex:hasOverlap | duration | have overlap with
+profile | dateTime | ex:hasOverlap | other | have overlap with
+profile | dateTime | ex:doesNotOverlap | instant | do not overlap
+profile | dateTime | ex:doesNotOverlap | day | do not overlap
+profile | dateTime | ex:doesNotOverlap | duration | do not overlap
+profile | dateTime | ex:doesNotOverlap | other | do not overlap
+profile | dateTime | ex:containsDay | instant | contain
+profile | dateTime | ex:containsDay | day | contain
+profile | dateTime | ex:containsDay | duration | contain
+profile | dateTime | ex:containsDay | other | contain
+profile | dateTime | ex:matchesWindow | instant | match window
+profile | dateTime | ex:matchesWindow | day | match window
+profile | dateTime | ex:matchesWindow | duration | match window
+profile | dateTime | ex:matchesWindow | other | match window
+profile | dateTime | ex:areNear | instant | are near
+profile | dateTime | ex:areNear | day | are near
+profile | dateTime | ex:areNear | duration | are near
+profile | dateTime | ex:areNear | other | are near
+profile | dateTime | ex:withinRegion | instant | are within region
+profile | dateTime | ex:withinRegion | day | are within region
+profile | dateTime | ex:withinRegion | duration | are within region
+profile | dateTime | ex:withinRegion | other | are within region
+profile | dateTime | ex:bare | instant | are x
+profile | dateTime | ex:bare | day | are x
+profile | dateTime | ex:bare | duration | are x
+profile | dateTime | ex:bare | other | are x
+profile | odrl:dateTime | eq | instant | are equal to
+profile | odrl:dateTime | eq | day | are equal to
+profile | odrl:dateTime | eq | duration | are equal to
+profile | odrl:dateTime | eq | other | are equal to
+profile | odrl:dateTime | neq | instant | are not equal to
+profile | odrl:dateTime | neq | day | are not equal to
+profile | odrl:dateTime | neq | duration | are not equal to
+profile | odrl:dateTime | neq | other | are not equal to
+profile | odrl:dateTime | gt | instant | are after
+profile | odrl:dateTime | gt | day | are after the end of
+profile | odrl:dateTime | gt | duration | are after
+profile | odrl:dateTime | gt | other | are after
+profile | odrl:dateTime | gteq | instant | are on or after
+profile | odrl:dateTime | gteq | day | are on or after the start of
+profile | odrl:dateTime | gteq | duration | are on or after
+profile | odrl:dateTime | gteq | other | are on or after
+profile | odrl:dateTime | lt | instant | are before
+profile | odrl:dateTime | lt | day | are before the start of
+profile | odrl:dateTime | lt | duration | are before
+profile | odrl:dateTime | lt | other | are before
+profile | odrl:dateTime | lteq | instant | are on or before
+profile | odrl:dateTime | lteq | day | are on or before the end of
+profile | odrl:dateTime | lteq | duration | are on or before
+profile | odrl:dateTime | lteq | other | are on or before
+profile | odrl:dateTime | isA | instant | are a kind of
+profile | odrl:dateTime | isA | day | are a kind of
+profile | odrl:dateTime | isA | duration | are a kind of
+profile | odrl:dateTime | isA | other | are a kind of
+profile | odrl:dateTime | hasPart | instant | have as a part
+profile | odrl:dateTime | hasPart | day | have as a part
+profile | odrl:dateTime | hasPart | duration | have as a part
+profile | odrl:dateTime | hasPart | other | have as a part
+profile | odrl:dateTime | isPartOf | instant | are part of
+profile | odrl:dateTime | isPartOf | day | are part of
+profile | odrl:dateTime | isPartOf | duration | are part of
+profile | odrl:dateTime | isPartOf | other | are part of
+profile | odrl:dateTime | isAllOf | instant | are all of
+profile | odrl:dateTime | isAllOf | day | are all of
+profile | odrl:dateTime | isAllOf | duration | are all of
+profile | odrl:dateTime | isAllOf | other | are all of
+profile | odrl:dateTime | isAnyOf | instant | are any of
+profile | odrl:dateTime | isAnyOf | day | are any of
+profile | odrl:dateTime | isAnyOf | duration | are any of
+profile | odrl:dateTime | isAnyOf | other | are any of
+profile | odrl:dateTime | isNoneOf | instant | are none of
+profile | odrl:dateTime | isNoneOf | day | are none of
+profile | odrl:dateTime | isNoneOf | duration | are none of
+profile | odrl:dateTime | isNoneOf | other | are none of
+profile | odrl:dateTime | odrl:lt | instant | are before
+profile | odrl:dateTime | odrl:lt | day | are before the start of
+profile | odrl:dateTime | odrl:lt | duration | are before
+profile | odrl:dateTime | odrl:lt | other | are before
+profile | odrl:dateTime | ex:near | instant | are related by near to
+profile | odrl:dateTime | ex:near | day | are related by near to
+profile | odrl:dateTime | ex:near | duration | are related by near to
+profile | odrl:dateTime | ex:near | other | are related by near to
+profile | odrl:dateTime | ex:earlierThan | instant | are earlier than
+profile | odrl:dateTime | ex:earlierThan | day | are earlier than
+profile | odrl:dateTime | ex:earlierThan | duration | are earlier than
+profile | odrl:dateTime | ex:earlierThan | other | are earlier than
+profile | odrl:dateTime | ex:hasOverlap | instant | have overlap with
+profile | odrl:dateTime | ex:hasOverlap | day | have overlap with
+profile | odrl:dateTime | ex:hasOverlap | duration | have overlap with
+profile | odrl:dateTime | ex:hasOverlap | other | have overlap with
+profile | odrl:dateTime | ex:doesNotOverlap | instant | do not overlap
+profile | odrl:dateTime | ex:doesNotOverlap | day | do not overlap
+profile | odrl:dateTime | ex:doesNotOverlap | duration | do not overlap
+profile | odrl:dateTime | ex:doesNotOverlap | other | do not overlap
+profile | odrl:dateTime | ex:containsDay | instant | contain
+profile | odrl:dateTime | ex:containsDay | day | contain
+profile | odrl:dateTime | ex:containsDay | duration | contain
+profile | odrl:dateTime | ex:containsDay | other | contain
+profile | odrl:dateTime | ex:matchesWindow | instant | match window
+profile | odrl:dateTime | ex:matchesWindow | day | match window
+profile | odrl:dateTime | ex:matchesWindow | duration | match window
+profile | odrl:dateTime | ex:matchesWindow | other | match window
+profile | odrl:dateTime | ex:areNear | instant | are near
+profile | odrl:dateTime | ex:areNear | day | are near
+profile | odrl:dateTime | ex:areNear | duration | are near
+profile | odrl:dateTime | ex:areNear | other | are near
+profile | odrl:dateTime | ex:withinRegion | instant | are within region
+profile | odrl:dateTime | ex:withinRegion | day | are within region
+profile | odrl:dateTime | ex:withinRegion | duration | are within region
+profile | odrl:dateTime | ex:withinRegion | other | are within region
+profile | odrl:dateTime | ex:bare | instant | are x
+profile | odrl:dateTime | ex:bare | day | are x
+profile | odrl:dateTime | ex:bare | duration | are x
+profile | odrl:dateTime | ex:bare | other | are x
+profile | timeInterval | eq | instant | is equal to
+profile | timeInterval | eq | day | is equal to
+profile | timeInterval | eq | duration | is equal to
+profile | timeInterval | eq | other | is equal to
+profile | timeInterval | neq | instant | is not equal to
+profile | timeInterval | neq | day | is not equal to
+profile | timeInterval | neq | duration | is not equal to
+profile | timeInterval | neq | other | is not equal to
+profile | timeInterval | gt | instant | is greater than
+profile | timeInterval | gt | day | is greater than
+profile | timeInterval | gt | duration | is greater than
+profile | timeInterval | gt | other | is greater than
+profile | timeInterval | gteq | instant | is at least
+profile | timeInterval | gteq | day | is at least
+profile | timeInterval | gteq | duration | is at least
+profile | timeInterval | gteq | other | is at least
+profile | timeInterval | lt | instant | is less than
+profile | timeInterval | lt | day | is less than
+profile | timeInterval | lt | duration | is less than
+profile | timeInterval | lt | other | is less than
+profile | timeInterval | lteq | instant | is at most
+profile | timeInterval | lteq | day | is at most
+profile | timeInterval | lteq | duration | is at most
+profile | timeInterval | lteq | other | is at most
+profile | timeInterval | isA | instant | is a kind of
+profile | timeInterval | isA | day | is a kind of
+profile | timeInterval | isA | duration | is a kind of
+profile | timeInterval | isA | other | is a kind of
+profile | timeInterval | hasPart | instant | has as a part
+profile | timeInterval | hasPart | day | has as a part
+profile | timeInterval | hasPart | duration | has as a part
+profile | timeInterval | hasPart | other | has as a part
+profile | timeInterval | isPartOf | instant | is part of
+profile | timeInterval | isPartOf | day | is part of
+profile | timeInterval | isPartOf | duration | is part of
+profile | timeInterval | isPartOf | other | is part of
+profile | timeInterval | isAllOf | instant | is all of
+profile | timeInterval | isAllOf | day | is all of
+profile | timeInterval | isAllOf | duration | is all of
+profile | timeInterval | isAllOf | other | is all of
+profile | timeInterval | isAnyOf | instant | is any of
+profile | timeInterval | isAnyOf | day | is any of
+profile | timeInterval | isAnyOf | duration | is any of
+profile | timeInterval | isAnyOf | other | is any of
+profile | timeInterval | isNoneOf | instant | is none of
+profile | timeInterval | isNoneOf | day | is none of
+profile | timeInterval | isNoneOf | duration | is none of
+profile | timeInterval | isNoneOf | other | is none of
+profile | timeInterval | odrl:lt | instant | is less than
+profile | timeInterval | odrl:lt | day | is less than
+profile | timeInterval | odrl:lt | duration | is less than
+profile | timeInterval | odrl:lt | other | is less than
+profile | timeInterval | ex:near | instant | is related by near to
+profile | timeInterval | ex:near | day | is related by near to
+profile | timeInterval | ex:near | duration | is related by near to
+profile | timeInterval | ex:near | other | is related by near to
+profile | timeInterval | ex:earlierThan | instant | is earlier than
+profile | timeInterval | ex:earlierThan | day | is earlier than
+profile | timeInterval | ex:earlierThan | duration | is earlier than
+profile | timeInterval | ex:earlierThan | other | is earlier than
+profile | timeInterval | ex:hasOverlap | instant | has overlap with
+profile | timeInterval | ex:hasOverlap | day | has overlap with
+profile | timeInterval | ex:hasOverlap | duration | has overlap with
+profile | timeInterval | ex:hasOverlap | other | has overlap with
+profile | timeInterval | ex:doesNotOverlap | instant | does not overlap
+profile | timeInterval | ex:doesNotOverlap | day | does not overlap
+profile | timeInterval | ex:doesNotOverlap | duration | does not overlap
+profile | timeInterval | ex:doesNotOverlap | other | does not overlap
+profile | timeInterval | ex:containsDay | instant | contains
+profile | timeInterval | ex:containsDay | day | contains
+profile | timeInterval | ex:containsDay | duration | contains
+profile | timeInterval | ex:containsDay | other | contains
+profile | timeInterval | ex:matchesWindow | instant | matches window
+profile | timeInterval | ex:matchesWindow | day | matches window
+profile | timeInterval | ex:matchesWindow | duration | matches window
+profile | timeInterval | ex:matchesWindow | other | matches window
+profile | timeInterval | ex:areNear | instant | are near
+profile | timeInterval | ex:areNear | day | are near
+profile | timeInterval | ex:areNear | duration | are near
+profile | timeInterval | ex:areNear | other | are near
+profile | timeInterval | ex:withinRegion | instant | is within region
+profile | timeInterval | ex:withinRegion | day | is within region
+profile | timeInterval | ex:withinRegion | duration | is within region
+profile | timeInterval | ex:withinRegion | other | is within region
+profile | timeInterval | ex:bare | instant | is x
+profile | timeInterval | ex:bare | day | is x
+profile | timeInterval | ex:bare | duration | is x
+profile | timeInterval | ex:bare | other | is x
+profile | delayPeriod | eq | instant | is equal to
+profile | delayPeriod | eq | day | is equal to
+profile | delayPeriod | eq | duration | is equal to
+profile | delayPeriod | eq | other | is equal to
+profile | delayPeriod | neq | instant | is not equal to
+profile | delayPeriod | neq | day | is not equal to
+profile | delayPeriod | neq | duration | is not equal to
+profile | delayPeriod | neq | other | is not equal to
+profile | delayPeriod | gt | instant | is greater than
+profile | delayPeriod | gt | day | is greater than
+profile | delayPeriod | gt | duration | is greater than
+profile | delayPeriod | gt | other | is greater than
+profile | delayPeriod | gteq | instant | is at least
+profile | delayPeriod | gteq | day | is at least
+profile | delayPeriod | gteq | duration | is at least
+profile | delayPeriod | gteq | other | is at least
+profile | delayPeriod | lt | instant | is less than
+profile | delayPeriod | lt | day | is less than
+profile | delayPeriod | lt | duration | is less than
+profile | delayPeriod | lt | other | is less than
+profile | delayPeriod | lteq | instant | is at most
+profile | delayPeriod | lteq | day | is at most
+profile | delayPeriod | lteq | duration | is at most
+profile | delayPeriod | lteq | other | is at most
+profile | delayPeriod | isA | instant | is a kind of
+profile | delayPeriod | isA | day | is a kind of
+profile | delayPeriod | isA | duration | is a kind of
+profile | delayPeriod | isA | other | is a kind of
+profile | delayPeriod | hasPart | instant | has as a part
+profile | delayPeriod | hasPart | day | has as a part
+profile | delayPeriod | hasPart | duration | has as a part
+profile | delayPeriod | hasPart | other | has as a part
+profile | delayPeriod | isPartOf | instant | is part of
+profile | delayPeriod | isPartOf | day | is part of
+profile | delayPeriod | isPartOf | duration | is part of
+profile | delayPeriod | isPartOf | other | is part of
+profile | delayPeriod | isAllOf | instant | is all of
+profile | delayPeriod | isAllOf | day | is all of
+profile | delayPeriod | isAllOf | duration | is all of
+profile | delayPeriod | isAllOf | other | is all of
+profile | delayPeriod | isAnyOf | instant | is any of
+profile | delayPeriod | isAnyOf | day | is any of
+profile | delayPeriod | isAnyOf | duration | is any of
+profile | delayPeriod | isAnyOf | other | is any of
+profile | delayPeriod | isNoneOf | instant | is none of
+profile | delayPeriod | isNoneOf | day | is none of
+profile | delayPeriod | isNoneOf | duration | is none of
+profile | delayPeriod | isNoneOf | other | is none of
+profile | delayPeriod | odrl:lt | instant | is less than
+profile | delayPeriod | odrl:lt | day | is less than
+profile | delayPeriod | odrl:lt | duration | is less than
+profile | delayPeriod | odrl:lt | other | is less than
+profile | delayPeriod | ex:near | instant | is related by near to
+profile | delayPeriod | ex:near | day | is related by near to
+profile | delayPeriod | ex:near | duration | is related by near to
+profile | delayPeriod | ex:near | other | is related by near to
+profile | delayPeriod | ex:earlierThan | instant | is earlier than
+profile | delayPeriod | ex:earlierThan | day | is earlier than
+profile | delayPeriod | ex:earlierThan | duration | is earlier than
+profile | delayPeriod | ex:earlierThan | other | is earlier than
+profile | delayPeriod | ex:hasOverlap | instant | has overlap with
+profile | delayPeriod | ex:hasOverlap | day | has overlap with
+profile | delayPeriod | ex:hasOverlap | duration | has overlap with
+profile | delayPeriod | ex:hasOverlap | other | has overlap with
+profile | delayPeriod | ex:doesNotOverlap | instant | does not overlap
+profile | delayPeriod | ex:doesNotOverlap | day | does not overlap
+profile | delayPeriod | ex:doesNotOverlap | duration | does not overlap
+profile | delayPeriod | ex:doesNotOverlap | other | does not overlap
+profile | delayPeriod | ex:containsDay | instant | contains
+profile | delayPeriod | ex:containsDay | day | contains
+profile | delayPeriod | ex:containsDay | duration | contains
+profile | delayPeriod | ex:containsDay | other | contains
+profile | delayPeriod | ex:matchesWindow | instant | matches window
+profile | delayPeriod | ex:matchesWindow | day | matches window
+profile | delayPeriod | ex:matchesWindow | duration | matches window
+profile | delayPeriod | ex:matchesWindow | other | matches window
+profile | delayPeriod | ex:areNear | instant | are near
+profile | delayPeriod | ex:areNear | day | are near
+profile | delayPeriod | ex:areNear | duration | are near
+profile | delayPeriod | ex:areNear | other | are near
+profile | delayPeriod | ex:withinRegion | instant | is within region
+profile | delayPeriod | ex:withinRegion | day | is within region
+profile | delayPeriod | ex:withinRegion | duration | is within region
+profile | delayPeriod | ex:withinRegion | other | is within region
+profile | delayPeriod | ex:bare | instant | is x
+profile | delayPeriod | ex:bare | day | is x
+profile | delayPeriod | ex:bare | duration | is x
+profile | delayPeriod | ex:bare | other | is x
+profile | elapsedTime | eq | instant | is equal to
+profile | elapsedTime | eq | day | is equal to
+profile | elapsedTime | eq | duration | is equal to
+profile | elapsedTime | eq | other | is equal to
+profile | elapsedTime | neq | instant | is not equal to
+profile | elapsedTime | neq | day | is not equal to
+profile | elapsedTime | neq | duration | is not equal to
+profile | elapsedTime | neq | other | is not equal to
+profile | elapsedTime | gt | instant | is greater than
+profile | elapsedTime | gt | day | is greater than
+profile | elapsedTime | gt | duration | is greater than
+profile | elapsedTime | gt | other | is greater than
+profile | elapsedTime | gteq | instant | is at least
+profile | elapsedTime | gteq | day | is at least
+profile | elapsedTime | gteq | duration | is at least
+profile | elapsedTime | gteq | other | is at least
+profile | elapsedTime | lt | instant | is less than
+profile | elapsedTime | lt | day | is less than
+profile | elapsedTime | lt | duration | is less than
+profile | elapsedTime | lt | other | is less than
+profile | elapsedTime | lteq | instant | is at most
+profile | elapsedTime | lteq | day | is at most
+profile | elapsedTime | lteq | duration | is at most
+profile | elapsedTime | lteq | other | is at most
+profile | elapsedTime | isA | instant | is a kind of
+profile | elapsedTime | isA | day | is a kind of
+profile | elapsedTime | isA | duration | is a kind of
+profile | elapsedTime | isA | other | is a kind of
+profile | elapsedTime | hasPart | instant | has as a part
+profile | elapsedTime | hasPart | day | has as a part
+profile | elapsedTime | hasPart | duration | has as a part
+profile | elapsedTime | hasPart | other | has as a part
+profile | elapsedTime | isPartOf | instant | is part of
+profile | elapsedTime | isPartOf | day | is part of
+profile | elapsedTime | isPartOf | duration | is part of
+profile | elapsedTime | isPartOf | other | is part of
+profile | elapsedTime | isAllOf | instant | is all of
+profile | elapsedTime | isAllOf | day | is all of
+profile | elapsedTime | isAllOf | duration | is all of
+profile | elapsedTime | isAllOf | other | is all of
+profile | elapsedTime | isAnyOf | instant | is any of
+profile | elapsedTime | isAnyOf | day | is any of
+profile | elapsedTime | isAnyOf | duration | is any of
+profile | elapsedTime | isAnyOf | other | is any of
+profile | elapsedTime | isNoneOf | instant | is none of
+profile | elapsedTime | isNoneOf | day | is none of
+profile | elapsedTime | isNoneOf | duration | is none of
+profile | elapsedTime | isNoneOf | other | is none of
+profile | elapsedTime | odrl:lt | instant | is less than
+profile | elapsedTime | odrl:lt | day | is less than
+profile | elapsedTime | odrl:lt | duration | is less than
+profile | elapsedTime | odrl:lt | other | is less than
+profile | elapsedTime | ex:near | instant | is related by near to
+profile | elapsedTime | ex:near | day | is related by near to
+profile | elapsedTime | ex:near | duration | is related by near to
+profile | elapsedTime | ex:near | other | is related by near to
+profile | elapsedTime | ex:earlierThan | instant | is earlier than
+profile | elapsedTime | ex:earlierThan | day | is earlier than
+profile | elapsedTime | ex:earlierThan | duration | is earlier than
+profile | elapsedTime | ex:earlierThan | other | is earlier than
+profile | elapsedTime | ex:hasOverlap | instant | has overlap with
+profile | elapsedTime | ex:hasOverlap | day | has overlap with
+profile | elapsedTime | ex:hasOverlap | duration | has overlap with
+profile | elapsedTime | ex:hasOverlap | other | has overlap with
+profile | elapsedTime | ex:doesNotOverlap | instant | does not overlap
+profile | elapsedTime | ex:doesNotOverlap | day | does not overlap
+profile | elapsedTime | ex:doesNotOverlap | duration | does not overlap
+profile | elapsedTime | ex:doesNotOverlap | other | does not overlap
+profile | elapsedTime | ex:containsDay | instant | contains
+profile | elapsedTime | ex:containsDay | day | contains
+profile | elapsedTime | ex:containsDay | duration | contains
+profile | elapsedTime | ex:containsDay | other | contains
+profile | elapsedTime | ex:matchesWindow | instant | matches window
+profile | elapsedTime | ex:matchesWindow | day | matches window
+profile | elapsedTime | ex:matchesWindow | duration | matches window
+profile | elapsedTime | ex:matchesWindow | other | matches window
+profile | elapsedTime | ex:areNear | instant | are near
+profile | elapsedTime | ex:areNear | day | are near
+profile | elapsedTime | ex:areNear | duration | are near
+profile | elapsedTime | ex:areNear | other | are near
+profile | elapsedTime | ex:withinRegion | instant | is within region
+profile | elapsedTime | ex:withinRegion | day | is within region
+profile | elapsedTime | ex:withinRegion | duration | is within region
+profile | elapsedTime | ex:withinRegion | other | is within region
+profile | elapsedTime | ex:bare | instant | is x
+profile | elapsedTime | ex:bare | day | is x
+profile | elapsedTime | ex:bare | duration | is x
+profile | elapsedTime | ex:bare | other | is x
+profile | count | eq | instant | is equal to
+profile | count | eq | day | is equal to
+profile | count | eq | duration | is equal to
+profile | count | eq | other | is equal to
+profile | count | neq | instant | is not equal to
+profile | count | neq | day | is not equal to
+profile | count | neq | duration | is not equal to
+profile | count | neq | other | is not equal to
+profile | count | gt | instant | is greater than
+profile | count | gt | day | is greater than
+profile | count | gt | duration | is greater than
+profile | count | gt | other | is greater than
+profile | count | gteq | instant | is at least
+profile | count | gteq | day | is at least
+profile | count | gteq | duration | is at least
+profile | count | gteq | other | is at least
+profile | count | lt | instant | is less than
+profile | count | lt | day | is less than
+profile | count | lt | duration | is less than
+profile | count | lt | other | is less than
+profile | count | lteq | instant | is at most
+profile | count | lteq | day | is at most
+profile | count | lteq | duration | is at most
+profile | count | lteq | other | is at most
+profile | count | isA | instant | is a kind of
+profile | count | isA | day | is a kind of
+profile | count | isA | duration | is a kind of
+profile | count | isA | other | is a kind of
+profile | count | hasPart | instant | has as a part
+profile | count | hasPart | day | has as a part
+profile | count | hasPart | duration | has as a part
+profile | count | hasPart | other | has as a part
+profile | count | isPartOf | instant | is part of
+profile | count | isPartOf | day | is part of
+profile | count | isPartOf | duration | is part of
+profile | count | isPartOf | other | is part of
+profile | count | isAllOf | instant | is all of
+profile | count | isAllOf | day | is all of
+profile | count | isAllOf | duration | is all of
+profile | count | isAllOf | other | is all of
+profile | count | isAnyOf | instant | is any of
+profile | count | isAnyOf | day | is any of
+profile | count | isAnyOf | duration | is any of
+profile | count | isAnyOf | other | is any of
+profile | count | isNoneOf | instant | is none of
+profile | count | isNoneOf | day | is none of
+profile | count | isNoneOf | duration | is none of
+profile | count | isNoneOf | other | is none of
+profile | count | odrl:lt | instant | is less than
+profile | count | odrl:lt | day | is less than
+profile | count | odrl:lt | duration | is less than
+profile | count | odrl:lt | other | is less than
+profile | count | ex:near | instant | is related by near to
+profile | count | ex:near | day | is related by near to
+profile | count | ex:near | duration | is related by near to
+profile | count | ex:near | other | is related by near to
+profile | count | ex:earlierThan | instant | is earlier than
+profile | count | ex:earlierThan | day | is earlier than
+profile | count | ex:earlierThan | duration | is earlier than
+profile | count | ex:earlierThan | other | is earlier than
+profile | count | ex:hasOverlap | instant | has overlap with
+profile | count | ex:hasOverlap | day | has overlap with
+profile | count | ex:hasOverlap | duration | has overlap with
+profile | count | ex:hasOverlap | other | has overlap with
+profile | count | ex:doesNotOverlap | instant | does not overlap
+profile | count | ex:doesNotOverlap | day | does not overlap
+profile | count | ex:doesNotOverlap | duration | does not overlap
+profile | count | ex:doesNotOverlap | other | does not overlap
+profile | count | ex:containsDay | instant | contains
+profile | count | ex:containsDay | day | contains
+profile | count | ex:containsDay | duration | contains
+profile | count | ex:containsDay | other | contains
+profile | count | ex:matchesWindow | instant | matches window
+profile | count | ex:matchesWindow | day | matches window
+profile | count | ex:matchesWindow | duration | matches window
+profile | count | ex:matchesWindow | other | matches window
+profile | count | ex:areNear | instant | are near
+profile | count | ex:areNear | day | are near
+profile | count | ex:areNear | duration | are near
+profile | count | ex:areNear | other | are near
+profile | count | ex:withinRegion | instant | is within region
+profile | count | ex:withinRegion | day | is within region
+profile | count | ex:withinRegion | duration | is within region
+profile | count | ex:withinRegion | other | is within region
+profile | count | ex:bare | instant | is x
+profile | count | ex:bare | day | is x
+profile | count | ex:bare | duration | is x
+profile | count | ex:bare | other | is x
+profile | ex:moment | eq | instant | is equal to
+profile | ex:moment | eq | day | is equal to
+profile | ex:moment | eq | duration | is equal to
+profile | ex:moment | eq | other | is equal to
+profile | ex:moment | neq | instant | is not equal to
+profile | ex:moment | neq | day | is not equal to
+profile | ex:moment | neq | duration | is not equal to
+profile | ex:moment | neq | other | is not equal to
+profile | ex:moment | gt | instant | is greater than
+profile | ex:moment | gt | day | is greater than
+profile | ex:moment | gt | duration | is greater than
+profile | ex:moment | gt | other | is greater than
+profile | ex:moment | gteq | instant | is at least
+profile | ex:moment | gteq | day | is at least
+profile | ex:moment | gteq | duration | is at least
+profile | ex:moment | gteq | other | is at least
+profile | ex:moment | lt | instant | is less than
+profile | ex:moment | lt | day | is less than
+profile | ex:moment | lt | duration | is less than
+profile | ex:moment | lt | other | is less than
+profile | ex:moment | lteq | instant | is at most
+profile | ex:moment | lteq | day | is at most
+profile | ex:moment | lteq | duration | is at most
+profile | ex:moment | lteq | other | is at most
+profile | ex:moment | isA | instant | is a kind of
+profile | ex:moment | isA | day | is a kind of
+profile | ex:moment | isA | duration | is a kind of
+profile | ex:moment | isA | other | is a kind of
+profile | ex:moment | hasPart | instant | has as a part
+profile | ex:moment | hasPart | day | has as a part
+profile | ex:moment | hasPart | duration | has as a part
+profile | ex:moment | hasPart | other | has as a part
+profile | ex:moment | isPartOf | instant | is part of
+profile | ex:moment | isPartOf | day | is part of
+profile | ex:moment | isPartOf | duration | is part of
+profile | ex:moment | isPartOf | other | is part of
+profile | ex:moment | isAllOf | instant | is all of
+profile | ex:moment | isAllOf | day | is all of
+profile | ex:moment | isAllOf | duration | is all of
+profile | ex:moment | isAllOf | other | is all of
+profile | ex:moment | isAnyOf | instant | is any of
+profile | ex:moment | isAnyOf | day | is any of
+profile | ex:moment | isAnyOf | duration | is any of
+profile | ex:moment | isAnyOf | other | is any of
+profile | ex:moment | isNoneOf | instant | is none of
+profile | ex:moment | isNoneOf | day | is none of
+profile | ex:moment | isNoneOf | duration | is none of
+profile | ex:moment | isNoneOf | other | is none of
+profile | ex:moment | odrl:lt | instant | is less than
+profile | ex:moment | odrl:lt | day | is less than
+profile | ex:moment | odrl:lt | duration | is less than
+profile | ex:moment | odrl:lt | other | is less than
+profile | ex:moment | ex:near | instant | is related by near to
+profile | ex:moment | ex:near | day | is related by near to
+profile | ex:moment | ex:near | duration | is related by near to
+profile | ex:moment | ex:near | other | is related by near to
+profile | ex:moment | ex:earlierThan | instant | is earlier than
+profile | ex:moment | ex:earlierThan | day | is earlier than
+profile | ex:moment | ex:earlierThan | duration | is earlier than
+profile | ex:moment | ex:earlierThan | other | is earlier than
+profile | ex:moment | ex:hasOverlap | instant | has overlap with
+profile | ex:moment | ex:hasOverlap | day | has overlap with
+profile | ex:moment | ex:hasOverlap | duration | has overlap with
+profile | ex:moment | ex:hasOverlap | other | has overlap with
+profile | ex:moment | ex:doesNotOverlap | instant | does not overlap
+profile | ex:moment | ex:doesNotOverlap | day | does not overlap
+profile | ex:moment | ex:doesNotOverlap | duration | does not overlap
+profile | ex:moment | ex:doesNotOverlap | other | does not overlap
+profile | ex:moment | ex:containsDay | instant | contains
+profile | ex:moment | ex:containsDay | day | contains
+profile | ex:moment | ex:containsDay | duration | contains
+profile | ex:moment | ex:containsDay | other | contains
+profile | ex:moment | ex:matchesWindow | instant | matches window
+profile | ex:moment | ex:matchesWindow | day | matches window
+profile | ex:moment | ex:matchesWindow | duration | matches window
+profile | ex:moment | ex:matchesWindow | other | matches window
+profile | ex:moment | ex:areNear | instant | are near
+profile | ex:moment | ex:areNear | day | are near
+profile | ex:moment | ex:areNear | duration | are near
+profile | ex:moment | ex:areNear | other | are near
+profile | ex:moment | ex:withinRegion | instant | is within region
+profile | ex:moment | ex:withinRegion | day | is within region
+profile | ex:moment | ex:withinRegion | duration | is within region
+profile | ex:moment | ex:withinRegion | other | is within region
+profile | ex:moment | ex:bare | instant | is x
+profile | ex:moment | ex:bare | day | is x
+profile | ex:moment | ex:bare | duration | is x
+profile | ex:moment | ex:bare | other | is x
+profile | ex:other | eq | instant | is equal to
+profile | ex:other | eq | day | is equal to
+profile | ex:other | eq | duration | is equal to
+profile | ex:other | eq | other | is equal to
+profile | ex:other | neq | instant | is not equal to
+profile | ex:other | neq | day | is not equal to
+profile | ex:other | neq | duration | is not equal to
+profile | ex:other | neq | other | is not equal to
+profile | ex:other | gt | instant | is greater than
+profile | ex:other | gt | day | is greater than
+profile | ex:other | gt | duration | is greater than
+profile | ex:other | gt | other | is greater than
+profile | ex:other | gteq | instant | is at least
+profile | ex:other | gteq | day | is at least
+profile | ex:other | gteq | duration | is at least
+profile | ex:other | gteq | other | is at least
+profile | ex:other | lt | instant | is less than
+profile | ex:other | lt | day | is less than
+profile | ex:other | lt | duration | is less than
+profile | ex:other | lt | other | is less than
+profile | ex:other | lteq | instant | is at most
+profile | ex:other | lteq | day | is at most
+profile | ex:other | lteq | duration | is at most
+profile | ex:other | lteq | other | is at most
+profile | ex:other | isA | instant | is a kind of
+profile | ex:other | isA | day | is a kind of
+profile | ex:other | isA | duration | is a kind of
+profile | ex:other | isA | other | is a kind of
+profile | ex:other | hasPart | instant | has as a part
+profile | ex:other | hasPart | day | has as a part
+profile | ex:other | hasPart | duration | has as a part
+profile | ex:other | hasPart | other | has as a part
+profile | ex:other | isPartOf | instant | is part of
+profile | ex:other | isPartOf | day | is part of
+profile | ex:other | isPartOf | duration | is part of
+profile | ex:other | isPartOf | other | is part of
+profile | ex:other | isAllOf | instant | is all of
+profile | ex:other | isAllOf | day | is all of
+profile | ex:other | isAllOf | duration | is all of
+profile | ex:other | isAllOf | other | is all of
+profile | ex:other | isAnyOf | instant | is any of
+profile | ex:other | isAnyOf | day | is any of
+profile | ex:other | isAnyOf | duration | is any of
+profile | ex:other | isAnyOf | other | is any of
+profile | ex:other | isNoneOf | instant | is none of
+profile | ex:other | isNoneOf | day | is none of
+profile | ex:other | isNoneOf | duration | is none of
+profile | ex:other | isNoneOf | other | is none of
+profile | ex:other | odrl:lt | instant | is less than
+profile | ex:other | odrl:lt | day | is less than
+profile | ex:other | odrl:lt | duration | is less than
+profile | ex:other | odrl:lt | other | is less than
+profile | ex:other | ex:near | instant | is related by near to
+profile | ex:other | ex:near | day | is related by near to
+profile | ex:other | ex:near | duration | is related by near to
+profile | ex:other | ex:near | other | is related by near to
+profile | ex:other | ex:earlierThan | instant | is earlier than
+profile | ex:other | ex:earlierThan | day | is earlier than
+profile | ex:other | ex:earlierThan | duration | is earlier than
+profile | ex:other | ex:earlierThan | other | is earlier than
+profile | ex:other | ex:hasOverlap | instant | has overlap with
+profile | ex:other | ex:hasOverlap | day | has overlap with
+profile | ex:other | ex:hasOverlap | duration | has overlap with
+profile | ex:other | ex:hasOverlap | other | has overlap with
+profile | ex:other | ex:doesNotOverlap | instant | does not overlap
+profile | ex:other | ex:doesNotOverlap | day | does not overlap
+profile | ex:other | ex:doesNotOverlap | duration | does not overlap
+profile | ex:other | ex:doesNotOverlap | other | does not overlap
+profile | ex:other | ex:containsDay | instant | contains
+profile | ex:other | ex:containsDay | day | contains
+profile | ex:other | ex:containsDay | duration | contains
+profile | ex:other | ex:containsDay | other | contains
+profile | ex:other | ex:matchesWindow | instant | matches window
+profile | ex:other | ex:matchesWindow | day | matches window
+profile | ex:other | ex:matchesWindow | duration | matches window
+profile | ex:other | ex:matchesWindow | other | matches window
+profile | ex:other | ex:areNear | instant | are near
+profile | ex:other | ex:areNear | day | are near
+profile | ex:other | ex:areNear | duration | are near
+profile | ex:other | ex:areNear | other | are near
+profile | ex:other | ex:withinRegion | instant | is within region
+profile | ex:other | ex:withinRegion | day | is within region
+profile | ex:other | ex:withinRegion | duration | is within region
+profile | ex:other | ex:withinRegion | other | is within region
+profile | ex:other | ex:bare | instant | is x
+profile | ex:other | ex:bare | day | is x
+profile | ex:other | ex:bare | duration | is x
+profile | ex:other | ex:bare | other | is x
