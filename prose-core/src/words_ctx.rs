@@ -105,23 +105,27 @@ impl<'a> WordCtx<'a> {
 
     /// An operator as the verb phrase that follows `left`. A label that is
     /// already a verb phrase ("Has part") is kept; otherwise it follows
-    /// "is" ("Greater than" reads "is greater than").
+    /// "is" ("Greater than" reads "is greater than"). The verb agrees in
+    /// number with the subject: when the subject is the built-in plural noun
+    /// phrase ("the date and time"), "is" reads "are", "has" "have", and so
+    /// on, for a profile label as for a built-in phrase.
     pub(crate) fn operator_for(&self, left: &str, op: &str, date: bool) -> String {
+        // Plural only when the noun phrase used is the built-in one.
+        let plural =
+            self.worded(left, TermKind::LeftOperand).is_none() && words::plural_operand(left);
         match self.worded(op, TermKind::Operator) {
             Some(label) => {
                 let label = lower_first(&label);
+                if plural {
+                    return words::plural_label(&label);
+                }
                 let verb = label.split_whitespace().next().unwrap_or("");
                 match verb {
                     "is" | "has" | "are" | "does" | "contains" | "matches" => label,
                     _ => format!("is {label}"),
                 }
             }
-            None => {
-                // Plural only when the noun phrase used is the built-in one.
-                let plural = self.worded(left, TermKind::LeftOperand).is_none()
-                    && words::plural_operand(left);
-                words::operator_phrase(left, op, plural, date)
-            }
+            None => words::operator_phrase(left, op, plural, date),
         }
     }
 

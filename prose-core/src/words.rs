@@ -207,14 +207,36 @@ pub fn operator_for_date(left: &str, op: &str) -> String {
     operator_phrase(left, op, plural_operand(left), true)
 }
 
-/// A leading "is" becomes "are" and "has" becomes "have".
+/// A leading "is" becomes "are", "has" "have", "does" "do", "contains"
+/// "contain" and "matches" "match". Anything else is kept.
 fn plural_verb(phrase: String) -> String {
-    if let Some(rest) = phrase.strip_prefix("is ") {
-        format!("are {rest}")
-    } else if let Some(rest) = phrase.strip_prefix("has ") {
-        format!("have {rest}")
-    } else {
-        phrase
+    let (verb, rest) = match phrase.split_once(' ') {
+        Some((v, r)) => (v, Some(r)),
+        None => (phrase.as_str(), None),
+    };
+    let plural = match verb {
+        "is" => "are",
+        "has" => "have",
+        "does" => "do",
+        "contains" => "contain",
+        "matches" => "match",
+        _ => return phrase,
+    };
+    match rest {
+        Some(r) => format!("{plural} {r}"),
+        None => plural.to_string(),
+    }
+}
+
+/// A profile operator label (already lower-cased, with its verb) made plural
+/// to agree with a plural subject. A label that does not start with a verb
+/// follows "are" ("earlier than" reads "are earlier than"); "are" is kept.
+pub(crate) fn plural_label(label: &str) -> String {
+    let verb = label.split_whitespace().next().unwrap_or("");
+    match verb {
+        "is" | "has" | "does" | "contains" | "matches" => plural_verb(label.to_string()),
+        "are" => label.to_string(),
+        _ => format!("are {label}"),
     }
 }
 

@@ -1225,5 +1225,9 @@ async fn profile_operator_options_agree_with_the_subject() {
     .unwrap();
     let cfg = EditConfig::default().with_wording(Rc::new(Wording::new().with_profile(profile)));
     let html = render_view(props(doc_of("offer"), EditMode::Edit, cfg)).await;
-    assert!(html.contains("are earlier than (ex:earlierThan)"), "{html}");
+    // The offer fixture does not bind `ex`, so the raw value is the full IRI.
+    assert!(
+        html.contains("are earlier than (https://example.org/odrl/profile/research/earlierThan)"),
+        "{html}"
+    );
 }
