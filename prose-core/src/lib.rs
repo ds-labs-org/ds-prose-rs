@@ -39,10 +39,14 @@ mod words_ctx;
 /// same phrases for the same terms.
 pub mod wording {
     pub use crate::words::ValueShape;
-    pub use crate::words::{
-        action, humanise, join, local_name, operand, operator, operator_for, operator_for_date,
-        short_iri,
-    };
+    pub use crate::words::{action, humanise, join, local_name, operand, operator, short_iri};
+    pub use crate::words_ctx::OperatorQuery;
+
+    /// The one entry point for operator wording: the phrase that follows the
+    /// left operand of `query`. See [`OperatorQuery`].
+    pub fn operator_phrase(query: &OperatorQuery<'_>) -> String {
+        crate::words_ctx::operator_phrase(query)
+    }
 
     /// The (term, phrase) table [`operand`] draws on.
     pub fn known_left_operands() -> &'static [(&'static str, &'static str)] {
@@ -60,26 +64,49 @@ pub mod wording {
         crate::words_ctx::gloss(wording, prefixes, written)
     }
 
-    /// [`operator_for`], worded with the loaded profiles: an operator a
-    /// profile declares (outside ODRL's namespace) reads with its label,
-    /// e.g. "is within region"; any other as [`operator_for`] phrases it.
+    /// The phrase that follows `left`: a date and time reads "are before"
+    /// rather than "are less than", a duration stays a quantity, and the verb
+    /// agrees in number with the operand's noun phrase.
+    #[deprecated(since = "0.5.0", note = "use operator_phrase(&OperatorQuery)")]
+    pub fn operator_for(left: &str, op: &str) -> String {
+        operator_phrase(&OperatorQuery::new(left, op))
+    }
+
+    /// [`operator_for`] when the one right operand is a date without a time
+    /// of day: a bound on a whole day says whether it means the start or the
+    /// end.
+    #[deprecated(since = "0.5.0", note = "use operator_phrase(&OperatorQuery)")]
+    pub fn operator_for_date(left: &str, op: &str) -> String {
+        operator_phrase(&OperatorQuery::new(left, op).value(ValueShape::DateOnly))
+    }
+
+    /// [`operator_phrase`] with the loaded profiles: an operator a profile
+    /// declares (outside ODRL's namespace) reads with its label, e.g. "is
+    /// within region".
+    #[deprecated(since = "0.5.0", note = "use operator_phrase(&OperatorQuery)")]
     pub fn operator_with(
         wording: &crate::profile::Wording,
         prefixes: &crate::profile::Prefixes,
         left: &str,
         op: &str,
     ) -> String {
-        crate::words_ctx::operator_with(wording, prefixes, left, op)
+        operator_phrase(&OperatorQuery::new(left, op).wording(wording, prefixes))
     }
 
-    /// [`operator_for_date`], worded with the loaded profiles.
+    /// [`operator_with`] when the one right operand is a date without a
+    /// time of day.
+    #[deprecated(since = "0.5.0", note = "use operator_phrase(&OperatorQuery)")]
     pub fn operator_with_date(
         wording: &crate::profile::Wording,
         prefixes: &crate::profile::Prefixes,
         left: &str,
         op: &str,
     ) -> String {
-        crate::words_ctx::operator_with_date(wording, prefixes, left, op)
+        operator_phrase(
+            &OperatorQuery::new(left, op)
+                .value(ValueShape::DateOnly)
+                .wording(wording, prefixes),
+        )
     }
 }
 

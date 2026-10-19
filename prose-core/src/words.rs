@@ -131,7 +131,7 @@ pub(crate) fn plural_operand(term: &str) -> bool {
 /// than"), then made plural when `plural`. Only a date and time is a point
 /// in time: a time interval, a delay period or an elapsed time is a
 /// quantity and keeps the quantity wording.
-pub(crate) fn operator_phrase(left: &str, op: &str, plural: bool, shape: ValueShape) -> String {
+pub(crate) fn built_in_phrase(left: &str, op: &str, plural: bool, shape: ValueShape) -> String {
     let date = shape == ValueShape::DateOnly;
     let temporal = local_name(left) == "dateTime";
     let phrase = match (temporal, date, local_name(op)) {
@@ -309,12 +309,6 @@ fn is_instant(s: &str) -> bool {
     }
 }
 
-/// [`operator_for`] when the one right operand is a date without a time of
-/// day: a bound on a whole day says whether it means the start or the end.
-pub fn operator_for_date(left: &str, op: &str) -> String {
-    operator_phrase(left, op, plural_operand(left), ValueShape::DateOnly)
-}
-
 /// A leading "is" becomes "are", "has" "have", "does" "do", "contains"
 /// "contain" and "matches" "match". Anything else is kept.
 fn plural_verb(phrase: String) -> String {
@@ -346,13 +340,6 @@ pub(crate) fn plural_label(label: &str) -> String {
         "are" => label.to_string(),
         _ => format!("are {label}"),
     }
-}
-
-/// The phrase that follows `left`: a date and time reads "is before" rather
-/// than "is less than" (a duration stays a quantity), and the verb agrees in number with the operand's noun phrase
-/// ("the date and time are before").
-pub fn operator_for(left: &str, op: &str) -> String {
-    operator_phrase(left, op, plural_operand(left), ValueShape::Other)
 }
 
 /// An action as a base-form verb phrase ("use", "attribute", "grant use").
@@ -471,6 +458,7 @@ fn duration_parts(s: &str, units: &[(char, &'static str)]) -> Option<Vec<(String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::words_ctx::{OperatorQuery, operator_phrase};
 
     #[test]
     fn operator_for_agrees_with_the_date_and_time() {
@@ -491,17 +479,36 @@ mod tests {
             ("http://www.w3.org/ns/odrl/2/lt", "are before"),
         ];
         for (op, want) in cases {
-            assert_eq!(operator_for("dateTime", op), want, "{op}");
+            assert_eq!(
+                operator_phrase(&OperatorQuery::new("dateTime", op)),
+                want,
+                "{op}"
+            );
         }
-        assert_eq!(operator_for("odrl:dateTime", "lt"), "are before");
+        assert_eq!(
+            operator_phrase(&OperatorQuery::new("odrl:dateTime", "lt")),
+            "are before"
+        );
     }
 
     #[test]
     fn other_operands_stay_singular() {
-        assert_eq!(operator_for("timeInterval", "lt"), "is less than");
-        assert_eq!(operator_for("delayPeriod", "eq"), "is equal to");
-        assert_eq!(operator_for("count", "lteq"), "is at most");
-        assert_eq!(operator_for("elapsedTime", "gteq"), "is at least");
+        assert_eq!(
+            operator_phrase(&OperatorQuery::new("timeInterval", "lt")),
+            "is less than"
+        );
+        assert_eq!(
+            operator_phrase(&OperatorQuery::new("delayPeriod", "eq")),
+            "is equal to"
+        );
+        assert_eq!(
+            operator_phrase(&OperatorQuery::new("count", "lteq")),
+            "is at most"
+        );
+        assert_eq!(
+            operator_phrase(&OperatorQuery::new("elapsedTime", "gteq")),
+            "is at least"
+        );
     }
 
     #[test]
@@ -520,7 +527,10 @@ mod tests {
             "odrl:timeInterval",
         ] {
             for (op, want) in cases {
-                for got in [operator_for(left, op), operator_for_date(left, op)] {
+                for got in [
+                    operator_phrase(&OperatorQuery::new(left, op)),
+                    operator_phrase(&OperatorQuery::new(left, op).value(ValueShape::DateOnly)),
+                ] {
                     assert_eq!(got, want, "{left} {op}");
                     for bad in ["before", "after", "start of", "end of", "are "] {
                         assert!(!got.contains(bad), "{left} {op}: {got}");
@@ -585,9 +595,19 @@ mod tests {
             ("neq", "are not equal to"),
         ];
         for (op, want) in cases {
-            assert_eq!(operator_for_date("dateTime", op), want, "{op}");
+            assert_eq!(
+                operator_phrase(&OperatorQuery::new("dateTime", op).value(ValueShape::DateOnly)),
+                want,
+                "{op}"
+            );
         }
-        assert_eq!(operator_for_date("timeInterval", "lt"), "is less than");
-        assert_eq!(operator_for_date("count", "lt"), "is less than");
+        assert_eq!(
+            operator_phrase(&OperatorQuery::new("timeInterval", "lt").value(ValueShape::DateOnly)),
+            "is less than"
+        );
+        assert_eq!(
+            operator_phrase(&OperatorQuery::new("count", "lt").value(ValueShape::DateOnly)),
+            "is less than"
+        );
     }
 }

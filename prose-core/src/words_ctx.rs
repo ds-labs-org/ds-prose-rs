@@ -125,7 +125,7 @@ impl<'a> WordCtx<'a> {
                     _ => format!("is {label}"),
                 }
             }
-            None => words::operator_phrase(left, op, plural, shape),
+            None => words::built_in_phrase(left, op, plural, shape),
         }
     }
 
@@ -274,22 +274,63 @@ pub(crate) fn gloss(w: &Wording, prefixes: &Prefixes, written: &str) -> Option<G
     Some(ctx.gloss_of(written, t, p, kind))
 }
 
-/// [`crate::wording::operator_with`].
-pub(crate) fn operator_with(w: &Wording, prefixes: &Prefixes, left: &str, op: &str) -> String {
-    let ctx = WordCtx {
-        wording: (!w.is_empty()).then_some(w),
-        prefixes: Cow::Borrowed(prefixes),
-        namespaces: HashMap::new(),
-    };
-    ctx.operator_for(left, op, ValueShape::Other)
+/// What [`operator_phrase`] words: an operator after its left operand, for
+/// one kind of right operand, optionally with the loaded profiles. Build one
+/// with [`OperatorQuery::new`] and the builder methods; fields may be added
+/// later without breaking callers.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug)]
+pub struct OperatorQuery<'a> {
+    /// The left operand, as a policy writes it.
+    pub left: &'a str,
+    /// The operator, as a policy writes it.
+    pub op: &'a str,
+    /// What the one right operand is; [`ValueShape::Other`] by default.
+    pub value: ValueShape,
+    profiles: Option<(&'a Wording, &'a Prefixes)>,
 }
 
-/// [`crate::wording::operator_with_date`].
-pub(crate) fn operator_with_date(w: &Wording, prefixes: &Prefixes, left: &str, op: &str) -> String {
-    let ctx = WordCtx {
-        wording: (!w.is_empty()).then_some(w),
-        prefixes: Cow::Borrowed(prefixes),
-        namespaces: HashMap::new(),
-    };
-    ctx.operator_for(left, op, ValueShape::DateOnly)
+impl<'a> OperatorQuery<'a> {
+    /// A query for `op` after `left`, with the built-in wording and no known
+    /// value.
+    pub fn new(left: &'a str, op: &'a str) -> OperatorQuery<'a> {
+        OperatorQuery {
+            left,
+            op,
+            value: ValueShape::Other,
+            profiles: None,
+        }
+    }
+
+    /// The shape of the right operand, from [`ValueShape::of`].
+    pub fn value(mut self, value: ValueShape) -> OperatorQuery<'a> {
+        self.value = value;
+        self
+    }
+
+    /// Word with the loaded profiles of `wording`, `prefixes` being those the
+    /// policy binds: an operator or left operand a profile declares reads
+    /// with its label.
+    pub fn wording(mut self, wording: &'a Wording, prefixes: &'a Prefixes) -> OperatorQuery<'a> {
+        self.profiles = Some((wording, prefixes));
+        self
+    }
+}
+
+/// The phrase that follows the left operand of `q`: the built-in wording,
+/// or the profile's label for an operator it declares outside ODRL. It
+/// agrees in number with the left operand, and reads a point in time, a
+/// whole day and a duration each in its own words.
+pub(crate) fn operator_phrase(q: &OperatorQuery<'_>) -> String {
+    match q.profiles {
+        Some((w, prefixes)) => {
+            let ctx = WordCtx {
+                wording: (!w.is_empty()).then_some(w),
+                prefixes: Cow::Borrowed(prefixes),
+                namespaces: HashMap::new(),
+            };
+            ctx.operator_for(q.left, q.op, q.value)
+        }
+        None => words::built_in_phrase(q.left, q.op, words::plural_operand(q.left), q.value),
+    }
 }

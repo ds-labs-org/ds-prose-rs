@@ -81,8 +81,7 @@ pub struct Vocabulary {
     pub parties: Vec<Suggestion>,
     pub assets: Vec<Suggestion>,
     /// Closed list of raw terms; the option labels come from
-    /// `labels.operator_option`, `wording::operator_for` and
-    /// `wording::operator_for_date`.
+    /// `labels.operator_option` and `wording::operator_phrase`.
     pub operators: Vec<AttrValue>,
     /// Closed list; the value "" means absent.
     pub conflicts: Vec<Choice>,
