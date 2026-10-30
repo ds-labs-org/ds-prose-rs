@@ -2,7 +2,7 @@
 //! declare when, and only when, its IRI answers HTTP 200. The check is
 //! injected here; `links.rs` tests the real one.
 use compliance_catalog::sources::Found;
-use compliance_catalog::{entry, reference};
+use compliance_catalog::{Check, entry, reference};
 use serde_json::json;
 
 /// W3C ODRL IM Example 19 as the catalog reads it, with one more constraint
@@ -34,7 +34,7 @@ const LINK: &str = r#"<a href="https://example.com/c/elsewhere" class="prose-ref
 #[test]
 fn a_reference_that_answers_200_is_a_link() {
     let mut asked = Vec::new();
-    let e = entry(found(), &mut |iri: &str| {
+    let e = entry(found(), &mut |iri: &str, _: Check| {
         asked.push(iri.to_string());
         true
     })
@@ -51,7 +51,7 @@ fn a_reference_that_answers_200_is_a_link() {
 
 #[test]
 fn a_reference_that_does_not_answer_200_is_plain_text() {
-    let e = entry(found(), &mut |_: &str| false).unwrap();
+    let e = entry(found(), &mut |_: &str, _: Check| false).unwrap();
     assert!(!e.html.contains("<a "), "{}", e.html);
     assert!(
         e.html
@@ -70,7 +70,7 @@ fn the_declared_constraints_of_example_19_read() {
         "",
         "W3C",
         vec![found()],
-        &mut |_: &str| false,
+        &mut |_: &str, _: Check| false,
     );
     let e = &s.entries[0];
     assert!(
@@ -119,7 +119,7 @@ const SCATTERED: [&str; 4] = [
 #[test]
 fn every_undeclared_reference_is_checked_wherever_it_sits() {
     let mut asked = Vec::new();
-    entry(scattered(), &mut |iri: &str| {
+    entry(scattered(), &mut |iri: &str, _: Check| {
         asked.push(iri.to_string());
         false
     })
@@ -130,7 +130,7 @@ fn every_undeclared_reference_is_checked_wherever_it_sits() {
 
 #[test]
 fn every_reference_that_answers_200_is_a_link_wherever_it_sits() {
-    let e = entry(scattered(), &mut |_: &str| true).unwrap();
+    let e = entry(scattered(), &mut |_: &str, _: Check| true).unwrap();
     for iri in SCATTERED {
         let link = format!(r#"<a href="{iri}" class="prose-reference">{iri}</a>"#);
         assert!(e.html.contains(&link), "{iri}: {}", e.html);
