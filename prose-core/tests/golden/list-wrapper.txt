@@ -20,6 +20,7 @@ Ok(
                                 text: "the purpose is equal to \"research\"",
                                 children: [],
                                 reference: None,
+                                urls: [],
                             },
                         ],
                         follow_ups: [],

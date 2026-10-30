@@ -106,6 +106,21 @@ shows the IRI as a link only when the host lists it in `links`, the IRIs it
 found to dereference (the site's catalog checks each over HTTP at build time
 and lists those that answer 200).
 
+The terms an `acceptedTerms` constraint accepts (any namespace:
+`ex:acceptedTerms`, EDC's `https://w3id.org/edc/v0.0.1/ns/acceptedTerms`)
+are often a URL in a plain string. Each `http://` or `https://` URL in a
+plain string right operand (a bare string, or an `@value` without a datatype
+or typed `xsd:string`) reads verbatim and is listed, once, in the
+`Condition`'s `urls`; trailing punctuation is not part of a URL. An IRI
+value (`{"@id": …}`) is a node, shown short as any other, and is not listed.
+The reader fetches nothing: `OdrlProse` shows a URL as a link, labelled with
+the URL itself (`a.prose-terms`), only when the host lists it in `links`.
+The site's catalog checks these URLs once the whole policy is read, with a
+GET it stops as soon as the final status is in (no body is downloaded),
+within 200 ms by default (`compliance-catalog --terms-timeout <ms>`); a URL
+that answers 200 is a link, any other outcome leaves it as text. The
+constraint references it checks get 5 s, with the same early stop.
+
 ## Profiles
 
 An ODRL profile ([ODRL IM §3.3](https://www.w3.org/TR/odrl-model/#profile-mechanism))
@@ -653,6 +668,15 @@ The profile types can grow too: `ProfileVocab`, `Wording`, `Prefixes` and
 `PolicyGlossary` and `Gloss` are `#[non_exhaustive]` structs: read their
 fields, and start from `ProfileLimits::default()` to change a limit. So is
 `edit::ChoiceSlot`: build one with `ChoiceSlot::new` and set its fields.
+
+Changed after 0.5.1 (additive except for struct literals): `Condition`
+gained `urls`, the `http(s)` URLs in the plain string of an `acceptedTerms`
+constraint; add `urls: vec![]` to a literal. The v0.1 and profile goldens
+print it (`urls: []`); their text is unchanged. `OdrlProse` links a URL among
+`links` as `a.prose-terms`. In `compliance-catalog`, the `live` callback of
+`entry` and `reference` takes a `Check` (`Reference` or `AcceptedTerms`), and
+`links::answers_200` sends one GET it stops at the final status (no HEAD
+first).
 
 Changed after 0.5.0 (wording): `wording::short_iri` keeps a DID (`did:…`)
 whole, so the HTML shows a party identified by a DID in full instead of its

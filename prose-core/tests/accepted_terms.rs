@@ -20,12 +20,20 @@ const EDC: &str = "https://w3id.org/edc/v0.0.1/ns/acceptedTerms";
 fn a_url_in_a_plain_string_is_listed_and_read_verbatim() {
     let c = condition(EDC, r#""https://example.com/terms/v1""#);
     assert_eq!(c.urls, ["https://example.com/terms/v1"]);
-    assert!(c.text.ends_with("https://example.com/terms/v1"), "{}", c.text);
+    assert!(
+        c.text.ends_with("https://example.com/terms/v1"),
+        "{}",
+        c.text
+    );
 }
 
 #[test]
 fn any_namespace_and_a_compact_iri_name_accepted_terms() {
-    for left in ["ex:acceptedTerms", "http://example.com/vocab#acceptedTerms", "acceptedTerms"] {
+    for left in [
+        "ex:acceptedTerms",
+        "http://example.com/vocab#acceptedTerms",
+        "acceptedTerms",
+    ] {
         let c = condition(left, r#""http://example.com/t""#);
         assert_eq!(c.urls, ["http://example.com/t"], "{left}");
     }
@@ -52,7 +60,11 @@ fn every_plain_string_of_a_list_is_read_and_a_typed_string_is_plain_too() {
     );
     assert_eq!(
         c.urls,
-        ["https://example.com/a", "https://example.com/b", "https://example.com/c"]
+        [
+            "https://example.com/a",
+            "https://example.com/b",
+            "https://example.com/c"
+        ]
     );
 }
 
@@ -62,7 +74,10 @@ fn an_iri_value_another_scheme_or_another_operand_lists_nothing() {
         (EDC, r#"{"@id": "https://example.com/terms"}"#),
         (EDC, r#""ftp://example.com/terms""#),
         (EDC, r#""urn:terms:1""#),
-        (EDC, r#"{"@value": "https://example.com/x", "@type": "xsd:anyURI"}"#),
+        (
+            EDC,
+            r#"{"@value": "https://example.com/x", "@type": "xsd:anyURI"}"#,
+        ),
         ("purpose", r#""https://example.com/terms""#),
         ("ex:notAcceptedTerms", r#""https://example.com/terms""#),
     ] {

@@ -36,7 +36,10 @@ fn each_url_is_checked_once_with_its_kind() {
     assert_eq!(
         asked,
         [
-            ("https://example.com/c/elsewhere".to_string(), Check::Reference),
+            (
+                "https://example.com/c/elsewhere".to_string(),
+                Check::Reference
+            ),
             (TERMS.to_string(), Check::AcceptedTerms),
         ]
     );

@@ -22,6 +22,7 @@ Ok(
                                 text: "the date and time are before the start of 2026-12-31",
                                 children: [],
                                 reference: None,
+                                urls: [],
                             },
                         ],
                         follow_ups: [

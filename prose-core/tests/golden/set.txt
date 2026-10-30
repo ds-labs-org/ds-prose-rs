@@ -30,6 +30,7 @@ Ok(
                                                 text: "the payment amount is equal to 100.00 euro",
                                                 children: [],
                                                 reference: None,
+                                                urls: [],
                                             },
                                         ],
                                         follow_ups: [],

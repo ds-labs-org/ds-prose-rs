@@ -42,7 +42,10 @@ async fn without_links_the_urls_are_text() {
 #[tokio::test]
 async fn a_url_the_host_checked_is_a_link_labelled_with_itself() {
     let html = ssr(&["https://example.com/terms/v1"]).await;
-    assert!(html.contains(&link("https://example.com/terms/v1")), "{html}");
+    assert!(
+        html.contains(&link("https://example.com/terms/v1")),
+        "{html}"
+    );
     assert!(!html.contains(&link("https://example.com/dead")), "{html}");
     assert!(html.contains("and https://example.com/dead"), "{html}");
 }

@@ -81,6 +81,11 @@ pub struct Condition {
     /// The reader fetches nothing: a host that knows the IRI dereferences
     /// can show it as a link.
     pub reference: Option<String>,
+    /// The `http(s)` URLs in the plain string right operand of an
+    /// `acceptedTerms` constraint (any namespace), in reading order, each
+    /// once; `text` reads each verbatim. The reader fetches nothing: a host
+    /// that finds one answers can show it as a link.
+    pub urls: Vec<String>,
 }
 
 impl Condition {
@@ -89,6 +94,7 @@ impl Condition {
             text: text.into(),
             children: Vec::new(),
             reference: None,
+            urls: Vec::new(),
         }
     }
 }

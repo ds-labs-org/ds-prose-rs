@@ -1,9 +1,12 @@
-//! `compliance-catalog <out-dir> [--compliance <cases-dir> <link>]
-//! [--w3c <model.html> <link>] [--edc <dir> <link>] [--dsp <dir> <link>]`:
-//! builds the site's catalog from local copies of its sources. Each `link`
-//! is where that source's files are linked under.
-use compliance_catalog::{Source, compliance, links, reference, sources, write_site};
+//! `compliance-catalog <out-dir> [--terms-timeout <ms>]
+//! [--compliance <cases-dir> <link>] [--w3c <model.html> <link>]
+//! [--edc <dir> <link>] [--dsp <dir> <link>]`: builds the site's catalog
+//! from local copies of its sources. Each `link` is where that source's
+//! files are linked under. `--terms-timeout` is how long the check of a URL
+//! of accepted terms may take, in milliseconds (200 by default).
+use compliance_catalog::{Check, Source, compliance, links, reference, sources, write_site};
 use std::path::Path;
+use std::time::Duration;
 
 const W3C_INTRO: &str = "The examples of the [ODRL Information Model 2.2](https://www.w3.org/TR/odrl-model/), \
 read from the editors' draft. An example written as several JSON documents, a policy and the \
@@ -17,23 +20,36 @@ the offers and agreements inside its catalog and negotiation messages. A policy 
 `@context` of its own gets the message's.\n";
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
     let usage = || -> ! {
         eprintln!(
-            "usage: compliance-catalog <out-dir> [--compliance <cases-dir> <link>] \
-             [--w3c <model.html> <link>] [--edc <dir> <link>] [--dsp <dir> <link>]"
+            "usage: compliance-catalog <out-dir> [--terms-timeout <ms>] \
+             [--compliance <cases-dir> <link>] [--w3c <model.html> <link>] \
+             [--edc <dir> <link>] [--dsp <dir> <link>]"
         );
         std::process::exit(2);
     };
+    let mut terms_timeout = links::TERMS_TIMEOUT;
+    if let Some(at) = args.iter().position(|a| a == "--terms-timeout") {
+        let ms = args.get(at + 1).and_then(|ms| ms.parse().ok());
+        let Some(ms) = ms else { usage() };
+        terms_timeout = Duration::from_millis(ms);
+        args.drain(at..at + 2);
+    }
     let Some((out, rest)) = args.split_first() else {
         usage()
     };
     if rest.len() % 3 != 0 {
         usage();
     }
-    // A constraint declared outside its policy is linked when its IRI
-    // answers 200; each IRI is checked once per build.
-    let mut live = links::cached(|iri| links::answers_200(iri, links::TIMEOUT));
+    // A constraint declared outside its policy, or the URL of accepted
+    // terms, is linked when it answers 200; each is checked once per build.
+    let mut reference_live = links::cached(|iri| links::answers_200(iri, links::TIMEOUT));
+    let mut terms_live = links::cached(|url| links::answers_200(url, terms_timeout));
+    let mut live = |iri: &str, kind: Check| match kind {
+        Check::Reference => reference_live(iri),
+        Check::AcceptedTerms => terms_live(iri),
+    };
     let mut run = || -> Result<Vec<Source>, String> {
         let mut out = Vec::new();
         for opt in rest.chunks(3) {

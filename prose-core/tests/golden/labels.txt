@@ -20,6 +20,7 @@ Ok(
                                 text: "the location is equal to Germany",
                                 children: [],
                                 reference: None,
+                                urls: [],
                             },
                         ],
                         follow_ups: [],
