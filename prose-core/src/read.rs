@@ -1606,6 +1606,7 @@ impl<'a> Reader<'a> {
                 text: format!("The action \"{}\" is limited to cases where", a.text),
                 children: a.refinements.clone(),
                 reference: None,
+                urls: Vec::new(),
             })
             .collect();
         let conditions = o
@@ -1820,6 +1821,7 @@ impl<'a> Reader<'a> {
                         .map(|c| self.constraint(c))
                         .collect(),
                     reference: None,
+                    urls: Vec::new(),
                 };
             }
         }
@@ -1851,12 +1853,41 @@ impl<'a> Reader<'a> {
             "an unspecified value".to_string()
         };
         let shape = self.value_shape(o.get("rightOperand"));
-        Condition::leaf(format!(
+        let mut read = Condition::leaf(format!(
             "{} {} {}",
             self.ctx.operand(&left),
             self.ctx.operator_for(&left, &op, shape),
             right
-        ))
+        ));
+        if local_name(&left) == "acceptedTerms" {
+            read.urls = self.terms_urls(o.get("rightOperand"));
+        }
+        read
+    }
+
+    /// The `http(s)` URLs in the plain strings of an `acceptedTerms` right
+    /// operand: a bare string, or an `@value` without a datatype or typed
+    /// `xsd:string`. An IRI value names a node, not a document to link.
+    fn terms_urls(&self, right: Option<&Value>) -> Vec<String> {
+        let mut urls: Vec<String> = Vec::new();
+        for v in right.map(items).unwrap_or_default() {
+            let s = match v {
+                Value::String(s) => s,
+                Value::Object(o) => match (o.get("@value"), o.get("@type").and_then(Value::as_str))
+                {
+                    (Some(Value::String(s)), None) => s,
+                    (Some(Value::String(s)), Some(t)) if self.iris.expand(t) == XSD_STRING => s,
+                    _ => continue,
+                },
+                _ => continue,
+            };
+            for u in http_urls(s) {
+                if !urls.iter().any(|x| x == u) {
+                    urls.push(u.to_string());
+                }
+            }
+        }
+        urls
     }
 
     /// A constraint referred to by `id`: the one the document declares,
@@ -1870,6 +1901,7 @@ impl<'a> Reader<'a> {
                 text: format!("the constraint defined at {id} holds"),
                 children: Vec::new(),
                 reference: Some(id),
+                urls: Vec::new(),
             };
         };
         if self.following.contains(&id) {
@@ -1985,6 +2017,34 @@ fn sorted(v: &Value) -> Value {
 }
 
 /// Bare when it reads as an IRI, a number or a date; quoted otherwise.
+const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
+
+/// The `http://` and `https://` URLs in `s`: each runs to the next space,
+/// quote or angle bracket, without trailing punctuation (`.,;:!?'` and a
+/// closing bracket), and has something after the scheme.
+fn http_urls(s: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    while let Some(i) = ["http://", "https://"]
+        .iter()
+        .filter_map(|p| s[at..].find(p))
+        .min()
+    {
+        let start = at + i;
+        let len = s[start..]
+            .find(|c: char| c.is_whitespace() || matches!(c, '"' | '<' | '>'))
+            .unwrap_or(s.len() - start);
+        let url = s[start..start + len]
+            .trim_end_matches(['.', ',', ';', ':', '!', '?', '\'', ')', ']', '}']);
+        let scheme = if url.starts_with("https://") { 8 } else { 7 };
+        if url.len() > scheme {
+            out.push(url);
+        }
+        at = start + len.max(1);
+    }
+    out
+}
+
 pub(crate) fn fmt_str(s: &str) -> String {
     let no_space = !s.chars().any(char::is_whitespace);
     let numeric = s.parse::<f64>().is_ok();

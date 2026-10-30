@@ -17,6 +17,10 @@
 //!
 //! A constraint a policy refers to and does not declare reads as defined at
 //! its IRI; the page links the IRI when it answers HTTP 200 ([`links`]).
+//! A URL in the plain string of an `acceptedTerms` constraint is checked the
+//! same way, once the whole policy is read, within a shorter timeout
+//! ([`links::TERMS_TIMEOUT`] by default); one that answers 200 is a link
+//! labelled with the URL itself.
 //!
 //! [ds-odrl-compliance-rdf]: https://github.com/ds-labs-org/ds-odrl-compliance-rdf
 pub mod features;
@@ -57,17 +61,36 @@ pub struct Source {
     pub entries: Vec<Entry>,
 }
 
-/// Renders one policy document and checks its reading. `live` says whether
-/// the IRI of a constraint the policy refers to, and does not declare,
-/// answers HTTP 200 ([`links::answers_200`]); those IRIs are links.
-pub fn entry(found: Found, live: &mut dyn FnMut(&str) -> bool) -> Result<Entry, String> {
+/// What a page checks before it links an IRI, so the host can give each its
+/// own timeout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Check {
+    /// A constraint the policy refers to and does not declare.
+    Reference,
+    /// A URL in the plain string of an `acceptedTerms` constraint.
+    AcceptedTerms,
+}
+
+/// Renders one policy document and checks its reading. Once the whole
+/// document is read, `live` says, for each IRI of a constraint the policy
+/// refers to and does not declare and each URL of accepted terms, whether
+/// it answers HTTP 200 ([`links::answers_200`]); those are links.
+pub fn entry(found: Found, live: &mut dyn FnMut(&str, Check) -> bool) -> Result<Entry, String> {
     let json = serde_json::to_string_pretty(&found.policy).expect("JSON") + "\n";
     let doc = prose_yew::prose_core::render(&json).map_err(|e| format!("{}: {e:?}", found.slug))?;
-    let mut referred = BTreeSet::new();
+    let (mut referred, mut terms) = (BTreeSet::new(), BTreeSet::new());
     for p in &doc.policies {
-        references(&p.rules, &mut referred);
+        references(&p.rules, &mut referred, &mut terms);
     }
-    let links = referred.into_iter().filter(|iri| live(iri)).collect();
+    let mut links: BTreeSet<String> = referred
+        .into_iter()
+        .filter(|iri| live(iri, Check::Reference))
+        .collect();
+    links.extend(
+        terms
+            .into_iter()
+            .filter(|url| live(url, Check::AcceptedTerms)),
+    );
     let html = without_markers(&ssr(&json, links));
     Ok(Entry {
         incomplete: html.contains("incomplete constraint"),
@@ -83,20 +106,21 @@ pub fn entry(found: Found, live: &mut dyn FnMut(&str) -> bool) -> Result<Entry, 
 }
 
 /// The IRIs of the constraints `rules` refer to and the document does not
-/// declare.
-fn references(rules: &[Rule], out: &mut BTreeSet<String>) {
-    fn walk(c: &[Condition], out: &mut BTreeSet<String>) {
+/// declare, and the URLs of the accepted terms their conditions name.
+fn references(rules: &[Rule], out: &mut BTreeSet<String>, terms: &mut BTreeSet<String>) {
+    fn walk(c: &[Condition], out: &mut BTreeSet<String>, terms: &mut BTreeSet<String>) {
         for c in c {
             out.extend(c.reference.clone());
-            walk(&c.children, out);
+            terms.extend(c.urls.iter().cloned());
+            walk(&c.children, out, terms);
         }
     }
     for r in rules {
         out.extend(r.references.iter().cloned());
-        walk(&r.refinements, out);
-        walk(&r.conditions, out);
+        walk(&r.refinements, out, terms);
+        walk(&r.conditions, out, terms);
         for f in &r.follow_ups {
-            references(&f.rules, out);
+            references(&f.rules, out, terms);
         }
     }
 }
@@ -154,7 +178,7 @@ pub fn compliance(cases_dir: &Path, link: &str) -> Result<Source, String> {
                 slug: case.slug,
                 policy: case.policies,
             },
-            &mut |_| false,
+            &mut |_, _| false,
         )?;
         if e.incomplete {
             return Err(format!(
@@ -189,7 +213,7 @@ pub fn reference(
     intro: &str,
     license: &'static str,
     found: Vec<Found>,
-    live: &mut dyn FnMut(&str) -> bool,
+    live: &mut dyn FnMut(&str, Check) -> bool,
 ) -> Source {
     let entries = found
         .into_iter()
@@ -566,7 +590,7 @@ mod tests {
             "",
             "W3C",
             vec![found],
-            &mut |_| false,
+            &mut |_, _| false,
         );
         assert!(s.entries[0].incomplete);
     }

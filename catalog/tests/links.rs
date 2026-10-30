@@ -1,7 +1,7 @@
 //! The check behind a link to a constraint declared outside the policy:
 //! only an IRI that finally answers HTTP 200 is linked. Run against a
 //! server on the loopback interface; nothing here reaches the network.
-use compliance_catalog::links::{answers_200, cached};
+use compliance_catalog::links::{TERMS_TIMEOUT, answers_200, cached};
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::time::{Duration, Instant};
@@ -41,6 +41,22 @@ fn answer(mut stream: TcpStream) {
         (_, "/no-content") => ("204 No Content", None),
         ("HEAD", "/get-only") => ("405 Method Not Allowed", None),
         ("GET", "/get-only") => ("200 OK", None),
+        // Refused to HEAD, so the check has to GET it.
+        ("HEAD", "/huge") => ("405 Method Not Allowed", None),
+        (_, "/huge") => {
+            // A status, then a body far too big to wait for.
+            let _ = write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: 1000000000\r\n\r\n"
+            );
+            for _ in 0..100 {
+                if stream.write_all(&[b'x'; 65536]).is_err() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            return;
+        }
         (_, "/slow") => {
             std::thread::sleep(Duration::from_secs(10));
             ("200 OK", None)
@@ -77,6 +93,22 @@ fn anything_but_a_final_200_is_not_a_link() {
 #[test]
 fn a_server_that_refuses_head_is_asked_with_get() {
     assert!(answers_200(&format!("{}/get-only", server()), TIMEOUT));
+}
+
+#[test]
+fn the_transfer_stops_once_the_status_is_in() {
+    let start = Instant::now();
+    assert!(answers_200(&format!("{}/huge", server()), TIMEOUT));
+    assert!(
+        start.elapsed() < Duration::from_millis(1500),
+        "{:?}",
+        start.elapsed()
+    );
+}
+
+#[test]
+fn accepted_terms_are_given_200_ms_by_default() {
+    assert_eq!(TERMS_TIMEOUT, Duration::from_millis(200));
 }
 
 #[test]

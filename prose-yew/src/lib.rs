@@ -7,7 +7,8 @@
 //! plus `prose-permission` / `prose-prohibition` / `prose-obligation`,
 //! `prose-rule-sentence`, `prose-label`, `prose-notes`, `prose-warnings`,
 //! `prose-error`, `prose-reference` (a link to a constraint declared outside
-//! the document, see [`OdrlProseProps::links`]), `prose-iri` (a party, asset
+//! the document, see [`OdrlProseProps::links`]), `prose-terms` (a link to
+//! the terms an `acceptedTerms` constraint names by URL), `prose-iri` (a party, asset
 //! or value named by an IRI, shown short with the IRI in its title), and in
 //! the glossary of profile terms ([`ProseGlossary`])
 //! `prose-glossary`, `prose-note`, `prose-kind-of`, `prose-implies`,
@@ -87,8 +88,10 @@ pub struct OdrlProseProps {
     /// IRIs the host found to dereference (the catalog: those that answer
     /// HTTP 200). A condition that refers to a constraint declared at one
     /// of them shows the IRI as a link, and so does a party, an asset or a
-    /// value named by an `http(s)` IRI among them; any other IRI is not a
-    /// link. The component fetches nothing. Empty by default: no link.
+    /// value named by an `http(s)` IRI among them, and so does a URL in the
+    /// plain string of an `acceptedTerms` constraint ([`Condition::urls`]),
+    /// labelled with the URL itself; any other IRI is not a link. The
+    /// component fetches nothing. Empty by default: no link.
     #[prop_or_default]
     pub links: Rc<BTreeSet<String>>,
 }
@@ -338,7 +341,7 @@ fn condition_list(list: &[Condition], names: &[ConditionNames], cx: &Cx) -> Html
 /// A condition's text, with the IRI of the constraint it refers to as a
 /// link when the host found that IRI dereferences.
 fn condition_text(c: &Condition, names: &ConditionNames, cx: &Cx) -> Html {
-    linked_text(&c.text, &c.reference, &names.text, cx)
+    linked_text_with(&c.text, &c.reference, &c.urls, &names.text, cx)
 }
 
 /// `text`, in which each "the constraint defined at {IRI} holds" whose IRI
@@ -349,6 +352,19 @@ fn condition_text(c: &Condition, names: &ConditionNames, cx: &Cx) -> Html {
 fn linked_text<'i>(
     text: &str,
     iris: impl IntoIterator<Item = &'i String>,
+    names: &[NameSpan],
+    cx: &Cx,
+) -> Html {
+    linked_text_with(text, iris, &[], names, cx)
+}
+
+/// [`linked_text`], where each of `urls` (the URLs of accepted terms,
+/// [`Condition::urls`]) that is one of the host's links is a link too,
+/// labelled with the URL itself.
+fn linked_text_with<'i>(
+    text: &str,
+    iris: impl IntoIterator<Item = &'i String>,
+    urls: &[String],
     names: &[NameSpan],
     cx: &Cx,
 ) -> Html {
@@ -375,6 +391,22 @@ fn linked_text<'i>(
                 start + iri.len(),
                 html! { <a class="prose-reference" href={iri.to_string()}>{ iri }</a> },
             ));
+        }
+    }
+    for url in urls.iter().filter(|u| cx.links.contains(u.as_str())) {
+        for (start, _) in text.match_indices(url.as_str()) {
+            // Not a longer URL that starts with this one.
+            let longer = text[start + url.len()..]
+                .chars()
+                .next()
+                .is_some_and(|c| !c.is_whitespace() && !"\"<>.,;:!?')]}".contains(c));
+            if !longer {
+                marks.push((
+                    start,
+                    start + url.len(),
+                    html! { <a class="prose-terms" href={url.clone()}>{ url }</a> },
+                ));
+            }
         }
     }
     if marks.is_empty() {
