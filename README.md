@@ -460,7 +460,7 @@ order. A change to `@1` may only add keys; removing or renaming one is `@2`.
 
 ```json
 { "schema": "ds-prose/validation-report@1",
-  "tool": {"name": "ds-prose-rs", "version": "0.5.1"},
+  "tool": {"name": "ds-prose-rs", "version": "0.6.0"},
   "mode": "strict",
   "tiers": ["profile", "prose", "input"],
   "ruleset": 1,
@@ -668,6 +668,12 @@ The profile types can grow too: `ProfileVocab`, `Wording`, `Prefixes` and
 `PolicyGlossary` and `Gloss` are `#[non_exhaustive]` structs: read their
 fields, and start from `ProfileLimits::default()` to change a limit. So is
 `edit::ChoiceSlot`: build one with `ChoiceSlot::new` and set its fields.
+
+Changed in 0.6.0: the licence is GPL-3.0-only (0.5.1 and earlier are Apache-2.0).
+In Edit mode a slot or select that holds a term a loaded profile explains has
+the `title` "{label}: {definition} ({raw})"; `OdrlProse` gives an IRI mention
+the same title when the policy's glossary has that IRI. Both were the bare IRI
+or the display text before.
 
 Changed after 0.5.1 (additive except for struct literals): `Condition`
 gained `urls`, the `http(s)` URLs in the plain string of an `acceptedTerms`
@@ -1134,5 +1140,5 @@ a file, or load a URL. Applying is explicit, and both tabs use it.
 ## Licence
 
 GPL-3.0-only. The full text is in `LICENSE`. The npm packages `@ds-labs/prose-wasm`
-and `@ds-labs/prose-angular` carry the same licence from version 0.5.1 on; earlier
+and `@ds-labs/prose-angular` carry the same licence from version 0.6.0 on; earlier
 releases stay under Apache-2.0.
