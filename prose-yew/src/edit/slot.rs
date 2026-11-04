@@ -1114,7 +1114,7 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                     data-slot={slot.path.to_string()}
                     data-closed={closed.map(|_| "true")}
                     data-placeholder={placeholder(&env, slot)}
-                    title={slot.display.clone()}
+                    title={super::view::slot_title(&env, &slot.display, &slot.raw)}
                     spellcheck="false"
                     autocapitalize="off"
                     autocorrect="off"

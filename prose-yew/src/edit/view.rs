@@ -699,10 +699,7 @@ impl Rend<'_> {
                 </span>
             };
         };
-        let title = match &g.definition {
-            Some(d) => format!("{}: {d} ({raw})", g.label),
-            None => format!("{} ({raw})", g.label),
-        };
+        let title = gloss_title(&g, raw);
         let id = g.definition.as_ref().map(|_| format!("prose-def-{slot}"));
         html! {
             <>
@@ -1362,4 +1359,124 @@ fn focus_on_press() -> Callback<MouseEvent> {
             let _ = el.focus();
         }
     })
+}
+
+/// The tooltip text of a term a loaded profile explains:
+/// "{label}: {definition} ({raw})", or "{label} ({raw})" without a
+/// definition.
+pub(crate) fn gloss_title(g: &prose_core::Gloss, raw: &str) -> String {
+    match &g.definition {
+        Some(d) => format!("{}: {d} ({raw})", g.label),
+        None => format!("{} ({raw})", g.label),
+    }
+}
+
+/// The tooltip of an editable slot: the profile's gloss of what it holds,
+/// else `display`.
+pub(super) fn slot_title(env: &super::Env, display: &str, raw: &str) -> String {
+    title_for(&env.cfg.wording, &env.prefixes, display, raw)
+}
+
+/// [`slot_title`] over the loaded profiles `w`.
+pub(super) fn title_for(
+    w: &prose_core::profile::Wording,
+    prefixes: &prose_core::profile::Prefixes,
+    display: &str,
+    raw: &str,
+) -> String {
+    if w.is_empty() || raw.is_empty() {
+        return display.to_string();
+    }
+    prose_core::wording::gloss(w, prefixes, raw)
+        .map(|g| gloss_title(&g, raw))
+        .unwrap_or_else(|| display.to_string())
+}
+
+#[cfg(test)]
+mod title_tests {
+    use super::*;
+    use prose_core::profile::{Prefixes, ProfileVocab, Wording};
+
+    const PROFILE: &str = r#"{
+      "@context": { "odrl": "http://www.w3.org/ns/odrl/2/",
+                    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+                    "ex": "https://example.org/ns/" },
+      "@type": "odrl:Profile",
+      "@id": "https://example.org/profiles/p",
+      "odrl:action": [
+        { "@id": "ex:fineTune", "@type": "odrl:Action",
+          "rdfs:label": "fine-tune", "rdfs:comment": "Train a model further on the asset." },
+        { "@id": "ex:index", "@type": "odrl:Action", "rdfs:label": "index" }
+      ]
+    }"#;
+
+    fn wording() -> Wording {
+        Wording::new().with_profile(ProfileVocab::parse(PROFILE).unwrap())
+    }
+
+    #[test]
+    fn a_defined_term_is_titled_with_its_definition() {
+        let t = title_for(
+            &wording(),
+            &Prefixes::default(),
+            "fine tune",
+            "https://example.org/ns/fineTune",
+        );
+        assert_eq!(
+            t,
+            "fine-tune: Train a model further on the asset. (https://example.org/ns/fineTune)"
+        );
+    }
+
+    #[test]
+    fn a_compact_iri_resolves_through_the_prefixes() {
+        let doc = prose_core::edit::read_model(
+            r#"{ "@context": { "odrl": "http://www.w3.org/ns/odrl/2/", "ex": "https://example.org/ns/" },
+                 "@type": "Set", "uid": "https://example.org/p" }"#,
+        )
+        .unwrap();
+        let prefixes = prose_core::edit::prefixes(&doc);
+        let t = title_for(&wording(), &prefixes, "fine tune", "ex:fineTune");
+        assert_eq!(
+            t,
+            "fine-tune: Train a model further on the asset. (ex:fineTune)"
+        );
+    }
+
+    #[test]
+    fn a_term_without_a_definition_is_titled_with_its_label() {
+        let t = title_for(
+            &wording(),
+            &Prefixes::default(),
+            "index",
+            "https://example.org/ns/index",
+        );
+        assert_eq!(t, "index (https://example.org/ns/index)");
+    }
+
+    #[test]
+    fn a_term_the_profile_does_not_declare_keeps_its_display() {
+        let t = title_for(
+            &wording(),
+            &Prefixes::default(),
+            "use",
+            "http://www.w3.org/ns/odrl/2/use",
+        );
+        assert_eq!(t, "use");
+    }
+
+    #[test]
+    fn without_a_profile_or_a_value_the_display_stays() {
+        let none = Wording::default();
+        assert_eq!(
+            title_for(
+                &none,
+                &Prefixes::default(),
+                "x",
+                "https://example.org/ns/fineTune"
+            ),
+            "x"
+        );
+        assert_eq!(title_for(&wording(), &Prefixes::default(), "", ""), "");
+    }
 }

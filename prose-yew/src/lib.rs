@@ -175,10 +175,9 @@ pub fn odrl_prose(props: &OdrlProseProps) -> Html {
     let class = classes!("ds-prose", props.class.clone());
     match &*parsed {
         Ok(r) => {
-            let glossary = if props.glossary { &r.glossary[..] } else { &[] };
             html! {
                 <article class={class}>
-                    { document(&r.document, glossary, &r.mentions, &r.names, &props.links) }
+                    { document(&r.document, &r.glossary, props.glossary, &r.mentions, &r.names, &props.links) }
                     if let Some(report) = &*report { { violations_section(report) } }
                 </article>
             }
@@ -231,6 +230,9 @@ type Links = BTreeSet<String>;
 struct Cx<'a> {
     mentions: &'a [Mention],
     links: &'a Links,
+    /// The profile terms the policy uses; a mention's tooltip carries the
+    /// definition of the one with its IRI.
+    terms: &'a [prose_core::Gloss],
 }
 
 /// Where no reading says where a text names an IRI: nowhere.
@@ -240,6 +242,7 @@ static NO_NAMES: std::sync::LazyLock<(PolicyNames, RuleNames, ConditionNames)> =
 fn document(
     doc: &Document,
     glossary: &[PolicyGlossary],
+    show_glossary: bool,
     mentions: &[Vec<Mention>],
     names: &[PolicyNames],
     links: &Links,
@@ -247,8 +250,10 @@ fn document(
     html! {
         <>
             { for doc.policies.iter().enumerate().map(|(i, p)| {
-                let cx = Cx { mentions: mentions.get(i).map_or(&[], Vec::as_slice), links };
-                policy(p, glossary.get(i), names.get(i).unwrap_or(&NO_NAMES.0), &cx)
+                let terms = glossary.get(i).map_or(&[][..], |g| &g.terms[..]);
+                let cx = Cx { mentions: mentions.get(i).map_or(&[], Vec::as_slice), links, terms };
+                let shown = glossary.get(i).filter(|_| show_glossary);
+                policy(p, shown, names.get(i).unwrap_or(&NO_NAMES.0), &cx)
             }) }
             if !doc.warnings.is_empty() {
                 <aside class="prose-warnings">
@@ -442,12 +447,76 @@ fn iri(m: &Mention, shown: &str, cx: &Cx) -> Html {
         .iter()
         .any(|o| o.iri != m.iri && o.short_label() == short);
     let shown = if shared { shown } else { short };
-    let title = m.iri.clone();
+    let title = mention_title(cx.terms, &m.iri);
     let web = m.iri.starts_with("http://") || m.iri.starts_with("https://");
     if web && cx.links.contains(&m.iri) {
         html! { <a class="prose-iri" href={m.iri.clone()} {title}>{ shown.to_string() }</a> }
     } else {
         html! { <span class="prose-iri" {title}>{ shown.to_string() }</span> }
+    }
+}
+
+/// The tooltip of a mentioned IRI: the profile's label and definition of it
+/// when `terms` has it, else the IRI.
+fn mention_title(terms: &[prose_core::Gloss], iri: &str) -> String {
+    terms
+        .iter()
+        .find(|g| g.iri == iri)
+        .map_or_else(|| iri.to_string(), |g| edit::view::gloss_title(g, iri))
+}
+
+#[cfg(test)]
+mod mention_tests {
+    use super::*;
+    use prose_core::profile::ProfileVocab;
+
+    const PROFILE: &str = r#"{
+      "@context": { "odrl": "http://www.w3.org/ns/odrl/2/",
+                    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+                    "ex": "https://example.org/ns/" },
+      "@type": "odrl:Profile",
+      "@id": "https://example.org/profiles/p",
+      "odrl:action": [
+        { "@id": "ex:fineTune", "@type": "odrl:Action",
+          "rdfs:label": "fine-tune", "rdfs:comment": "Train a model further on the asset." },
+        { "@id": "ex:index", "@type": "odrl:Action", "rdfs:label": "index" }
+      ]
+    }"#;
+
+    const POLICY: &str = r#"{
+      "@context": ["http://www.w3.org/ns/odrl.jsonld", { "ex": "https://example.org/ns/" }],
+      "@type": "Set", "uid": "ex:p",
+      "permission": [
+        { "target": "ex:data", "action": "ex:fineTune" },
+        { "target": "ex:data", "action": "ex:index" }
+      ]
+    }"#;
+
+    fn terms() -> Vec<prose_core::Gloss> {
+        let w = Wording::new().with_profile(ProfileVocab::parse(PROFILE).unwrap());
+        let r = prose_core::render_with(POLICY, &w).expect("policy reads");
+        r.glossary.into_iter().next().expect("one policy").terms
+    }
+
+    #[test]
+    fn a_defined_term_is_titled_with_its_definition() {
+        let t = mention_title(&terms(), "https://example.org/ns/fineTune");
+        assert_eq!(
+            t,
+            "fine-tune: Train a model further on the asset. (https://example.org/ns/fineTune)"
+        );
+    }
+
+    #[test]
+    fn an_undefined_term_is_titled_with_its_label() {
+        let t = mention_title(&terms(), "https://example.org/ns/index");
+        assert_eq!(t, "index (https://example.org/ns/index)");
+    }
+
+    #[test]
+    fn an_unknown_iri_is_titled_with_itself() {
+        let t = mention_title(&terms(), "https://example.org/ns/data");
+        assert_eq!(t, "https://example.org/ns/data");
     }
 }
 
