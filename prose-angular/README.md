@@ -143,7 +143,7 @@ delete the copy, the vendoring script, the `tsconfig` path to it and the lint
 and formatter ignores for it, install the package above, and keep only the one
 `angular.json` asset line.
 
-Licence: Apache-2.0.
+Licence: GPL-3.0-only.
 
 ## Developing this package
 
