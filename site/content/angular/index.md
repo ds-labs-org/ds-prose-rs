@@ -24,7 +24,7 @@ The layers are `<ds-odrl-prose [json]>`, then `ProseHandle` from `@ds-labs/prose
 npm install @ds-labs/prose-angular
 ```
 
-This also installs `@ds-labs/prose-wasm` as a dependency. Both packages are Apache-2.0 and have the same version.
+This also installs `@ds-labs/prose-wasm` as a dependency. Both packages are GPL-3.0-only and have the same version.
 
 ## Copy the wasm file into your assets
 

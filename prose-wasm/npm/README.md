@@ -146,4 +146,4 @@ does it:
 
 `package.json` records the `ds-prose-rs` workspace version the wasm was built
 from under `dsProse.prose-yew`. The package version is its own (semver).
-Licence: Apache-2.0.
+Licence: GPL-3.0-only.

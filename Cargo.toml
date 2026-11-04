@@ -18,7 +18,7 @@ version = "0.5.1"
 edition = "2024"
 # Let-chains (`if let ... && let ...`) are used throughout; stable since 1.88.
 rust-version = "1.88"
-license = "Apache-2.0"
+license = "GPL-3.0-only"
 repository = "https://github.com/ds-labs-org/ds-prose-rs"
 
 # The wasm that ships (npm package, demo): about 30% smaller over the wire

@@ -9,7 +9,7 @@
     "wasm",
     "dataspace"
   ],
-  "license": "Apache-2.0",
+  "license": "GPL-3.0-only",
   "author": "Nicolas Karageuzian",
   "homepage": "https://github.com/ds-labs-org/ds-prose-rs#readme",
   "repository": {

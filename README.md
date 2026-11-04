@@ -1129,3 +1129,9 @@ The demo's Profile field reads one profile at a time: paste it, pick a
 preset (the research profile of the tests, as JSON-LD or Turtle, or the
 W3C ODRL 2.2 vocabulary trimmed to its terms, see `demo/profiles/`), choose
 a file, or load a URL. Applying is explicit, and both tabs use it.
+
+## Licence
+
+GPL-3.0-only. The full text is in `LICENSE`. The npm packages `@ds-labs/prose-wasm`
+and `@ds-labs/prose-angular` carry the same licence from version 0.5.1 on; earlier
+releases stay under Apache-2.0.

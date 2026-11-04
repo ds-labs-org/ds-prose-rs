@@ -36,7 +36,7 @@ for (const file of files) {
   manifests[pkg.name] = pkg;
 
   for (const f of ['package.json', 'README.md', 'LICENSE']) need(has(f), `${tag}: missing ${f}`);
-  need(pkg.license === 'Apache-2.0', `${tag}: license is ${pkg.license}`);
+  need(pkg.license === 'GPL-3.0-only', `${tag}: license is ${pkg.license}`);
   need(pkg.repository?.url?.includes('ds-labs-org/ds-prose-rs'), `${tag}: no repository`);
   need(!pkg.private, `${tag}: is marked private`);
   need(pkg.publishConfig?.access === 'public', `${tag}: publishConfig.access is not public`);

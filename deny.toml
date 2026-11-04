@@ -18,8 +18,9 @@ ignore = [
 ]
 
 [licenses]
-# This repository is Apache-2.0. Only permissive licences are accepted from
-# dependencies; add one here deliberately, with a reason, not to silence a failure.
+# The workspace's own crates are GPL-3.0-only. Dependencies are accepted only
+# under the permissive licences below, all compatible with GPLv3; add one here
+# deliberately, with a reason, not to silence a failure.
 allow = [
   "Apache-2.0",
   "Apache-2.0 WITH LLVM-exception",
@@ -32,6 +33,15 @@ allow = [
   "CC0-1.0",
 ]
 confidence-threshold = 0.9
+# The published workspace crates are GPL-3.0-only. The publish = false members
+# (compliance-catalog, demo, prose-wasm) are skipped by the private setting.
+exceptions = [
+  { allow = ["GPL-3.0-only"], crate = "prose-core" },
+  { allow = ["GPL-3.0-only"], crate = "prose-yew" },
+]
+
+[licenses.private]
+ignore = true
 
 [bans]
 multiple-versions = "warn"
