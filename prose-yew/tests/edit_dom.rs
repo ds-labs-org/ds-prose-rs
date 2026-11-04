@@ -1244,7 +1244,7 @@ async fn switching_wording_rerenders_without_resetting_doc_or_undo() {
     settle().await;
     assert_eq!(
         slot(&c, action).get_attribute("title").as_deref(),
-        Some("fine-tune")
+        Some("Fine-tune: To adapt an already trained model using the Asset. (ex:fineTune)")
     );
     assert_eq!(
         slot(&c, "policy[0]#uid").text_content().as_deref(),
@@ -1367,10 +1367,12 @@ async fn a_value_picked_into_a_text_slot_is_written_as_an_iri() {
         set_iris(&log),
         vec![(path.to_string(), "ex:academic".to_string())]
     );
-    // The slot now shows the value's label.
+    // The slot's tooltip carries the value's label, definition and IRI.
     assert_eq!(
         slot(&c, path).get_attribute("title").as_deref(),
-        Some("academic research")
+        Some(
+            "Academic research: Research carried out by an accredited academic institution with no commercial sponsor. (ex:academic)"
+        )
     );
 }
 

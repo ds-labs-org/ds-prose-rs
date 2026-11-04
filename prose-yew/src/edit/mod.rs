@@ -43,7 +43,7 @@ mod hook;
 mod problems;
 mod slot;
 mod suggest;
-mod view;
+pub(crate) mod view;
 
 use std::rc::Rc;
 use yew::prelude::*;

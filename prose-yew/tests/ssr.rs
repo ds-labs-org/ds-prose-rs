@@ -756,6 +756,30 @@ async fn odrl_prose_with_wording_renders_glossary_details() {
 }
 
 #[tokio::test]
+async fn a_mentioned_iri_the_profile_explains_is_titled_with_its_definition() {
+    // ex:academic is a declared right operand; the policy also names it as a
+    // target, which the reader notes as an IRI mention.
+    let json = r#"{
+      "@context": ["http://www.w3.org/ns/odrl.jsonld",
+                   { "ex": "https://example.org/odrl/profile/research/" }],
+      "@type": "Set", "uid": "https://example.org/policy/1",
+      "permission": [{
+        "target": "ex:academic", "action": "use",
+        "constraint": [{ "leftOperand": "ex:researchPurpose", "operator": "eq",
+                         "rightOperand": { "@id": "ex:academic" } }]
+      }]
+    }"#;
+    let html = ssr::<OdrlProse>(prose_props(json.into(), Some(research_wording()), false)).await;
+    let title = "Academic research: Research carried out by an accredited academic \
+                 institution with no commercial sponsor. \
+                 (https://example.org/odrl/profile/research/academic)";
+    assert!(
+        html.contains("class=\"prose-iri\"") && html.contains(&format!("title=\"{title}\"")),
+        "{html}"
+    );
+}
+
+#[tokio::test]
 async fn glossary_is_capped_per_policy() {
     // 40 declared actions, all used by one policy.
     let mut graph = vec![];
@@ -1230,4 +1254,25 @@ async fn profile_operator_options_agree_with_the_subject() {
         html.contains("are earlier than (https://example.org/odrl/profile/research/earlierThan)"),
         "{html}"
     );
+}
+
+#[tokio::test]
+async fn edit_slot_and_select_titles_follow_the_profile() {
+    let html = research_edit(&with_refinement("lteq"), vec![]).await;
+    let slot = "policy[0].permission[0].action[0]#name";
+    let at = html
+        .find(&format!("data-slot=\"{slot}\""))
+        .unwrap_or_else(|| panic!("no {slot} in:\n{html}"));
+    let start = html[..at].rfind('<').unwrap();
+    let tag = &html[start..at + html[at..].find('>').unwrap()];
+    assert!(
+        tag.contains(
+            "title=\"Fine-tune: To adapt an already trained model using the Asset. (ex:fineTune)\""
+        ),
+        "{tag}"
+    );
+    // A select whose value the profile does not declare keeps its display.
+    let sel = select_of(&html, REFINEMENT_OP);
+    let open = &sel[..sel.find('>').unwrap()];
+    assert!(open.contains("title=\"is at most\""), "{open}");
 }

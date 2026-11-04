@@ -319,7 +319,7 @@ pub(crate) fn choice_select(props: &ChoiceSelectProps) -> Html {
             aria-label={cfg.labels.slot_name(&c.path)}
             aria-invalid={invalid}
             aria-describedby={props.described_by.clone()}
-            title={c.display.clone()}
+            title={super::view::slot_title(&env, &c.display, &c.raw)}
             onchange={onchange}
             onfocusin={onfocusin}
             onfocusout={onfocusout}
