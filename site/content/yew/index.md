@@ -15,7 +15,7 @@ The crate targets Yew 0.23, Rust edition 2024, and Rust 1.88 or newer. The [Yew 
 
 ```toml
 [dependencies]
-prose-yew = "0.5"
+prose-yew = "0.6"
 yew = { version = "0.23", features = ["csr"] }
 ```
 
