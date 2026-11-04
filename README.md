@@ -909,8 +909,8 @@ With a profile, in Edit mode:
   own `@context` binds its namespace, else as the full IRI; a picked
   right-operand value is written as `{"@id": ...}` (`EditEvent::SetIri`),
   whatever the slot held before. No prefix is invented.
-- In Read mode, a profile term carries `title="{label}: {definition}
-  ({raw})"` and `data-iri`.
+- In Read and Edit mode, a profile term carries `title="{label}: {definition}
+  ({raw})"`; in Read mode it also carries `data-iri`.
 
 ### How editing behaves
 
@@ -1015,8 +1015,9 @@ only through the `"plaintext-only"` path.
   `subClassOf` within the loaded profiles, and no fetching (see Profiles).
   Turtle needs the `turtle` feature; RDF/XML is not read. `skos:note` and
   `skos:definition` prose is shown, never parsed into restrictions. The
-  read-only `OdrlProse` gets the profile's labels and a glossary, but no
-  per-term `title` (only `OdrlProseView`'s Read mode has those). Party
+  read-only `OdrlProse` gets the profile's labels and a glossary, and titles
+  an IRI mention with the profile's label and definition when the policy's
+  glossary has that IRI. Party
   functions and asset relations a profile declares are read, not offered
   in dropdowns. Only the label language is picked; the sentence templates
   stay English.
