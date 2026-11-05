@@ -725,8 +725,8 @@ async fn odrl_prose_with_wording_renders_glossary_details() {
     // The sentences use the profile's labels.
     assert!(html.contains("may fine-tune"), "{html}");
     for needle in [
-        // Yew writes a boolean attribute as open="open", attributes sorted.
-        "<details open=\"open\" class=\"prose-glossary\">",
+        // Collapsed by default: no `open` attribute.
+        "<details class=\"prose-glossary\">",
         "<summary>Terms from the profile</summary>",
         "<dt><span>Fine-tune</span> <code>ex:fineTune</code></dt>",
         "<dd>To adapt an already trained model using the Asset.</dd>",
@@ -739,6 +739,7 @@ async fn odrl_prose_with_wording_renders_glossary_details() {
     ] {
         assert!(html.contains(needle), "{needle} missing in:\n{html}");
     }
+    assert!(!html.contains("<details open"), "glossary must be collapsed:\n{html}");
     // One glossary per policy, inside it, after the rules.
     assert_eq!(html.matches("prose-glossary").count(), 1);
     let rules = html.find("prose-rules").unwrap();

@@ -122,7 +122,7 @@ pub fn prose_glossary(props: &GlossaryProps) -> Html {
             .join(", ")
     };
     html! {
-        <details class="prose-glossary" open=true>
+        <details class="prose-glossary">
             <summary>{ l.glossary_heading.clone() }</summary>
             <dl>
                 { for terms.iter().take(GLOSSARY_MAX).map(|g| html! {
