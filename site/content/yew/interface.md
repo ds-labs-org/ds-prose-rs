@@ -223,7 +223,7 @@ Keep the visible text of a button contained in its accessible name. A change of 
 | `glossary_heading` | `Terms from the profile` | Profiles and glossary |
 | `kind_of` | `A kind of:{terms}` | Profiles and glossary |
 | `implies` | `Implies:{terms}` | Profiles and glossary |
-| `usage_note` | `Usage:{note}` | Profiles and glossary |
+| `usage_note` | `Usage:{note}` | Profiles and glossary. A note that already starts with the text before `{note}` (case-insensitive) is shown alone. |
 | `from_profile` | `From {profile}` | Profiles and glossary |
 | `deprecated` | `Deprecated in the profile` | Profiles and glossary |
 | `suggested_operators` | `Suggested by the profile` | Profiles and glossary |

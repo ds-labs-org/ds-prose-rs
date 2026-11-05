@@ -662,6 +662,20 @@ pub fn fill(template: &str, vars: &[(&str, &str)]) -> String {
     out
 }
 
+/// A glossary term's usage note through the `usage_note` template, unless the
+/// note already starts with the template's own prefix (the text before
+/// `{note}`, trimmed, compared case-insensitively): then the note alone, so a
+/// profile that writes "Usage: ..." does not read "Usage: Usage: ...".
+pub(crate) fn usage_line(template: &str, note: &str) -> String {
+    if let Some((prefix, _)) = template.split_once("{note}") {
+        let prefix = prefix.trim().to_lowercase();
+        if !prefix.is_empty() && note.trim_start().to_lowercase().starts_with(&prefix) {
+            return note.to_string();
+        }
+    }
+    fill(template, &[("note", note)])
+}
+
 impl Nouns {
     pub fn rule(&self, list: RuleList) -> &AttrValue {
         match list {
@@ -1104,6 +1118,33 @@ mod tests {
         for c in v.conflicts.iter().filter(|c| !c.value.is_empty()) {
             assert_eq!(kind(&c.value), TermKind::ConflictTerm, "{}", c.value);
         }
+    }
+
+    #[test]
+    fn usage_line_does_not_repeat_the_template_prefix() {
+        let t = "Usage: {note}";
+        assert_eq!(usage_line(t, "Pick one."), "Usage: Pick one.");
+        assert_eq!(usage_line(t, "Usage: Pick one."), "Usage: Pick one.");
+        assert_eq!(usage_line(t, "usage:Pick one."), "usage:Pick one.");
+        assert_eq!(usage_line(t, "  USAGE: Pick one."), "  USAGE: Pick one.");
+        // Only a prefix counts, not a mention further in.
+        assert_eq!(usage_line(t, "See Usage: here"), "Usage: See Usage: here");
+        // A translated template compares against its own prefix.
+        let fr = "Utilisation : {note}";
+        assert_eq!(usage_line(fr, "Choisir."), "Utilisation : Choisir.");
+        assert_eq!(
+            usage_line(fr, "Utilisation : Choisir."),
+            "Utilisation : Choisir."
+        );
+        assert_eq!(
+            usage_line(fr, "Usage: Choisir."),
+            "Utilisation : Usage: Choisir."
+        );
+        // No literal prefix: always templated.
+        assert_eq!(usage_line("{note}", "Usage: x"), "Usage: x");
+        assert_eq!(usage_line("{note} (usage)", "x"), "x (usage)");
+        // A prefix that is empty after trimming never matches.
+        assert_eq!(usage_line("  {note}", "a"), "  a");
     }
 
     #[test]
