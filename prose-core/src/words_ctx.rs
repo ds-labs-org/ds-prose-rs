@@ -251,15 +251,50 @@ pub(crate) fn namespace(iri: &str) -> &str {
     }
 }
 
-/// The first letter lower-cased, unless the label starts with an acronym
-/// ("EU region" stays).
+/// A label read inside a sentence. A Title Case label (two or more words,
+/// each starting with an upper-case letter) has each plain capitalised word
+/// lower-cased ("Restricted Discovery Claim" becomes "restricted discovery
+/// claim"); acronyms and CamelCase words stay ("EU Data Act" becomes "EU data
+/// act"). Any other label only loses its first letter, unless it starts with
+/// an acronym ("EU region" stays).
 fn lower_first(label: &str) -> String {
+    let words: Vec<&str> = label.split(' ').collect();
+    let title_case = words.len() > 1
+        && words
+            .iter()
+            .all(|w| w.chars().next().is_some_and(char::is_uppercase));
+    if title_case {
+        return words
+            .iter()
+            .map(|w| {
+                if is_plain_capitalised(w) {
+                    w.to_lowercase()
+                } else {
+                    w.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+    }
     let mut chars = label.chars();
     match (chars.next(), chars.next()) {
         (Some(_), Some(second)) if second.is_uppercase() => label.to_string(),
         (Some(first), _) => first.to_lowercase().chain(label.chars().skip(1)).collect(),
         (None, _) => String::new(),
     }
+}
+
+/// A word that is a capital followed by no other capital ("Credential",
+/// "A"). Each part of a hyphenated word must be one, and a lone letter does
+/// not count there: "Data-Driven" is plain, "Eona-X" is not.
+fn is_plain_capitalised(word: &str) -> bool {
+    let hyphenated = word.contains('-');
+    word.split('-').all(|part| {
+        let mut chars = part.chars();
+        chars.next().is_some_and(char::is_uppercase)
+            && !chars.clone().any(char::is_uppercase)
+            && (!hyphenated || chars.next().is_some())
+    })
 }
 
 /// [`crate::wording::gloss`]: `written` as a policy with `prefixes` writes
@@ -334,5 +369,43 @@ pub(crate) fn operator_phrase(q: &OperatorQuery<'_>) -> String {
             ctx.operator_for(q.left, q.op, q.value)
         }
         None => words::built_in_phrase(q.left, q.op, words::plural_operand(q.left), q.value),
+    }
+}
+
+#[cfg(test)]
+mod lower_first_tests {
+    use super::lower_first;
+
+    #[test]
+    fn title_case_labels_are_lowercased_word_by_word() {
+        for (label, want) in [
+            ("Restricted Discovery Claim", "restricted discovery claim"),
+            ("Generic Claim", "generic claim"),
+            ("Membership", "membership"),
+            ("EU Data Act", "EU data act"),
+            (
+                "Membership Credential Groups",
+                "membership credential groups",
+            ),
+            ("MembershipCredential Groups", "MembershipCredential groups"),
+            ("Eona-X Member", "Eona-X member"),
+            ("Data-Driven Service", "data-driven service"),
+        ] {
+            assert_eq!(lower_first(label), want, "{label}");
+        }
+    }
+
+    #[test]
+    fn other_labels_only_lose_their_first_letter() {
+        for (label, want) in [
+            ("Paris region", "paris region"),
+            ("EU region", "EU region"),
+            ("number of data subjects", "number of data subjects"),
+            ("Purpose Of use", "purpose Of use"),
+            ("ODRL", "ODRL"),
+            ("", ""),
+        ] {
+            assert_eq!(lower_first(label), want, "{label}");
+        }
     }
 }
