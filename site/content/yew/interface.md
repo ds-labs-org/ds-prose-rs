@@ -64,7 +64,7 @@ The edit layer reads bare property keys only (`permission`, not `odrl:permission
 
 ## `ProseGlossary`
 
-Renders the profile terms one policy uses as `<details class="prose-glossary" open>` with a `<dl>`. `OdrlProse` uses it for you. Use it directly to place a glossary elsewhere. It renders nothing for an empty glossary, and shows at most 30 entries.
+Renders the profile terms one policy uses as `<details class="prose-glossary">` with a `<dl>`, collapsed by default. `OdrlProse` uses it for you. Use it directly to place a glossary elsewhere. It renders nothing for an empty glossary, and shows at most 30 entries.
 
 | Property | Type | Default | Meaning |
 |---|---|---|---|
@@ -223,7 +223,7 @@ Keep the visible text of a button contained in its accessible name. A change of 
 | `glossary_heading` | `Terms from the profile` | Profiles and glossary |
 | `kind_of` | `A kind of:{terms}` | Profiles and glossary |
 | `implies` | `Implies:{terms}` | Profiles and glossary |
-| `usage_note` | `Usage:{note}` | Profiles and glossary |
+| `usage_note` | `Usage:{note}` | Profiles and glossary. A note that already starts with the text before `{note}` (case-insensitive) is shown alone. |
 | `from_profile` | `From {profile}` | Profiles and glossary |
 | `deprecated` | `Deprecated in the profile` | Profiles and glossary |
 | `suggested_operators` | `Suggested by the profile` | Profiles and glossary |

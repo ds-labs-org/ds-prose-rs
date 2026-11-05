@@ -48,6 +48,7 @@ pub(crate) mod view;
 use std::rc::Rc;
 use yew::prelude::*;
 
+pub(crate) use config::usage_line;
 pub use config::{
     ButtonContent, Choice, EditConfig, EmptyTexts, FieldNames, Labels, Nouns, Placeholders,
     ProseClasses, ProseStyles, Reveal, Suggestion, Vocabulary, fill,

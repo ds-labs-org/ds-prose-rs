@@ -26,7 +26,6 @@
 //! [`OdrlProseView`] is the editing counterpart: the same sentences, with an
 //! Edit mode (see [`edit`]).
 pub mod edit;
-use edit::fill;
 pub use edit::{
     BASE_CSS, ButtonContent, Choice, Decoration, DecorationAt, EditConfig, EditMode, EmptyTexts,
     FieldNames, FocusKind, Labels, Nouns, OdrlProseView, OdrlProseViewProps, Placeholders,
@@ -34,6 +33,7 @@ pub use edit::{
     Reveal, SlotFocus, StrictEdit, Suggestion, Vocabulary, filter_suggestions, use_prose_editor,
     use_prose_editor_with, use_validation,
 };
+use edit::{fill, usage_line};
 /// The core crate, so hosts can reach `prose_yew::prose_core::edit::*`.
 pub use prose_core;
 use prose_core::profile::Wording;
@@ -122,14 +122,14 @@ pub fn prose_glossary(props: &GlossaryProps) -> Html {
             .join(", ")
     };
     html! {
-        <details class="prose-glossary" open=true>
+        <details class="prose-glossary">
             <summary>{ l.glossary_heading.clone() }</summary>
             <dl>
                 { for terms.iter().take(GLOSSARY_MAX).map(|g| html! {
                     <>
                         <dt><span>{ g.label.clone() }</span>{ " " }<code>{ g.written.clone() }</code></dt>
                         if let Some(d) = &g.definition { <dd>{ d.clone() }</dd> }
-                        if let Some(n) = &g.note { { line("prose-note", &l.usage_note, "note", n) } }
+                        if let Some(n) = &g.note { <dd class="prose-note">{ usage_line(&l.usage_note, n) }</dd> }
                         if !g.broader.is_empty() {
                             { line("prose-kind-of", &l.kind_of, "terms", &labels(&g.broader)) }
                         }

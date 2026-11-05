@@ -725,8 +725,8 @@ async fn odrl_prose_with_wording_renders_glossary_details() {
     // The sentences use the profile's labels.
     assert!(html.contains("may fine-tune"), "{html}");
     for needle in [
-        // Yew writes a boolean attribute as open="open", attributes sorted.
-        "<details open=\"open\" class=\"prose-glossary\">",
+        // Collapsed by default: no `open` attribute.
+        "<details class=\"prose-glossary\">",
         "<summary>Terms from the profile</summary>",
         "<dt><span>Fine-tune</span> <code>ex:fineTune</code></dt>",
         "<dd>To adapt an already trained model using the Asset.</dd>",
@@ -739,6 +739,10 @@ async fn odrl_prose_with_wording_renders_glossary_details() {
     ] {
         assert!(html.contains(needle), "{needle} missing in:\n{html}");
     }
+    assert!(
+        !html.contains("<details open"),
+        "glossary must be collapsed:\n{html}"
+    );
     // One glossary per policy, inside it, after the rules.
     assert_eq!(html.matches("prose-glossary").count(), 1);
     let rules = html.find("prose-rules").unwrap();
@@ -820,6 +824,59 @@ async fn prose_glossary_caps_what_a_host_hands_it() {
     })
     .await;
     assert_eq!(html.matches("<dt>").count(), 30, "{html}");
+}
+
+#[tokio::test]
+async fn glossary_note_that_starts_with_the_prefix_is_not_prefixed_again() {
+    let profile = r#"{
+        "@context": {"odrl": "http://www.w3.org/ns/odrl/2/", "ex": "https://example.org/x/",
+                     "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+                     "skos": "http://www.w3.org/2004/02/skos/core#"},
+        "@graph": [
+          {"@id": "ex:a", "@type": "odrl:Action", "rdfs:label": "A", "skos:note": "Usage: use it."},
+          {"@id": "ex:b", "@type": "odrl:Action", "rdfs:label": "B", "skos:note": "Use it."}]
+    }"#;
+    let w = Rc::new(Wording::new().with_profile(ProfileVocab::parse(profile).unwrap()));
+    let prefixes = prose_core::edit::prefixes(
+        &read_model(r#"{"@context": {"ex": "https://example.org/x/"}, "@type": "Set"}"#).unwrap(),
+    );
+    let mut glossary = prose_core::PolicyGlossary::default();
+    glossary.terms = ["ex:a", "ex:b"]
+        .iter()
+        .map(|t| prose_core::wording::gloss(&w, &prefixes, t).unwrap())
+        .collect();
+    let render = |labels: Rc<prose_yew::Labels>| {
+        ssr::<prose_yew::ProseGlossary>(prose_yew::GlossaryProps {
+            glossary: glossary.clone(),
+            labels,
+        })
+    };
+    // The default template.
+    let html = render(Rc::default()).await;
+    assert!(
+        html.contains("<dd class=\"prose-note\">Usage: use it.</dd>"),
+        "{html}"
+    );
+    assert!(!html.contains("Usage: Usage:"), "{html}");
+    assert!(
+        html.contains("<dd class=\"prose-note\">Usage: Use it.</dd>"),
+        "{html}"
+    );
+    // A custom template.
+    let mut labels = prose_yew::Labels::default();
+    labels.usage_note = "Note d'usage : {note}".into();
+    let html = render(Rc::new(labels)).await;
+    assert!(
+        html.contains("<dd class=\"prose-note\">Note d'usage : Usage: use it.</dd>"),
+        "{html}"
+    );
+    let mut labels = prose_yew::Labels::default();
+    labels.usage_note = "Usage {note}".into();
+    let html = render(Rc::new(labels)).await;
+    assert!(
+        html.contains("<dd class=\"prose-note\">Usage: use it.</dd>"),
+        "{html}"
+    );
 }
 
 #[tokio::test]
