@@ -460,7 +460,7 @@ order. A change to `@1` may only add keys; removing or renaming one is `@2`.
 
 ```json
 { "schema": "ds-prose/validation-report@1",
-  "tool": {"name": "ds-prose-rs", "version": "0.6.0"},
+  "tool": {"name": "ds-prose-rs", "version": "0.6.1"},
   "mode": "strict",
   "tiers": ["profile", "prose", "input"],
   "ruleset": 1,
@@ -668,6 +668,12 @@ The profile types can grow too: `ProfileVocab`, `Wording`, `Prefixes` and
 `PolicyGlossary` and `Gloss` are `#[non_exhaustive]` structs: read their
 fields, and start from `ProfileLimits::default()` to change a limit. So is
 `edit::ChoiceSlot`: build one with `ChoiceSlot::new` and set its fields.
+
+Changed in 0.6.1 (wording and markup): a Title Case label of two or more words
+reads in lower case inside a sentence ("Restricted Discovery Claim" becomes
+"restricted discovery claim"; acronyms and CamelCase words stay). The profile
+glossary of `OdrlProse` is collapsed by default, and its note no longer repeats
+"Usage:".
 
 Changed in 0.6.0: the licence is GPL-3.0-only (0.5.1 and earlier are Apache-2.0).
 In Edit mode a slot or select that holds a term a loaded profile explains has
