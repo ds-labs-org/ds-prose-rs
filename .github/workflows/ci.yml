@@ -174,7 +174,7 @@ jobs:
           # wasm-pack builds the npm package (0.14 or newer: --profile);
           # Trunk builds the Yew demo that goes into the site tree.
           tool: trunk@0.22.0-beta.2,wasm-pack@0.15.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           # Angular 20 (the demo) needs Node 20.19, 22.12 or newer; the
           # wrapper's tests use Node's built-in TypeScript stripping (22.18+).
