@@ -1370,7 +1370,10 @@ async fn a_rule_target_limited_to_zero_leaves_no_unspecified_asset() {
     for mode in [EditMode::Edit, EditMode::Read] {
         let html = render_view(props(bare(), mode, cfg.clone())).await;
         assert!(!html.contains("an unspecified asset"), "{mode:?}:\n{html}");
-        assert!(!html.contains(" ."), "{mode:?}:\n{html}");
+        // The sentence ends "use.", whatever the base CSS says.
+        let body = html.split("</style>").last().unwrap();
+        assert!(!body.contains(" ."), "{mode:?}:\n{html}");
+        assert!(body.contains("use"), "{mode:?}:\n{html}");
     }
 }
 
