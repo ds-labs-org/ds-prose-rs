@@ -1,5 +1,6 @@
 //! `<ProseProblems>`: the findings of a validation, grouped by rule, each
-//! with a button that goes to it and one per fix.
+//! with a button that goes to it and one per fix. A report without findings
+//! and without a verdict (advisory mode) renders nothing.
 use std::rc::Rc;
 use yew::prelude::*;
 
@@ -150,6 +151,10 @@ pub fn prose_problems(props: &ProseProblemsProps) -> Html {
             },
         )
     };
+    // Nothing to say: no findings, and an advisory report has no verdict.
+    if report.findings.is_empty() && status.is_none() {
+        return Html::default();
+    }
     html! {
         <section class={classes!("prose-problems", class.clone())}>
             <h3 class="prose-problems-heading" ref={heading}>{ labels.problems_heading.clone() }</h3>
