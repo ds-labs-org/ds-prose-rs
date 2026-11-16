@@ -316,3 +316,17 @@ async fn the_no_rule_note_goes_once_a_rule_is_added() {
         c.inner_html()
     );
 }
+
+#[wasm_bindgen_test]
+async fn an_advisory_validation_without_findings_shows_no_problems_heading() {
+    let (c, mut h, _calls) = mount(ONE).await;
+    h.set_validation(js(r#"{"strict":false}"#))
+        .expect("validation");
+    settle().await;
+    assert!(
+        select(&c, ".prose-problems-heading").is_none(),
+        "{}",
+        c.inner_html()
+    );
+    assert!(select(&c, ".prose-problems").is_none());
+}
