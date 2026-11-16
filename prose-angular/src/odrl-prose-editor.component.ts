@@ -11,8 +11,9 @@ import {
   signal,
 } from '@angular/core';
 import type { EditLimits, ProseEditorHandle, ValidateOptions, ValidationReport } from '@ds-labs/prose-wasm';
-import { ProfileSummary, parseSummary } from './profile-sync';
-import { createChangeTracker, parseReport, profileTexts, reportChanged, validationOptions } from './validation-sync';
+import { type EditorInputs, EditorSession } from './editor-sync';
+import type { ProfileSummary } from './profile-sync';
+import { parseReport, profileTexts, reportChanged, validationOptions } from './validation-sync';
 import { PROSE_WASM_MODULE, PROSE_WASM_URL, type ProseWasmModule, loadWasm } from './wasm-runtime';
 
 /**
@@ -92,121 +93,52 @@ export class OdrlProseEditorComponent implements OnChanges, OnDestroy {
   private readonly wasmUrl = inject(PROSE_WASM_URL);
   private readonly wasmModule = inject(PROSE_WASM_MODULE);
   private wasm?: ProseWasmModule;
-  private handle?: ProseEditorHandle;
-  private readonly profilesChanged = createChangeTracker<string[]>();
-  private readonly optionsChanged = createChangeTracker<ValidateOptions>();
-  private readonly limitsChanged = createChangeTracker<EditLimits>();
-  // The text the handle holds as far as this component knows: the last one
-  // given to it or emitted by it.
-  private lastJson?: string;
-  private lastClass: string | null = null;
-  private destroyed = false;
+  private readonly session = new EditorSession<ProseEditorHandle>({
+    // Both run inside the wasm call of an edit, back in Angular's zone.
+    publish: (report) => this.publish(report),
+    emit: (text) => this.jsonChange.emit(text),
+  });
 
   ngOnChanges(): void {
     void this.sync();
   }
 
   ngOnDestroy(): void {
-    this.destroyed = true;
-    this.handle?.destroy();
-    this.handle?.free();
-    this.handle = undefined;
+    this.session.destroy();
   }
 
   private async sync(): Promise<void> {
     try {
       this.wasm = await loadWasm({ module: this.wasmModule, url: this.wasmUrl });
     } catch (error) {
-      if (!this.destroyed) this.showLoadError(error);
+      if (!this.session.destroyed) this.showLoadError(error);
       return;
     }
-    if (this.destroyed) return;
+    if (this.session.destroyed) return;
     // Only the error message can be in the host before the first mount.
-    if (!this.handle) this.host.replaceChildren();
-    const json = this.json();
-    const cls = this.articleClass() ?? null;
-    const single = this.profiles() == null;
-    const texts = profileTexts(this.profile(), this.profiles());
-    const options = validationOptions(this.strict(), this.validation());
-    const limits = this.limits();
+    if (!this.session.handle) this.host.replaceChildren();
+    const inputs: EditorInputs = {
+      json: this.json(),
+      cls: this.articleClass() ?? null,
+      single: this.profiles() == null,
+      texts: profileTexts(this.profile(), this.profiles()),
+      options: validationOptions(this.strict(), this.validation()),
+      limits: this.limits(),
+    };
     // Yew schedules its own work; keep it out of Angular's change detection.
-    const outcome = this.zone.runOutsideAngular(() => {
-      const out: {
-        summaries?: ProfileSummary[];
-        jsonError?: unknown;
-        profileError?: unknown;
-        validationError?: unknown;
-        report?: string | null;
-      } = {};
-      let handle = this.handle;
-      if (!handle) {
-        try {
-          handle = new this.wasm!.ProseEditorHandle(this.host, json, cls, (text, report) => this.onChange(text, report));
-        } catch (error) {
-          // Nothing is mounted; the next change of an input tries again.
-          out.jsonError = error;
-          return out;
-        }
-        this.handle = handle;
-        this.lastJson = json;
-        this.lastClass = cls;
-      } else if (json !== this.lastJson || cls !== this.lastClass) {
-        try {
-          handle.update(json, cls);
-          this.lastJson = json;
-          this.lastClass = cls;
-        } catch (error) {
-          // The document on screen stays.
-          out.jsonError = error;
-        }
-      }
-      // The profiles go first, so the validation below uses them.
-      if (this.profilesChanged(texts)) {
-        try {
-          out.summaries = single
-            ? [parseSummary(handle.setProfile(texts?.[0] ?? null))].filter((x) => x != null)
-            : (JSON.parse(handle.setProfiles(texts ?? [])) as ProfileSummary[]);
-        } catch (error) {
-          out.profileError = error;
-        }
-      }
-      if (this.limitsChanged(limits)) {
-        try {
-          handle.setLimits(limits ?? null);
-        } catch (error) {
-          // The previous limits stay; there is no output for this, a host
-          // error in the limits is a programming error.
-          console.error('ds-odrl-prose-editor: the limits are not readable', error);
-        }
-      }
-      if (this.optionsChanged(options)) {
-        try {
-          handle.setValidation(options);
-        } catch (error) {
-          out.validationError = error;
-        }
-      }
-      try {
-        out.report = handle.report();
-      } catch (error) {
-        out.validationError ??= error;
-      }
-      return out;
-    });
+    const outcome = this.zone.runOutsideAngular(() =>
+      this.session.apply(
+        inputs,
+        (json, cls, onChange) =>
+          new this.wasm!.ProseEditorHandle(this.host, json, cls, (text, report) => this.zone.run(() => onChange(text, report))),
+      ),
+    );
+    if (!outcome) return;
     if (outcome.jsonError !== undefined) this.jsonError.emit(outcome.jsonError);
     if (outcome.profileError !== undefined) this.profileError.emit(outcome.profileError);
     for (const summary of outcome.summaries ?? []) this.profileLoaded.emit(summary);
     if (outcome.validationError !== undefined) this.validationError.emit(outcome.validationError);
     if (outcome.report !== undefined) this.publish(parseReport<ValidationReport>(outcome.report));
-  }
-
-  /** The editor committed an edit. Runs inside the wasm call: no calls back into the handle. */
-  private onChange(text: string, report: string | null): void {
-    this.zone.run(() => {
-      this.lastJson = text;
-      this.publish(parseReport<ValidationReport>(report));
-      this.jsonChange.emit(text);
-    });
   }
 
   private publish(next: ValidationReport | null): void {
@@ -221,7 +153,7 @@ export class OdrlProseEditorComponent implements OnChanges, OnDestroy {
   private showLoadError(error: unknown): void {
     console.error('ds-odrl-prose-editor: could not load the wasm module', error);
     // A mounted Yew tree owns the host's children: leave it alone.
-    if (!this.handle) {
+    if (!this.session.handle) {
       const message = document.createElement('p');
       message.className = 'prose-error';
       message.setAttribute('role', 'alert');
