@@ -839,8 +839,18 @@ impl Rend<'_> {
             && self.cfg().rules.limit(self.doc, &l.path).max == Some(0)
     }
 
+    /// A capped list whose empty text is part of a sentence that stays
+    /// ("Between no assigner (assigner) and ..."): the text is kept, with no
+    /// add button.
+    fn keeps_empty_text(l: &SlotList) -> bool {
+        matches!(
+            l.empty,
+            prose_core::edit::EmptyText::NoAssigner | prose_core::edit::EmptyText::AnyoneObject
+        )
+    }
+
     fn is_hidden_list(&self, seg: Option<&Segment>) -> bool {
-        matches!(seg, Some(Segment::List(l)) if self.list_hidden(l))
+        matches!(seg, Some(Segment::List(l)) if self.list_hidden(l) && !Self::keeps_empty_text(l))
     }
 
     /// A sentence made around lists that are all hidden has nothing left to
@@ -854,6 +864,17 @@ impl Rend<'_> {
         first.is_some() && first.into_iter().chain(lists).all(|l| self.list_hidden(l))
     }
 
+    /// The empty text of a capped list inside a sentence that stays.
+    fn capped_empty_text(&self, l: &SlotList) -> Html {
+        let cfg = self.cfg();
+        let text = cfg.labels.empty.get(l.empty);
+        html! {
+            <span class={cls!(cfg, empty, "prose-empty")} style={cfg.styles.empty.clone()}>
+                { text }
+            </span>
+        }
+    }
+
     fn sentence(&self, s: &Sentence) -> Html {
         let segs = &s.segments;
         html! {
@@ -862,7 +883,12 @@ impl Rend<'_> {
                     // The space before a hidden list goes with it.
                     !(matches!(seg, Segment::Text(t) if t.trim().is_empty())
                         && self.is_hidden_list(segs.get(i + 1)))
-                }).map(|(_, seg)| self.segment(seg)) }
+                }).map(|(_, seg)| match seg {
+                    Segment::List(l) if self.list_hidden(l) && Self::keeps_empty_text(l) => {
+                        self.capped_empty_text(l)
+                    }
+                    _ => self.segment(seg),
+                }) }
             </>
         }
     }
