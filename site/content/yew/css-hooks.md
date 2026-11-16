@@ -77,6 +77,7 @@ Two more selectors have no class. A closed slot has `data-closed="true"`. A rule
 |---|---|---|
 | `.prose-problems` | `section` | The panel root. The `class` prop is appended here. |
 | `.prose-problems-heading` | `h3` | The heading. It takes focus after a fix removed the focused button. |
+| `.prose-problems-clear` | `div` | Empty. Left in place of a panel that was shown and has no findings left, so the focus has somewhere to go. |
 | `.prose-problems-status` | `p[role="status"]` | The verdict, for a strict report only, with one of `.prose-conforms`, `.prose-incomplete`, `.prose-violations-found`. |
 | `.prose-problems-counts` | `p` | The counts of errors, warnings and notes. |
 | `.prose-problem-groups` | `ol` | The groups, one per rule. |

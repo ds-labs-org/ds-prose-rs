@@ -83,6 +83,10 @@ The findings of a validation, grouped by rule, each with a "Go to" button and on
 | `labels` | `Rc<Labels>` | `Labels::default()` | The words of the panel. |
 | `class` | `Classes` | empty | Added to the panel root. |
 
+With no findings and no verdict, the panel renders nothing. If it was shown before, it leaves an empty `.prose-problems-clear` element that holds the focus after a fix cleared the last finding.
+
+A host that wires `onjump` itself can reuse the panel's own behaviour: `target_selectors(&target)` lists the CSS selectors that "Go to" tries for a target, best first, and `go_to(&root, &target)` moves the focus to the first match under `root` and scrolls it into view (`false` when nothing matched).
+
 ## Hooks
 
 A ready-made host. It owns the document, applies each event with the rules, and keeps an undo history capped at 50 entries.
