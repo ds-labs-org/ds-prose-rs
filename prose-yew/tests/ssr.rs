@@ -1333,3 +1333,69 @@ async fn edit_slot_and_select_titles_follow_the_profile() {
     let open = &sel[..sel.find('>').unwrap()];
     assert!(open.contains("title=\"is at most\""), "{open}");
 }
+
+// --- lists limited to zero ------------------------------------------------------
+
+const BARE_PERMISSION: &str = r#"{"@context":"http://www.w3.org/ns/odrl.jsonld","@type":"Set","uid":"urn:p:1","permission":[{"action":"use"}]}"#;
+
+fn bare() -> Rc<EditDoc> {
+    Rc::new(read_model(BARE_PERMISSION).unwrap())
+}
+
+#[tokio::test]
+async fn a_policy_with_no_party_slots_has_no_between_sentence() {
+    for mode in [EditMode::Edit, EditMode::Read] {
+        let html = render_view(props(bare(), mode, EditConfig::default())).await;
+        assert!(html.contains("Between "), "{mode:?} default:\n{html}");
+        let mut cfg = EditConfig::default();
+        cfg.rules.policy_assigner = Limit::NONE;
+        cfg.rules.policy_assignee = Limit::NONE;
+        let html = render_view(props(bare(), mode, cfg)).await;
+        assert!(!html.contains("Between "), "{mode:?}:\n{html}");
+        assert!(!html.contains("prose-intro"), "{mode:?}:\n{html}");
+        // One party list left: the sentence stays.
+        let mut cfg = EditConfig::default();
+        cfg.rules.policy_assigner = Limit::NONE;
+        let html = render_view(props(bare(), mode, cfg)).await;
+        assert!(html.contains("Between "), "{mode:?} partial:\n{html}");
+    }
+}
+
+#[tokio::test]
+async fn a_rule_target_limited_to_zero_leaves_no_unspecified_asset() {
+    let html = render_view(props(bare(), EditMode::Edit, EditConfig::default())).await;
+    assert!(html.contains("an unspecified asset"), "{html}");
+    let mut cfg = EditConfig::default();
+    cfg.rules.rule_target = Limit::NONE;
+    for mode in [EditMode::Edit, EditMode::Read] {
+        let html = render_view(props(bare(), mode, cfg.clone())).await;
+        assert!(!html.contains("an unspecified asset"), "{mode:?}:\n{html}");
+        assert!(!html.contains(" ."), "{mode:?}:\n{html}");
+    }
+}
+
+#[tokio::test]
+async fn a_policy_action_limited_to_zero_is_not_shown_and_the_conflict_stays() {
+    let mut cfg = EditConfig::default();
+    cfg.rules.policy_action = Limit::NONE;
+    let html = render_view(props(doc_of("agreement"), EditMode::Edit, cfg)).await;
+    assert!(!html.contains("Covers the action "), "{html}");
+    let html = render_view(props(
+        doc_of("agreement"),
+        EditMode::Edit,
+        EditConfig::default(),
+    ))
+    .await;
+    assert!(
+        html.contains("If a permission and a prohibition conflict"),
+        "{html}"
+    );
+}
+
+#[tokio::test]
+async fn a_rule_assignee_limited_to_zero_still_says_anyone() {
+    let mut cfg = EditConfig::default();
+    cfg.rules.rule_assignee = Limit::NONE;
+    let html = render_view(props(bare(), EditMode::Edit, cfg)).await;
+    assert!(html.contains("Anyone"), "{html}");
+}
