@@ -139,3 +139,41 @@ export interface RuleInfo {
   /** Whether an editor may refuse an edit that makes it. */
   refusable: boolean;
 }
+
+/** A list the editor limits: `permission` is the rule list, `policyAssigner` the assigner list of the policy, `ruleAssigner` that of a rule, and so on. */
+export type LimitName =
+  | "policies"
+  | "permission"
+  | "prohibition"
+  | "obligation"
+  | "duty"
+  | "remedy"
+  | "consequence"
+  | "policyAssigner"
+  | "policyAssignee"
+  | "policyTarget"
+  | "policyAction"
+  | "ruleAssigner"
+  | "ruleAssignee"
+  | "ruleTarget"
+  | "ruleAction"
+  | "actionRefinement"
+  | "entityRefinement"
+  | "constraints"
+  | "logicalChildren"
+  | "rightOperandValues"
+  | "profile"
+  | "inheritFrom";
+
+/**
+ * How many items a list may hold. A given entry replaces the editor's
+ * default for that list: `min` defaults to 0 and `max` to `null`
+ * (unbounded). `{ max: 0 }` removes the list's add button.
+ */
+export interface LimitSpec {
+  min?: number;
+  max?: number | null;
+}
+
+/** The lists to limit, by name; a list not named keeps its default. */
+export type EditLimits = Partial<Record<LimitName, LimitSpec>>;

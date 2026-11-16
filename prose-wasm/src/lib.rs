@@ -10,12 +10,17 @@
 //! reads several, and `setValidation` adds the validator's findings to the
 //! rendering.
 //!
+//! [`ProseEditorHandle`] mounts the editing view (`OdrlProseView` in Edit
+//! mode) the same way and reports each committed edit as JSON-LD text; see
+//! the [`editor`] module.
+//!
 //! Validation also works without the DOM: [`validate`], [`rules`] and
 //! [`ProseValidator`] are plain functions over text, so a Node script can
 //! call them after `initSync`. They return the report as JSON text
 //! (`ds-prose/validation-report@1`), the same bytes everywhere.
 pub mod editor;
 pub mod validation;
+pub use editor::ProseEditorHandle;
 use prose_core::profile::{ProfileError, ProfileVocab, Wording};
 use prose_core::validate::{Options, Validator};
 use prose_yew::{OdrlProse, OdrlProseProps, SharedWording};
@@ -52,7 +57,7 @@ fn props(
 
 /// A JS value as JSON, through `JSON.stringify`: `None` for `undefined`.
 /// Errors when the value has no JSON form (a cycle, a BigInt, a function).
-fn to_json(v: &JsValue, what: &str) -> Result<Option<Value>, String> {
+pub(crate) fn to_json(v: &JsValue, what: &str) -> Result<Option<Value>, String> {
     if v.is_undefined() {
         return Ok(None);
     }
@@ -75,14 +80,14 @@ fn options_of(v: Option<&ValidateOptionsArg>) -> Result<Options, String> {
 
 /// The profile texts of a list; unlike [`validate`], a lone string is not
 /// accepted where the method says a list.
-fn texts_of(v: &JsValue) -> Result<Vec<String>, String> {
+pub(crate) fn texts_of(v: &JsValue) -> Result<Vec<String>, String> {
     match to_json(v, "profiles")? {
         Some(l @ Value::Array(_)) => validation::profile_list(&l),
         _ => Err("profiles must be a list of strings".to_string()),
     }
 }
 
-fn throw(e: String) -> JsError {
+pub(crate) fn throw(e: String) -> JsError {
     JsError::new(&e)
 }
 

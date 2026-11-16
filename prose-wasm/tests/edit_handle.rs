@@ -18,6 +18,7 @@ const CLOSED: &str = include_str!("../../prose-core/tests/profiles/research-clos
 
 const ONE: &str = r#"{"@context":"http://www.w3.org/ns/odrl.jsonld","@type":"Set","uid":"urn:policy:1","permission":[{"target":"urn:asset:1","action":"use"}]}"#;
 const OTHER: &str = r#"{"@context":"http://www.w3.org/ns/odrl.jsonld","@type":"Set","uid":"urn:policy:2","prohibition":[{"target":"urn:asset:2","action":"distribute"}]}"#;
+const FINE: &str = r#"{"@context":["http://www.w3.org/ns/odrl.jsonld",{"ex":"https://example.org/odrl/profile/research/"}],"@type":"Set","uid":"urn:policy:4","permission":[{"target":"urn:asset:1","action":"ex:fineTune"}]}"#;
 const FOREIGN: &str = r#"{"@context":["http://www.w3.org/ns/odrl.jsonld",{"foo":"https://example.net/foo/"}],"@type":"Set","uid":"urn:policy:3","profile":"https://example.org/odrl/profile/research","permission":[{"target":"urn:asset:1","action":"foo:bar"}]}"#;
 
 type Calls = Rc<RefCell<Vec<(String, Option<String>)>>>;
@@ -85,9 +86,9 @@ async fn mounting_renders_the_editor_and_does_not_call_back() {
 async fn an_edit_calls_back_once_with_the_json_ld() {
     let (c, h, calls) = mount(ONE).await;
     click(&c, ADD_PERMISSION).await;
-    let calls = calls.borrow();
-    assert_eq!(calls.len(), 1, "{calls:?}");
-    let (json, report) = &calls[0];
+    let recorded = calls.borrow().clone();
+    assert_eq!(recorded.len(), 1, "{recorded:?}");
+    let (json, report) = &recorded[0];
     assert_eq!(count(json, "permission"), 2, "{json}");
     assert_eq!(*report, None, "validation is off");
     assert_eq!(&h.json(), json, "json() is the text last emitted");
@@ -107,8 +108,16 @@ async fn update_with_the_emitted_text_is_a_no_op_and_another_policy_replaces() {
     h.update(OTHER, None).expect("another policy");
     settle().await;
     assert!(select(&c, "[data-add=\"policy[0]@prohibition\"]").is_some());
-    assert!(c.text_content().unwrap().contains("distribute"), "{}", c.inner_html());
-    assert_eq!(calls.borrow().len(), 1, "a document the host set is not reported");
+    assert!(
+        c.text_content().unwrap().contains("distribute"),
+        "{}",
+        c.inner_html()
+    );
+    assert_eq!(
+        calls.borrow().len(),
+        1,
+        "a document the host set is not reported"
+    );
     assert_eq!(h.json(), OTHER);
     // An edit after that is reported again.
     click(&c, "[data-add=\"policy[0]@prohibition\"]").await;
@@ -152,17 +161,21 @@ async fn limits_hide_the_controls_and_bad_limits_throw() {
 }
 
 #[wasm_bindgen_test]
-async fn set_profile_loads_the_profile_and_keeps_the_document() {
-    let (c, mut h, calls) = mount(ONE).await;
+async fn set_profile_words_the_slots_and_keeps_the_document() {
+    let (c, mut h, calls) = mount(FINE).await;
+    let slot = "[data-slot=\"policy[0].permission[0].action[0]#name\"]";
+    let before = select(&c, slot)
+        .expect("the action slot")
+        .get_attribute("title")
+        .unwrap();
     let summary = h.set_profile(Some(RESEARCH.to_string())).expect("loads");
     assert!(summary.contains("\"Research Data Profile\""), "{summary}");
     settle().await;
-    assert!(select(&c, ".prose-edit").is_some());
-    assert!(
-        c.text_content().unwrap().contains("Research Data Profile"),
-        "{}",
-        c.inner_html()
-    );
+    let after = select(&c, slot)
+        .expect("the action slot")
+        .get_attribute("title")
+        .unwrap();
+    assert_ne!(before, after, "the profile explains the term in the title");
     assert!(calls.borrow().is_empty(), "a profile is not an edit");
     assert!(h.set_profile(Some("<!doctype html><p>x".into())).is_err());
     assert_eq!(h.set_profile(None).unwrap(), "null");
@@ -172,24 +185,28 @@ async fn set_profile_loads_the_profile_and_keeps_the_document() {
 async fn validation_shows_problems_and_reports_with_each_edit() {
     let (c, mut h, calls) = mount(FOREIGN).await;
     h.set_profile(Some(CLOSED.to_string())).expect("profile");
-    assert_eq!(h.report(), None, "validation is off");
+    assert!(h.report().is_null(), "validation is off");
     h.set_validation(js("{}")).expect("validation");
     settle().await;
-    assert!(select(&c, ".prose-problems").is_some(), "{}", c.inner_html());
-    let report = h.report().expect("a report");
+    assert!(
+        select(&c, ".prose-problems").is_some(),
+        "{}",
+        c.inner_html()
+    );
+    let report = h.report().as_string().expect("a report");
     assert!(report.contains("ds-prose/validation-report@1"), "{report}");
     assert!(report.contains("profile.unknown-term"), "{report}");
     assert!(calls.borrow().is_empty());
 
     click(&c, ADD_PERMISSION).await;
-    let calls = calls.borrow();
-    assert_eq!(calls.len(), 1);
-    let sent = calls[0].1.as_deref().expect("a report with the edit");
+    let recorded = calls.borrow().clone();
+    assert_eq!(recorded.len(), 1);
+    let sent = recorded[0].1.as_deref().expect("a report with the edit");
     assert!(sent.contains("ds-prose/validation-report@1"), "{sent}");
 
     h.set_validation(JsValue::NULL).expect("off");
     settle().await;
-    assert_eq!(h.report(), None);
+    assert!(h.report().is_null());
     assert!(select(&c, ".prose-problems").is_none());
     assert!(h.set_validation(js(r#"{"nope":1}"#)).is_err());
 }
