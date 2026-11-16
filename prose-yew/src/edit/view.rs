@@ -1256,6 +1256,31 @@ impl Rend<'_> {
         html! { <div class="prose-heading-row">{ h3 }{ controls }</div> }
     }
 
+    /// The heading: the type and the identifier. With the host holding the
+    /// identifier elsewhere (`policy_uid` capped at zero) an empty one is
+    /// dropped, with the space before it, and a present one is plain text.
+    fn heading_sentence(&self, h: &Sentence) -> Html {
+        if self.cfg().rules.policy_uid.max != Some(0) {
+            return self.sentence(h);
+        }
+        let is_uid = |seg: &Segment| matches!(seg, Segment::Slot(s) if s.kind == prose_core::edit::SlotKind::Uid);
+        let segs = &h.segments;
+        html! {
+            <>
+                { for segs.iter().enumerate().filter_map(|(i, seg)| match seg {
+                    Segment::Slot(s) if is_uid(seg) => (!s.raw.is_empty())
+                        .then(|| self.term(&s.display, &s.raw, &s.path)),
+                    Segment::Text(t)
+                        if t.trim().is_empty()
+                            && segs.get(i + 1).is_some_and(|n| {
+                                matches!(n, Segment::Slot(s) if is_uid(n) && s.raw.is_empty())
+                            }) => None,
+                    _ => Some(self.segment(seg)),
+                }) }
+            </>
+        }
+    }
+
     fn policy(&self, p: &PolicyProse) -> Html {
         let cfg = self.cfg();
         let list = ListPath::policies();
@@ -1312,7 +1337,7 @@ impl Rend<'_> {
                 { self.heading_row(
                     html! {
                         <>
-                            { self.sentence(&p.heading) }
+                            { self.heading_sentence(&p.heading) }
                             { self.decoration(DecorationAt::Policy, &p.path, p.node) }
                         </>
                     },
