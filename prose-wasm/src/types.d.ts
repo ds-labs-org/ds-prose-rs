@@ -172,6 +172,9 @@ export type LimitName =
  * (unbounded). `{ max: 0 }` removes the list's add button, and hides a list
  * that is empty. On `policyUid` it hides the policy's identifier (an empty
  * one is not shown, a present one is read-only) and a new policy gets none.
+ * The `odrl.policy-uid` validation rule still fires on a policy without an
+ * identifier: a host that caps `policyUid` at 0 sets it to `"off"` in
+ * `ValidateOptions.rules`.
  */
 export interface LimitSpec {
   min?: number;

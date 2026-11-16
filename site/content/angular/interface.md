@@ -81,7 +81,7 @@ The declared type is writable, because the source declares `readonly report = si
 |---|---|---|---|
 | `report` | `WritableSignal<ValidationReport \| null>` | `null` | The latest report. `null` while validation is off. Read it, do not set it. |
 
-`EditLimits` maps a list name (`policies`, `permission`, `prohibition`, `obligation`, `duty`, `remedy`, `consequence`, `policyAssigner`, `policyAssignee`, `policyTarget`, `policyAction`, `policyUid`, `ruleAssigner`, `ruleAssignee`, `ruleTarget`, `ruleAction`, `actionRefinement`, `entityRefinement`, `constraints`, `logicalChildren`, `rightOperandValues`, `profile`, `inheritFrom`) to `{ min?: number; max?: number | null }`.
+`EditLimits` maps a list name (`policies`, `permission`, `prohibition`, `obligation`, `duty`, `remedy`, `consequence`, `policyAssigner`, `policyAssignee`, `policyTarget`, `policyAction`, `policyUid`, `ruleAssigner`, `ruleAssignee`, `ruleTarget`, `ruleAction`, `actionRefinement`, `entityRefinement`, `constraints`, `logicalChildren`, `rightOperandValues`, `profile`, `inheritFrom`) to `{ min?: number; max?: number | null }`. A host that caps `policyUid` at 0 (the identifier lives elsewhere) should also set the `odrl.policy-uid` rule to `"off"` in `validation.rules`: the rule would otherwise report a policy without an identifier that nobody can set.
 
 The wasm work runs outside the zone and `jsonChange` and `validationChange` are emitted inside it, as for `ds-odrl-prose`. When the wasm cannot be loaded, the host shows a `p.prose-error` with `role="alert"`: "The ODRL prose editor could not be loaded (the URL)."
 
