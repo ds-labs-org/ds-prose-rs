@@ -118,6 +118,10 @@ pub fn prose_problems(props: &ProseProblemsProps) -> Html {
     // pressed is kept until the panel has rendered the new report; if it is
     // gone and the focus fell, the heading takes it.
     let heading = use_node_ref();
+    // Whether the panel has been shown: when its last finding goes (an
+    // advisory report has no verdict to keep it), an empty target stays for
+    // the focus, so it does not fall to the page.
+    let was_shown = use_mut_ref(|| false);
     let pressed = use_mut_ref(|| None::<web_sys::Element>);
     {
         let heading = heading.clone();
@@ -153,8 +157,12 @@ pub fn prose_problems(props: &ProseProblemsProps) -> Html {
     };
     // Nothing to say: no findings, and an advisory report has no verdict.
     if report.findings.is_empty() && status.is_none() {
+        if *was_shown.borrow() {
+            return html! { <div class="prose-problems-clear" ref={heading}></div> };
+        }
         return Html::default();
     }
+    *was_shown.borrow_mut() = true;
     html! {
         <section class={classes!("prose-problems", class.clone())}>
             <h3 class="prose-problems-heading" ref={heading}>{ labels.problems_heading.clone() }</h3>
