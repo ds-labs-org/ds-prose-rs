@@ -1402,3 +1402,36 @@ async fn a_rule_assignee_limited_to_zero_still_says_anyone() {
     let html = render_view(props(bare(), EditMode::Edit, cfg)).await;
     assert!(html.contains("Anyone"), "{html}");
 }
+
+// --- the policy identifier limit --------------------------------------------------
+
+fn uid_cfg() -> EditConfig {
+    let mut cfg = EditConfig::default();
+    cfg.rules.policy_uid = Limit::NONE;
+    cfg
+}
+
+#[tokio::test]
+async fn an_absent_identifier_the_host_holds_elsewhere_is_not_shown() {
+    let doc = Rc::new(
+        read_model(r#"{"@context":"http://www.w3.org/ns/odrl.jsonld","@type":"Set"}"#).unwrap(),
+    );
+    let html = render_view(props(doc.clone(), EditMode::Edit, EditConfig::default())).await;
+    assert!(html.contains("data-slot=\"policy[0]#uid\""), "{html}");
+    let html = render_view(props(doc, EditMode::Edit, uid_cfg())).await;
+    assert!(!html.contains("data-slot=\"policy[0]#uid\""), "{html}");
+    assert!(!html.contains("\"identifier\""), "{html}");
+}
+
+#[tokio::test]
+async fn a_present_identifier_the_host_holds_elsewhere_is_read_only() {
+    let html = render_view(props(bare(), EditMode::Edit, uid_cfg())).await;
+    assert!(!html.contains("data-slot=\"policy[0]#uid\""), "{html}");
+    let terms = spans_with(&html, "prose-term");
+    assert!(
+        terms
+            .iter()
+            .any(|t| t.contains("urn:p:1") && !t.contains("contenteditable")),
+        "{html}"
+    );
+}
