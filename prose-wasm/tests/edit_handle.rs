@@ -219,3 +219,82 @@ async fn destroy_removes_the_dom_and_is_idempotent() {
     settle().await;
     assert!(select(&c, ".prose-edit").is_none());
 }
+
+#[wasm_bindgen_test]
+async fn the_echo_keeps_the_editor_state_but_another_document_resets_it() {
+    let (c, mut h, calls) = mount(ONE).await;
+    // An empty policy type is refused; the editor shows why. A document
+    // set by the host clears that state, so it tells a reset from a no-op.
+    let kind = select(&c, "[data-slot=\"policy[0]#kind\"]")
+        .expect("the type slot")
+        .dyn_into::<HtmlElement>()
+        .unwrap();
+    kind.focus().unwrap();
+    kind.set_text_content(Some(""));
+    let input = web_sys::InputEventInit::new();
+    input.set_bubbles(true);
+    kind.dispatch_event(&web_sys::InputEvent::new_with_event_init_dict("input", &input).unwrap())
+        .unwrap();
+    let out = web_sys::FocusEventInit::new();
+    out.set_bubbles(true);
+    kind.dispatch_event(
+        &web_sys::FocusEvent::new_with_focus_event_init_dict("focusout", &out).unwrap(),
+    )
+    .unwrap();
+    settle().await;
+    assert!(
+        select(&c, ".prose-error[role=\"alert\"]").is_some(),
+        "the refusal: {}",
+        c.inner_html()
+    );
+    assert!(calls.borrow().is_empty(), "a refused edit is not reported");
+
+    h.update(ONE, None).expect("the echo");
+    settle().await;
+    assert!(
+        select(&c, ".prose-error[role=\"alert\"]").is_some(),
+        "the echo changed nothing"
+    );
+
+    h.update(OTHER, None).expect("another document");
+    settle().await;
+    assert!(
+        select(&c, ".prose-error[role=\"alert\"]").is_none(),
+        "another document starts clean"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn go_to_moves_the_focus_to_the_finding() {
+    let (c, mut h, _calls) = mount(FOREIGN).await;
+    h.set_profile(Some(CLOSED.to_string())).expect("profile");
+    h.set_validation(js("{}")).expect("validation");
+    settle().await;
+    let go = select(&c, ".prose-problem-go").expect("a Go to button");
+    go.dyn_into::<HtmlElement>().unwrap().click();
+    settle().await;
+    let active = web_sys::window()
+        .unwrap()
+        .document()
+        .unwrap()
+        .active_element()
+        .expect("something has the focus");
+    assert!(
+        select(&c, ".prose-edit").unwrap().contains(Some(&active)),
+        "the focus is in the editor, not on the button: {}",
+        active.outer_html()
+    );
+    assert!(
+        active.has_attribute("data-slot") || active.has_attribute("data-node"),
+        "{}",
+        active.outer_html()
+    );
+}
+
+#[wasm_bindgen_test]
+async fn dropping_the_handle_unmounts_the_editor() {
+    let (c, h, _calls) = mount(ONE).await;
+    drop(h);
+    settle().await;
+    assert!(select(&c, ".prose-edit").is_none());
+}
