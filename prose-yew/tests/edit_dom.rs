@@ -2367,9 +2367,10 @@ async fn ux3_a_render_of_the_panel_does_not_steal_the_focus() {
     (q(&c, "#toggle").dyn_into::<HtmlElement>().unwrap()).click();
     settle().await;
     assert!(
-        document()
-            .active_element()
-            .is_none_or(|a| !q(&c, ".prose-problems").contains(Some(&a))),
+        document().active_element().is_none_or(|a| c
+            .query_selector(".prose-problems")
+            .unwrap()
+            .is_none_or(|p| !p.contains(Some(&a)))),
         "the panel took the focus"
     );
 }
