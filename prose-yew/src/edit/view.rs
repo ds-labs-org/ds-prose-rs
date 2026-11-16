@@ -825,8 +825,46 @@ impl Rend<'_> {
         .collect()
     }
 
+    /// A list nobody can fill and that says nothing when empty: the host's
+    /// rules cap it at zero items. It leaves no trace in the sentence (the
+    /// "Anyone" and "The assignee" it stands for are still read aloud).
+    fn list_hidden(&self, l: &SlotList) -> bool {
+        l.items.is_empty()
+            && l.inherited.is_empty()
+            && !matches!(
+                l.empty,
+                prose_core::edit::EmptyText::AnyoneSubject
+                    | prose_core::edit::EmptyText::TheAssignee
+            )
+            && self.cfg().rules.limit(self.doc, &l.path).max == Some(0)
+    }
+
+    fn is_hidden_list(&self, seg: Option<&Segment>) -> bool {
+        matches!(seg, Some(Segment::List(l)) if self.list_hidden(l))
+    }
+
+    /// A sentence made around lists that are all hidden has nothing left to
+    /// say ("Between no assigner and anyone.").
+    fn sentence_hidden(&self, s: &Sentence) -> bool {
+        let mut lists = s.segments.iter().filter_map(|seg| match seg {
+            Segment::List(l) => Some(l),
+            _ => None,
+        });
+        let first = lists.next();
+        first.is_some() && first.into_iter().chain(lists).all(|l| self.list_hidden(l))
+    }
+
     fn sentence(&self, s: &Sentence) -> Html {
-        html! { <>{ for s.segments.iter().map(|seg| self.segment(seg)) }</> }
+        let segs = &s.segments;
+        html! {
+            <>
+                { for segs.iter().enumerate().filter(|(i, seg)| {
+                    // The space before a hidden list goes with it.
+                    !(matches!(seg, Segment::Text(t) if t.trim().is_empty())
+                        && self.is_hidden_list(segs.get(i + 1)))
+                }).map(|(_, seg)| self.segment(seg)) }
+            </>
+        }
     }
 
     fn locked(&self, l: &Locked) -> Html {
@@ -882,6 +920,9 @@ impl Rend<'_> {
     }
 
     fn slot_list(&self, l: &SlotList) -> Html {
+        if self.list_hidden(l) {
+            return Html::default();
+        }
         let cfg = self.cfg();
         let conj = match l.conj {
             prose_core::edit::Conj::And => "and",
@@ -1278,9 +1319,11 @@ impl Rend<'_> {
                     controls,
                 ) }
                 { self.issues_for(&p.path, &[&p.heading, &p.intro]) }
-                <p class={cls!(cfg, intro, "prose-intro")} style={cfg.styles.intro.clone()}>
-                    { self.sentence(&p.intro) }
-                </p>
+                if !self.sentence_hidden(&p.intro) {
+                    <p class={cls!(cfg, intro, "prose-intro")} style={cfg.styles.intro.clone()}>
+                        { self.sentence(&p.intro) }
+                    </p>
+                }
                 if !notes.is_empty() {
                     <ul class={cls!(cfg, notes, "prose-notes")} style={cfg.styles.notes.clone()}>
                         { for notes.iter().map(|n| html! {

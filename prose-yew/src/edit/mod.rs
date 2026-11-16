@@ -30,7 +30,9 @@
 //! Markup: every policy, rule and condition container carries
 //! `data-node="<NodePath>"`; slots `data-slot="<SlotPath>"`; add buttons
 //! `data-add="<ListPath>"`. Controls the [`EditRules`](prose_core::edit::EditRules) do not allow are not
-//! rendered.
+//! rendered, and neither is an empty list the rules cap at zero items (nor
+//! the intro sentence when all its lists are such): the policy's parties, a
+//! rule's target. Read mode follows the same rules.
 //!
 //! Server rendering: Yew 0.23's server renderer writes Edit mode's `<style>`
 //! text unchanged, so [`BASE_CSS`] arrives as CSS; `EditConfig::base_css` can
