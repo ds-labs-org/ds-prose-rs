@@ -1389,7 +1389,7 @@ async fn a_typed_slot_is_not_offered_unrelated_profile_values() {
 
 // --- strict validation ------------------------------------------------------------
 
-use prose_core::validate::Options;
+use prose_core::validate::{Level, Options, RuleId};
 use prose_yew::{ProseProblems, StrictEdit, use_prose_editor_with, use_validation};
 
 const CLOSED: &str = include_str!("../../prose-core/tests/profiles/research-closed.jsonld");
@@ -1441,6 +1441,8 @@ struct StrictProps {
     inject: Vec<EditEvent>,
     /// An action added to the vocabulary, which the profile does not allow.
     extra_action: Option<AttrValue>,
+    /// Options used when `strict` is on, instead of `Options::strict()`.
+    options: Option<Options>,
 }
 
 fn strict_props(json: &str, log: &Log, strict: bool, policy: StrictEdit) -> StrictProps {
@@ -1451,6 +1453,7 @@ fn strict_props(json: &str, log: &Log, strict: bool, policy: StrictEdit) -> Stri
         policy,
         inject: vec![],
         extra_action: None,
+        options: None,
     }
 }
 
@@ -1460,7 +1463,8 @@ fn strict_props(json: &str, log: &Log, strict: bool, policy: StrictEdit) -> Stri
 #[function_component(StrictHost)]
 fn strict_host(p: &StrictProps) -> Html {
     let strict = use_state(|| p.strict);
-    let config = use_memo((*strict, p.extra_action.clone()), |(strict, extra)| {
+    let options = p.options.clone();
+    let config = use_memo((*strict, p.extra_action.clone()), move |(strict, extra)| {
         let mut cfg = EditConfig::default().with_wording(closed_wording());
         if let Some(a) = extra {
             cfg.vocab
@@ -1468,7 +1472,7 @@ fn strict_host(p: &StrictProps) -> Html {
                 .push(prose_yew::Suggestion::new(a, a, None));
         }
         if *strict {
-            cfg = cfg.with_strict(Options::strict());
+            cfg = cfg.with_strict(options.clone().unwrap_or_else(Options::strict));
         }
         cfg
     });
@@ -2356,6 +2360,30 @@ async fn ux3_focus_stays_in_the_panel_after_a_fix_removes_its_button() {
     );
 }
 
+/// UX-3 in advisory mode: the panel disappears with its last finding, and
+/// the focus must not fall to <body>.
+#[wasm_bindgen_test]
+async fn ux3_focus_does_not_fall_when_an_advisory_panel_goes() {
+    let log = Log::default();
+    // Advisory mode, with the one rule that has a fix switched on by hand.
+    let json = STRICT_POLICY.replace(r#"[{"@id": "ex:academic"}]"#, r#"["ex:academic"]"#);
+    let mut props = strict_props(&json, &log, true, StrictEdit::Flag);
+    props.options = Some(Options::advisory().level(RuleId::ProseIriExpected, Level::Error));
+    let (c, _h) = mount_strict(props).await;
+    let fix = q(&c, ".prose-problems .prose-problem-fix")
+        .dyn_into::<HtmlElement>()
+        .unwrap();
+    fix.focus().unwrap();
+    fix.click();
+    settle().await;
+    assert!(
+        c.query_selector(".prose-problems").unwrap().is_none(),
+        "the panel is gone"
+    );
+    let active = document().active_element().expect("an active element");
+    assert_ne!(active.tag_name(), "BODY", "focus fell to the page");
+}
+
 /// UX-3: the panel does not take the focus on its own: a refused or stale
 /// fix leaves it where it was.
 #[wasm_bindgen_test]
@@ -2367,9 +2395,10 @@ async fn ux3_a_render_of_the_panel_does_not_steal_the_focus() {
     (q(&c, "#toggle").dyn_into::<HtmlElement>().unwrap()).click();
     settle().await;
     assert!(
-        document()
-            .active_element()
-            .is_none_or(|a| !q(&c, ".prose-problems").contains(Some(&a))),
+        document().active_element().is_none_or(|a| c
+            .query_selector(".prose-problems")
+            .unwrap()
+            .is_none_or(|p| !p.contains(Some(&a)))),
         "the panel took the focus"
     );
 }

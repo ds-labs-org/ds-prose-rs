@@ -139,3 +139,47 @@ export interface RuleInfo {
   /** Whether an editor may refuse an edit that makes it. */
   refusable: boolean;
 }
+
+/** A list the editor limits: `permission` is the rule list, `policyAssigner` the assigner list of the policy, `ruleAssigner` that of a rule, and so on. */
+export type LimitName =
+  | "policies"
+  | "permission"
+  | "prohibition"
+  | "obligation"
+  | "duty"
+  | "remedy"
+  | "consequence"
+  | "policyAssigner"
+  | "policyAssignee"
+  | "policyTarget"
+  | "policyAction"
+  | "policyUid"
+  | "ruleAssigner"
+  | "ruleAssignee"
+  | "ruleTarget"
+  | "ruleAction"
+  | "actionRefinement"
+  | "entityRefinement"
+  | "constraints"
+  | "logicalChildren"
+  | "rightOperandValues"
+  | "profile"
+  | "inheritFrom";
+
+/**
+ * How many items a list may hold. A given entry replaces the editor's
+ * default for that list: `min` defaults to 0 and `max` to `null`
+ * (unbounded). `{ max: 0 }` removes the list's add button, and hides a list
+ * that is empty. On `policyUid` it hides the policy's identifier (an empty
+ * one is not shown, a present one is read-only) and a new policy gets none.
+ * The `odrl.policy-uid` validation rule still fires on a policy without an
+ * identifier: a host that caps `policyUid` at 0 sets it to `"off"` in
+ * `ValidateOptions.rules`.
+ */
+export interface LimitSpec {
+  min?: number;
+  max?: number | null;
+}
+
+/** The lists to limit, by name; a list not named keeps its default. */
+export type EditLimits = Partial<Record<LimitName, LimitSpec>>;

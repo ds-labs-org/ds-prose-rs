@@ -47,7 +47,7 @@ pub fn read_model_value(value: &Value) -> Result<EditDoc, ProseError> {
                 r.warn("skipped a node that is not an ODRL policy");
                 policies.push(PolicyNode {
                     origin: Some(Origin::new(v.clone())),
-                    locked: Some("not an ODRL policy".into()),
+                    locked: Some(NOT_A_POLICY.into()),
                     ..PolicyNode::default()
                 });
             }
@@ -56,7 +56,10 @@ pub fn read_model_value(value: &Value) -> Result<EditDoc, ProseError> {
     if real == 0 {
         return Err(ProseError::NoPolicy);
     }
-    inheritance_warnings(&mut r, &policies, value);
+    let iris = Prefixes::of_document(value);
+    if inheritance_no_rules(&policies, &iris) {
+        r.warn(NO_RULES);
+    }
     let mut doc = EditDoc::new(policies);
     doc.shape = shape;
     doc.origin = origin;
@@ -69,33 +72,53 @@ pub fn read_model_value(value: &Value) -> Result<EditDoc, ProseError> {
     Ok(doc)
 }
 
+const NOT_A_POLICY: &str = "not an ODRL policy";
 const NO_RULES: &str = "a policy has no permission, prohibition or obligation";
 
 fn has_rules(p: &PolicyNode) -> bool {
     !(p.permission.is_empty() && p.prohibition.is_empty() && p.obligation.is_empty())
 }
 
-/// Warns, as `render` does, when a policy without rules of its own gets
-/// none by inheriting (ODRL IM 2.9) either: it inherits only from itself or
-/// from policies in the document that have no rules. Parents that are not
-/// in the document may have rules, so they are no reason to warn.
-fn inheritance_warnings(r: &mut Reader, policies: &[PolicyNode], value: &Value) {
-    let iris = Prefixes::of_document(value);
+/// Whether a policy that inherits has no rules after all: it inherits only
+/// from itself or from policies in the document that have no rules (ODRL IM
+/// 2.9), as `render` warns. Parents that are not in the document may have
+/// rules, so they are no reason to warn.
+fn inheritance_no_rules(policies: &[PolicyNode], iris: &Prefixes) -> bool {
     let uids: Vec<Option<String>> = policies.iter().map(|p| p.uid.clone()).collect();
     let parents: Vec<Vec<String>> = policies.iter().map(|p| p.inherit_from.clone()).collect();
     let (lineages, _) = lineages(&uids, &parents, |id| match id.contains(':') {
         true => iris.expand(id),
         false => id.to_string(),
     });
-    for (p, lineage) in policies.iter().zip(lineages) {
-        if !has_rules(p)
+    policies.iter().zip(lineages).any(|(p, lineage)| {
+        !has_rules(p)
             && !p.inherit_from.is_empty()
             && lineage.missing.is_empty()
             && !lineage.cut
             && !lineage.ancestors.iter().any(|&a| has_rules(&policies[a]))
-        {
-            r.warn(NO_RULES);
+    })
+}
+
+/// Whether the document has a policy without rules, as the reader warns:
+/// one that has none and inherits none, or whose inheritance gives it none.
+pub(crate) fn no_rules_note(policies: &[PolicyNode], iris: &Prefixes) -> bool {
+    policies.iter().any(|p| {
+        p.locked.as_deref() != Some(NOT_A_POLICY) && !has_rules(p) && p.inherit_from.is_empty()
+    }) || inheritance_no_rules(policies, iris)
+}
+
+/// Brings the no-rule note of `doc.warnings` in line with the document after
+/// an edit: removed when every policy has rules, kept (at its place) or
+/// added when one has none. The reader's other notes are left alone.
+pub(crate) fn refresh_rule_note(doc: &mut EditDoc) {
+    let at = doc.warnings.iter().position(|w| w == NO_RULES);
+    let wanted = no_rules_note(&doc.policies, &super::prefixes(doc));
+    match (at, wanted) {
+        (Some(_), true) | (None, false) => {}
+        (Some(i), false) => {
+            doc.warnings.remove(i);
         }
+        (None, true) => doc.warnings.push(NO_RULES.to_string()),
     }
 }
 
@@ -141,7 +164,7 @@ impl Reader {
         let Value::Object(o) = v else {
             return PolicyNode {
                 origin: locked_origin(v),
-                locked: Some("not an ODRL policy".into()),
+                locked: Some(NOT_A_POLICY.into()),
                 ..PolicyNode::default()
             };
         };

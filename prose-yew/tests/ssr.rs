@@ -1333,3 +1333,138 @@ async fn edit_slot_and_select_titles_follow_the_profile() {
     let open = &sel[..sel.find('>').unwrap()];
     assert!(open.contains("title=\"is at most\""), "{open}");
 }
+
+// --- lists limited to zero ------------------------------------------------------
+
+const BARE_PERMISSION: &str = r#"{"@context":"http://www.w3.org/ns/odrl.jsonld","@type":"Set","uid":"urn:p:1","permission":[{"action":"use"}]}"#;
+
+fn bare() -> Rc<EditDoc> {
+    Rc::new(read_model(BARE_PERMISSION).unwrap())
+}
+
+#[tokio::test]
+async fn a_policy_with_no_party_slots_has_no_between_sentence() {
+    for mode in [EditMode::Edit, EditMode::Read] {
+        let html = render_view(props(bare(), mode, EditConfig::default())).await;
+        assert!(html.contains("Between "), "{mode:?} default:\n{html}");
+        let mut cfg = EditConfig::default();
+        cfg.rules.policy_assigner = Limit::NONE;
+        cfg.rules.policy_assignee = Limit::NONE;
+        let html = render_view(props(bare(), mode, cfg)).await;
+        assert!(!html.contains("Between "), "{mode:?}:\n{html}");
+        assert!(!html.contains("prose-intro"), "{mode:?}:\n{html}");
+        // One party list left: the sentence stays.
+        let mut cfg = EditConfig::default();
+        cfg.rules.policy_assigner = Limit::NONE;
+        let html = render_view(props(bare(), mode, cfg)).await;
+        let intro = html.split("prose-intro").nth(1).expect("an intro");
+        let text = strip_tags(intro.split("</p>").next().unwrap());
+        assert!(
+            text.contains("Between no assigner (assigner) and anyone (assignee)."),
+            "{mode:?} partial: {text}"
+        );
+        // The other way round: the assignee list is capped.
+        let mut cfg = EditConfig::default();
+        cfg.rules.policy_assignee = Limit::NONE;
+        let html = render_view(props(bare(), mode, cfg)).await;
+        let intro = html.split("prose-intro").nth(1).expect("an intro");
+        let text = strip_tags(intro.split("</p>").next().unwrap());
+        assert!(
+            text.contains("Between no assigner (assigner) and anyone (assignee)."),
+            "{mode:?} partial assignee: {text}"
+        );
+    }
+}
+
+/// The text of `html`, tags dropped, the buttons' labels with them.
+fn strip_tags(html: &str) -> String {
+    let mut out = String::new();
+    let mut in_tag = false;
+    let mut in_button = false;
+    let mut rest = html;
+    while let Some(c) = rest.chars().next() {
+        if c == '<' {
+            in_tag = true;
+            if rest.starts_with("<button") {
+                in_button = true;
+            } else if rest.starts_with("</button") {
+                in_button = false;
+            }
+        } else if c == '>' {
+            in_tag = false;
+        } else if !in_tag && !in_button {
+            out.push(c);
+        }
+        rest = &rest[c.len_utf8()..];
+    }
+    out
+}
+
+#[tokio::test]
+async fn a_rule_target_limited_to_zero_leaves_no_unspecified_asset() {
+    let html = render_view(props(bare(), EditMode::Edit, EditConfig::default())).await;
+    assert!(html.contains("an unspecified asset"), "{html}");
+    let mut cfg = EditConfig::default();
+    cfg.rules.rule_target = Limit::NONE;
+    for mode in [EditMode::Edit, EditMode::Read] {
+        let html = render_view(props(bare(), mode, cfg.clone())).await;
+        assert!(!html.contains("an unspecified asset"), "{mode:?}:\n{html}");
+        // The sentence ends "use.", whatever the base CSS says.
+        let body = html.split("</style>").last().unwrap();
+        assert!(!body.contains(" ."), "{mode:?}:\n{html}");
+        assert!(body.contains("use"), "{mode:?}:\n{html}");
+    }
+}
+
+#[tokio::test]
+async fn a_policy_action_limited_to_zero_is_not_shown_and_the_conflict_stays() {
+    let mut cfg = EditConfig::default();
+    cfg.rules.policy_action = Limit::NONE;
+    let html = render_view(props(doc_of("agreement"), EditMode::Edit, cfg)).await;
+    assert!(!html.contains("Covers the action "), "{html}");
+    assert!(
+        html.contains("If a permission and a prohibition conflict"),
+        "{html}"
+    );
+}
+
+#[tokio::test]
+async fn a_rule_assignee_limited_to_zero_still_says_anyone() {
+    let mut cfg = EditConfig::default();
+    cfg.rules.rule_assignee = Limit::NONE;
+    let html = render_view(props(bare(), EditMode::Edit, cfg)).await;
+    assert!(html.contains("Anyone"), "{html}");
+}
+
+// --- the policy identifier limit --------------------------------------------------
+
+fn uid_cfg() -> EditConfig {
+    let mut cfg = EditConfig::default();
+    cfg.rules.policy_uid = Limit::NONE;
+    cfg
+}
+
+#[tokio::test]
+async fn an_absent_identifier_the_host_holds_elsewhere_is_not_shown() {
+    let doc = Rc::new(
+        read_model(r#"{"@context":"http://www.w3.org/ns/odrl.jsonld","@type":"Set"}"#).unwrap(),
+    );
+    let html = render_view(props(doc.clone(), EditMode::Edit, EditConfig::default())).await;
+    assert!(html.contains("data-slot=\"policy[0]#uid\""), "{html}");
+    let html = render_view(props(doc, EditMode::Edit, uid_cfg())).await;
+    assert!(!html.contains("data-slot=\"policy[0]#uid\""), "{html}");
+    assert!(!html.contains("\"identifier\""), "{html}");
+}
+
+#[tokio::test]
+async fn a_present_identifier_the_host_holds_elsewhere_is_read_only() {
+    let html = render_view(props(bare(), EditMode::Edit, uid_cfg())).await;
+    assert!(!html.contains("data-slot=\"policy[0]#uid\""), "{html}");
+    let terms = spans_with(&html, "prose-term");
+    assert!(
+        terms
+            .iter()
+            .any(|t| t.contains("urn:p:1") && !t.contains("contenteditable")),
+        "{html}"
+    );
+}

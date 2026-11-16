@@ -7,9 +7,11 @@
 import { ApplicationConfig, Component, ViewEncapsulation, inject, signal } from '@angular/core';
 import {
   OdrlProseComponent,
+  OdrlProseEditorComponent,
   PROSE_WASM_MODULE,
   PROSE_WASM_URL,
   ProseValidatorService,
+  type EditLimits,
   type ProfileSummary,
   type ValidateOptions,
   type ValidationReport,
@@ -167,3 +169,27 @@ export class LatestComponent {
   policy = POLICY;
 }
 // endregion: report_signal
+
+// region: editor
+const LIMITS: EditLimits = {
+  policies: { min: 1, max: 1 },
+  policyAssigner: { max: 0 },
+  policyAssignee: { max: 0 },
+};
+
+@Component({
+  selector: 'app-editor',
+  imports: [OdrlProseEditorComponent],
+  template: `
+    <ds-odrl-prose-editor [json]="policy()" [profile]="profileText" [limits]="limits"
+                          (jsonChange)="policy.set($event)" (jsonError)="unreadable.set(true)" />
+  `,
+})
+export class EditorComponent {
+  // Bind back exactly what jsonChange emits: the editor ignores its own echo.
+  policy = signal(POLICY);
+  unreadable = signal(false);
+  profileText = PROFILE_TEXT;
+  limits = LIMITS;
+}
+// endregion: editor

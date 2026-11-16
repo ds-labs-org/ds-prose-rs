@@ -57,6 +57,9 @@ pub struct EditRules {
     pub policy_assignee: Limit,
     pub policy_target: Limit,
     pub policy_action: Limit,
+    /// The policy's own identifier: `max: Some(0)` when the host holds it
+    /// elsewhere. It is then not set on a new policy and cannot be typed.
+    pub policy_uid: Limit,
     pub rule_assigner: Limit,
     pub rule_assignee: Limit,
     pub rule_target: Limit,
@@ -93,6 +96,7 @@ impl Default for EditRules {
             policy_assignee: Limit::ANY,
             policy_target: Limit::ANY,
             policy_action: Limit::ANY,
+            policy_uid: Limit::at_most(1),
             rule_assigner: Limit::ANY,
             rule_assignee: Limit::ANY,
             rule_target: Limit::ANY,

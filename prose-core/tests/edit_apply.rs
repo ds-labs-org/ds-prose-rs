@@ -945,3 +945,71 @@ fn the_vocabulary_set_operators_take_several_values_in_the_editor() {
         assert!(!r.operator_switch_allowed("isPartOf", op, 2), "{op}");
     }
 }
+
+// --- the policy identifier limit --------------------------------------------------
+
+fn set_text_with(
+    doc: &mut EditDoc,
+    rules: &EditRules,
+    slot: &str,
+    value: &str,
+) -> Result<(), EditError> {
+    let slot: SlotPath = slot.parse().unwrap();
+    let expect = doc.node(&slot.node).map(|n| n.id()).unwrap_or_default();
+    doc.apply(
+        &EditEvent::SetText {
+            slot,
+            expect,
+            value: value.to_string(),
+        },
+        rules,
+    )
+}
+
+#[test]
+fn the_policy_identifier_is_editable_by_default() {
+    assert_eq!(EditRules::default().policy_uid, Limit::at_most(1));
+}
+
+#[test]
+fn a_policy_identifier_limited_to_zero_cannot_be_set_but_can_be_cleared() {
+    let mut r = rules();
+    r.policy_uid = Limit::NONE;
+    let mut doc = rich();
+    assert!(matches!(
+        set_text_with(&mut doc, &r, "policy[0]#uid", "urn:other"),
+        Err(EditError::NotAllowed(_))
+    ));
+    assert_eq!(doc.policies[0].uid.as_deref(), Some("urn:policy:r"));
+    set_text_with(&mut doc, &r, "policy[0]#uid", "").unwrap();
+}
+
+#[test]
+fn a_new_policy_has_no_identifier_when_the_limit_is_zero() {
+    let mut r = rules();
+    r.policy_uid = Limit::NONE;
+    let mut doc = rich();
+    let n = doc.policies.len();
+    doc.apply(&add_ev(&doc, ListPath::policies(), n, NewItem::Default), &r)
+        .unwrap();
+    assert_eq!(doc.policies[n].uid, None);
+    let mut doc = rich();
+    doc.apply(
+        &add_ev(&doc, ListPath::policies(), n, NewItem::Default),
+        &rules(),
+    )
+    .unwrap();
+    assert!(doc.policies[n].uid.is_some());
+}
+
+#[test]
+fn a_rule_identifier_is_not_governed_by_the_policy_limit() {
+    let mut r = rules();
+    r.policy_uid = Limit::NONE;
+    let mut doc = rich();
+    set_text_with(&mut doc, &r, "policy[0].permission[0]#uid", "urn:rule:x").unwrap();
+    assert_eq!(
+        doc.policies[0].permission[0].uid.as_deref(),
+        Some("urn:rule:x")
+    );
+}

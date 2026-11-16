@@ -825,8 +825,72 @@ impl Rend<'_> {
         .collect()
     }
 
+    /// A list nobody can fill and that says nothing when empty: the host's
+    /// rules cap it at zero items. It leaves no trace in the sentence (the
+    /// "Anyone" and "The assignee" it stands for are still read aloud).
+    fn list_hidden(&self, l: &SlotList) -> bool {
+        l.items.is_empty()
+            && l.inherited.is_empty()
+            && !matches!(
+                l.empty,
+                prose_core::edit::EmptyText::AnyoneSubject
+                    | prose_core::edit::EmptyText::TheAssignee
+            )
+            && self.cfg().rules.limit(self.doc, &l.path).max == Some(0)
+    }
+
+    /// A capped list whose empty text is part of a sentence that stays
+    /// ("Between no assigner (assigner) and ..."): the text is kept, with no
+    /// add button.
+    fn keeps_empty_text(l: &SlotList) -> bool {
+        matches!(
+            l.empty,
+            prose_core::edit::EmptyText::NoAssigner | prose_core::edit::EmptyText::AnyoneObject
+        )
+    }
+
+    fn is_hidden_list(&self, seg: Option<&Segment>) -> bool {
+        matches!(seg, Some(Segment::List(l)) if self.list_hidden(l) && !Self::keeps_empty_text(l))
+    }
+
+    /// A sentence made around lists that are all hidden has nothing left to
+    /// say ("Between no assigner and anyone.").
+    fn sentence_hidden(&self, s: &Sentence) -> bool {
+        let mut lists = s.segments.iter().filter_map(|seg| match seg {
+            Segment::List(l) => Some(l),
+            _ => None,
+        });
+        let first = lists.next();
+        first.is_some() && first.into_iter().chain(lists).all(|l| self.list_hidden(l))
+    }
+
+    /// The empty text of a capped list inside a sentence that stays.
+    fn capped_empty_text(&self, l: &SlotList) -> Html {
+        let cfg = self.cfg();
+        let text = cfg.labels.empty.get(l.empty);
+        html! {
+            <span class={cls!(cfg, empty, "prose-empty")} style={cfg.styles.empty.clone()}>
+                { text }
+            </span>
+        }
+    }
+
     fn sentence(&self, s: &Sentence) -> Html {
-        html! { <>{ for s.segments.iter().map(|seg| self.segment(seg)) }</> }
+        let segs = &s.segments;
+        html! {
+            <>
+                { for segs.iter().enumerate().filter(|(i, seg)| {
+                    // The space before a hidden list goes with it.
+                    !(matches!(seg, Segment::Text(t) if t.trim().is_empty())
+                        && self.is_hidden_list(segs.get(i + 1)))
+                }).map(|(_, seg)| match seg {
+                    Segment::List(l) if self.list_hidden(l) && Self::keeps_empty_text(l) => {
+                        self.capped_empty_text(l)
+                    }
+                    _ => self.segment(seg),
+                }) }
+            </>
+        }
     }
 
     fn locked(&self, l: &Locked) -> Html {
@@ -882,6 +946,9 @@ impl Rend<'_> {
     }
 
     fn slot_list(&self, l: &SlotList) -> Html {
+        if self.list_hidden(l) {
+            return Html::default();
+        }
         let cfg = self.cfg();
         let conj = match l.conj {
             prose_core::edit::Conj::And => "and",
@@ -1215,6 +1282,31 @@ impl Rend<'_> {
         html! { <div class="prose-heading-row">{ h3 }{ controls }</div> }
     }
 
+    /// The heading: the type and the identifier. With the host holding the
+    /// identifier elsewhere (`policy_uid` capped at zero) an empty one is
+    /// dropped, with the space before it, and a present one is plain text.
+    fn heading_sentence(&self, h: &Sentence) -> Html {
+        if self.cfg().rules.policy_uid.max != Some(0) {
+            return self.sentence(h);
+        }
+        let is_uid = |seg: &Segment| matches!(seg, Segment::Slot(s) if s.kind == prose_core::edit::SlotKind::Uid);
+        let segs = &h.segments;
+        html! {
+            <>
+                { for segs.iter().enumerate().filter_map(|(i, seg)| match seg {
+                    Segment::Slot(s) if is_uid(seg) => (!s.raw.is_empty())
+                        .then(|| self.term(&s.display, &s.raw, &s.path)),
+                    Segment::Text(t)
+                        if t.trim().is_empty()
+                            && segs.get(i + 1).is_some_and(|n| {
+                                matches!(n, Segment::Slot(s) if is_uid(n) && s.raw.is_empty())
+                            }) => None,
+                    _ => Some(self.segment(seg)),
+                }) }
+            </>
+        }
+    }
+
     fn policy(&self, p: &PolicyProse) -> Html {
         let cfg = self.cfg();
         let list = ListPath::policies();
@@ -1271,16 +1363,18 @@ impl Rend<'_> {
                 { self.heading_row(
                     html! {
                         <>
-                            { self.sentence(&p.heading) }
+                            { self.heading_sentence(&p.heading) }
                             { self.decoration(DecorationAt::Policy, &p.path, p.node) }
                         </>
                     },
                     controls,
                 ) }
                 { self.issues_for(&p.path, &[&p.heading, &p.intro]) }
-                <p class={cls!(cfg, intro, "prose-intro")} style={cfg.styles.intro.clone()}>
-                    { self.sentence(&p.intro) }
-                </p>
+                if !self.sentence_hidden(&p.intro) {
+                    <p class={cls!(cfg, intro, "prose-intro")} style={cfg.styles.intro.clone()}>
+                        { self.sentence(&p.intro) }
+                    </p>
+                }
                 if !notes.is_empty() {
                     <ul class={cls!(cfg, notes, "prose-notes")} style={cfg.styles.notes.clone()}>
                         { for notes.iter().map(|n| html! {

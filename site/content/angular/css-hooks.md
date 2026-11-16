@@ -7,7 +7,7 @@ order: 5
 ---
 # CSS hooks (Angular)
 
-This page lists what a stylesheet can select in the output of `<ds-odrl-prose>`. The Angular package renders the read-only output of `OdrlProse` and nothing else, so the hooks are the read-only ones. There is no editor in the Angular package; the editor hooks are on the [Yew CSS hooks](/yew/css-hooks/) page and do not apply here.
+This page lists what a stylesheet can select in the output of `<ds-odrl-prose>`. The list covers the read-only output of `OdrlProse`, which is all `ds-odrl-prose` renders. `ds-odrl-prose-editor` uses the Yew editor hooks, which are on the [Yew CSS hooks](/yew/css-hooks/) page and are not repeated here.
 
 The repository states no CSS stability policy. The split between Stable and Internal on the Yew page is a recommendation, and every class below is Stable in that split. The table is checked against `prose-yew/src/lib.rs`, the file that writes this markup: a test fails when a class is missing here or when this page names one the file does not write.
 

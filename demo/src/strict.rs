@@ -3,35 +3,17 @@
 //! is open, and what the status badge says.
 use std::rc::Rc;
 
-use prose_yew::prose_core::edit::IssueTarget;
 use prose_yew::prose_core::validate::{Finding, Mode, Report, Verdict};
+pub use prose_yew::{go_to, target_selectors};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use yew::prelude::*;
-
-fn escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
-}
 
 /// The selectors "Go to" tries for a finding, best first: the first one that
 /// matches an element of the Edit view gets the focus. A finding about the
 /// document as a whole goes to the first node there is.
 pub fn jump_selectors(f: &Finding) -> Vec<String> {
     target_selectors(&f.target)
-}
-
-/// As [`jump_selectors`], for the target alone (what the problems panel
-/// reports when "Go to" is pressed).
-pub fn target_selectors(target: &IssueTarget) -> Vec<String> {
-    match target {
-        IssueTarget::Slot(s) => vec![
-            format!("[data-slot=\"{}\"]", escape(&s.to_string())),
-            format!("[data-node=\"{}\"]", escape(&s.node.to_string())),
-        ],
-        IssueTarget::Node(n) => vec![format!("[data-node=\"{}\"]", escape(&n.to_string()))],
-        IssueTarget::List(l) => vec![format!("[data-add=\"{}\"]", escape(&l.to_string()))],
-        _ => vec!["[data-node]".to_string()],
-    }
 }
 
 /// The first of [`jump_selectors`].
@@ -117,30 +99,6 @@ pub fn badge(r: &Report, profile: Option<&str>) -> (&'static str, String) {
 /// The report as the `ds-prose/validation-report@1` JSON the download holds.
 pub fn report_text(r: &Report) -> String {
     serde_json::to_string_pretty(&r.to_json()).unwrap_or_default()
-}
-
-/// Moves the keyboard focus to the first element of `root` that one of the
-/// target's selectors finds, and scrolls it into view. A node is not
-/// focusable by itself, so it is made so first. `false` when nothing matched.
-pub fn go_to(root: &NodeRef, target: &IssueTarget) -> bool {
-    let Some(root) = root.cast::<web_sys::Element>() else {
-        return false;
-    };
-    for sel in target_selectors(target) {
-        let Ok(Some(el)) = root.query_selector(&sel) else {
-            continue;
-        };
-        let Ok(el) = el.dyn_into::<web_sys::HtmlElement>() else {
-            continue;
-        };
-        if el.tab_index() < 0 && el.get_attribute("tabindex").is_none() {
-            let _ = el.set_attribute("tabindex", "-1");
-        }
-        let _ = el.focus();
-        el.scroll_into_view();
-        return true;
-    }
-    false
 }
 
 /// Downloads `text` as `name`, through a Blob URL that lives for the click.

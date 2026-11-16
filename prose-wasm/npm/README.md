@@ -3,8 +3,9 @@
 Renders an [ODRL](https://www.w3.org/TR/odrl-model/) policy, written as
 JSON-LD, as plain-language prose. This is the `<OdrlProse>` Yew component of
 [ds-prose-rs](https://github.com/ds-labs-org/ds-prose-rs), compiled to
-WebAssembly and mounted into a DOM element you give it. Read-only: there is
-no edit mode in this package.
+WebAssembly and mounted into a DOM element you give it. `ProseHandle` is
+read-only; `ProseEditorHandle` mounts the editing view of the same sentences
+(see Editing).
 
 Framework-neutral. For Angular use
 [`@ds-labs/prose-angular`](https://www.npmjs.com/package/@ds-labs/prose-angular),
@@ -23,6 +24,40 @@ Profiles written in Turtle need the Turtle build: import
 `@ds-labs/prose-wasm/turtle` instead, and serve `prose_wasm_turtle_bg.wasm`.
 It has the same API and is about 30 KiB larger over the wire (brotli), so it
 is opt-in. See Profiles and Serving the wasm.
+
+## Editing
+
+`ProseEditorHandle` mounts the editor: click a word to type, pick from the
+suggestions, add and remove parts with the + and − buttons. The editor
+injects its own stylesheet. `onChange` receives the JSON-LD the editor writes
+after each committed edit, and the validation report text (`null` while
+validation is off). It is not called on mount or for a document you set with
+`update`.
+
+```js
+import init, { ProseEditorHandle } from '@ds-labs/prose-wasm';
+
+await init({ module_or_path: new URL('/prose_wasm_bg.wasm', document.baseURI) });
+const editor = new ProseEditorHandle(root, policyJsonText, null, (json, report) => {
+  policyJsonText = json;            // keep the text exactly as emitted
+});
+editor.setProfile(profileText);     // as ProseHandle.setProfile
+editor.setLimits({ policyAssigner: { max: 0 } }); // no assigner button
+editor.setValidation({});           // inline markers, problems panel, report in onChange
+editor.update(policyJsonText);      // no-op: it is what the editor emitted
+editor.destroy();
+```
+
+The constructor throws, and mounts nothing, when the text is not a readable
+ODRL policy; `update` throws and keeps the document. `update` with the text
+last emitted does nothing, so binding the emitted text back keeps the undo
+history and the focus; any other text replaces the document and clears the
+history. The editor reads and writes the bare keys of ODRL JSON-LD
+(`permission`, not `odrl:permission`). Do not call a method of the handle
+from inside `onChange`. `setLimits(limits | null)` sets how many items each
+list may hold (`EditLimits`: `{ min?, max? }` per list name; a given entry
+replaces the default for that list) and throws on an unknown name, a negative
+or fractional number, or `min` above `max`.
 
 ## Documentation
 

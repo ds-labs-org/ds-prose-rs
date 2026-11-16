@@ -248,6 +248,16 @@ async fn an_advisory_report_has_no_verdict_line() {
     }
 }
 
+#[tokio::test]
+async fn an_advisory_report_without_findings_renders_no_panel() {
+    let v = Validator::new(closed_wording(), Options::advisory());
+    let report = report_of("clean.json", &v);
+    assert!(report.findings.is_empty());
+    let html = ssr::<ProseProblems>(panel(report)).await;
+    assert!(!html.contains("prose-problems"), "{html}");
+    assert!(!html.contains("<h3"), "{html}");
+}
+
 // --- the read-only component -----------------------------------------------------
 
 fn read_props(

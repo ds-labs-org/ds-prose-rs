@@ -4,11 +4,13 @@ An Angular component that renders an [ODRL](https://www.w3.org/TR/odrl-model/)
 policy, written as JSON-LD, as plain-language prose. It wraps the
 `<OdrlProse>` Yew component of
 [ds-prose-rs](https://github.com/ds-labs-org/ds-prose-rs), compiled to
-WebAssembly (shipped in the `@ds-labs/prose-wasm` dependency). Read-only: no
-edit mode.
+WebAssembly (shipped in the `@ds-labs/prose-wasm` dependency).
+`ds-odrl-prose` is read-only; `ds-odrl-prose-editor` edits the same policy in
+its sentences (see Editing).
 
 ```
-<ds-odrl-prose [json]>  ->  ProseHandle (@ds-labs/prose-wasm)  ->  <OdrlProse> (prose-yew)
+<ds-odrl-prose [json]>         ->  ProseHandle (@ds-labs/prose-wasm)        ->  <OdrlProse> (prose-yew)
+<ds-odrl-prose-editor [json]>  ->  ProseEditorHandle (@ds-labs/prose-wasm)  ->  <OdrlProseView> in Edit mode (prose-yew)
 ```
 
 ## Documentation and demo
@@ -83,6 +85,40 @@ their built-in wording whatever a profile calls them, and a profile over
 4 MiB, or past the reader's other limits, is refused (`profileError`). See
 the [ds-prose-rs README](https://github.com/ds-labs-org/ds-prose-rs#profiles)
 for what a profile changes and which formats are read.
+
+
+## Editing
+
+```ts
+import { Component, signal } from '@angular/core';
+import { OdrlProseEditorComponent, type EditLimits } from '@ds-labs/prose-angular';
+
+@Component({
+  selector: 'app-editor',
+  imports: [OdrlProseEditorComponent],
+  template: `<ds-odrl-prose-editor [json]="policy()" [limits]="limits" (jsonChange)="policy.set($event)" />`,
+})
+export class EditorComponent {
+  policy = signal('{ "@type": "Set", "permission": [{ "action": "use", "target": "urn:asset:1" }] }');
+  limits: EditLimits = { policyAssigner: { max: 0 }, policyAssignee: { max: 0 } };
+}
+```
+
+`json` is controlled: `jsonChange` emits the JSON-LD the editor writes after
+each committed edit, and you bind back exactly that text. The editor
+recognises its own echo and keeps the undo history and the focus; any other
+text replaces the document and clears the history, so do not reformat the
+emitted text. The editor reads and writes the bare keys of ODRL JSON-LD
+(`permission`, not `odrl:permission`). It injects its own stylesheet.
+
+| | | |
+|---|---|---|
+| `json` | input, required | the ODRL policy as JSON-LD text; unreadable text emits `jsonError` |
+| `articleClass`, `profile`, `profiles`, `strict`, `validation` | inputs | as for `ds-odrl-prose`; with validation on, the editor shows inline markers and a problems panel with fix buttons |
+| `limits` | input | how many items each list may hold, by name (`{ min?, max? }`); a given entry replaces the default for that list |
+| `jsonChange` | output | the JSON-LD text after each committed edit |
+| `jsonError`, `loadFailed`, `profileLoaded`, `profileError`, `validationChange`, `validationError` | outputs | as for `ds-odrl-prose` (`jsonError`: the `json` input is not a readable policy) |
+| `report` | signal | the latest validation report, or `null` |
 
 ## Validation
 
