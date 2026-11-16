@@ -330,3 +330,13 @@ async fn an_advisory_validation_without_findings_shows_no_problems_heading() {
     );
     assert!(select(&c, ".prose-problems").is_none());
 }
+
+#[wasm_bindgen_test]
+async fn a_policy_uid_limit_of_zero_hides_the_identifier() {
+    let (c, mut h, _calls) = mount(NO_RULES_DOC).await;
+    assert!(select(&c, "[data-slot=\"policy[0]#uid\"]").is_some());
+    h.set_limits(js(r#"{"policyUid":{"max":0}}"#))
+        .expect("limits");
+    settle().await;
+    assert!(select(&c, "[data-slot=\"policy[0]#uid\"]").is_none());
+}

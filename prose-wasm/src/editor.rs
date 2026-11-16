@@ -545,7 +545,7 @@ mod tests {
     const POLICY: &str = include_str!("../../prose-core/tests/profiles/research-policy.json");
 
     /// Every name with the limit it sets.
-    fn fields(r: &EditRules) -> [(&'static str, Limit); 22] {
+    fn fields(r: &EditRules) -> [(&'static str, Limit); 23] {
         [
             ("policies", r.policies),
             ("permission", r.permission),
@@ -558,6 +558,7 @@ mod tests {
             ("policyAssignee", r.policy_assignee),
             ("policyTarget", r.policy_target),
             ("policyAction", r.policy_action),
+            ("policyUid", r.policy_uid),
             ("ruleAssigner", r.rule_assigner),
             ("ruleAssignee", r.rule_assignee),
             ("ruleTarget", r.rule_target),
@@ -578,10 +579,16 @@ mod tests {
     }
 
     #[test]
+    fn the_unknown_name_error_lists_policy_uid() {
+        let err = limits(json!({ "bogus": { "max": 0 } })).unwrap_err();
+        assert!(err.contains("policyUid"), "{err}");
+    }
+
+    #[test]
     fn every_name_sets_its_own_field() {
         let defaults = EditRules::default();
         let names: Vec<&str> = fields(&defaults).iter().map(|(n, _)| *n).collect();
-        assert_eq!(names.len(), 22);
+        assert_eq!(names.len(), 23);
         for (i, name) in names.iter().enumerate() {
             let r = limits(json!({ *name: { "min": 2, "max": 5 } })).unwrap();
             let want = Limit {
