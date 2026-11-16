@@ -1357,8 +1357,47 @@ async fn a_policy_with_no_party_slots_has_no_between_sentence() {
         let mut cfg = EditConfig::default();
         cfg.rules.policy_assigner = Limit::NONE;
         let html = render_view(props(bare(), mode, cfg)).await;
-        assert!(html.contains("Between "), "{mode:?} partial:\n{html}");
+        let intro = html.split("prose-intro").nth(1).expect("an intro");
+        let text = strip_tags(intro.split("</p>").next().unwrap());
+        assert!(
+            text.contains("Between no assigner (assigner) and anyone (assignee)."),
+            "{mode:?} partial: {text}"
+        );
+        // The other way round: the assignee list is capped.
+        let mut cfg = EditConfig::default();
+        cfg.rules.policy_assignee = Limit::NONE;
+        let html = render_view(props(bare(), mode, cfg)).await;
+        let intro = html.split("prose-intro").nth(1).expect("an intro");
+        let text = strip_tags(intro.split("</p>").next().unwrap());
+        assert!(
+            text.contains("Between no assigner (assigner) and anyone (assignee)."),
+            "{mode:?} partial assignee: {text}"
+        );
     }
+}
+
+/// The text of `html`, tags dropped, the buttons' labels with them.
+fn strip_tags(html: &str) -> String {
+    let mut out = String::new();
+    let mut in_tag = false;
+    let mut in_button = false;
+    let mut rest = html;
+    while let Some(c) = rest.chars().next() {
+        if c == '<' {
+            in_tag = true;
+            if rest.starts_with("<button") {
+                in_button = true;
+            } else if rest.starts_with("</button") {
+                in_button = false;
+            }
+        } else if c == '>' {
+            in_tag = false;
+        } else if !in_tag && !in_button {
+            out.push(c);
+        }
+        rest = &rest[c.len_utf8()..];
+    }
+    out
 }
 
 #[tokio::test]
@@ -1383,12 +1422,6 @@ async fn a_policy_action_limited_to_zero_is_not_shown_and_the_conflict_stays() {
     cfg.rules.policy_action = Limit::NONE;
     let html = render_view(props(doc_of("agreement"), EditMode::Edit, cfg)).await;
     assert!(!html.contains("Covers the action "), "{html}");
-    let html = render_view(props(
-        doc_of("agreement"),
-        EditMode::Edit,
-        EditConfig::default(),
-    ))
-    .await;
     assert!(
         html.contains("If a permission and a prohibition conflict"),
         "{html}"
