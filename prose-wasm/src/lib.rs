@@ -14,6 +14,7 @@
 //! [`ProseValidator`] are plain functions over text, so a Node script can
 //! call them after `initSync`. They return the report as JSON text
 //! (`ds-prose/validation-report@1`), the same bytes everywhere.
+pub mod editor;
 pub mod validation;
 use prose_core::profile::{ProfileError, ProfileVocab, Wording};
 use prose_core::validate::{Options, Validator};
