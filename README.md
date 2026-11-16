@@ -460,7 +460,7 @@ order. A change to `@1` may only add keys; removing or renaming one is `@2`.
 
 ```json
 { "schema": "ds-prose/validation-report@1",
-  "tool": {"name": "ds-prose-rs", "version": "0.6.1"},
+  "tool": {"name": "ds-prose-rs", "version": "0.7.0"},
   "mode": "strict",
   "tiers": ["profile", "prose", "input"],
   "ruleset": 1,
@@ -668,6 +668,16 @@ The profile types can grow too: `ProfileVocab`, `Wording`, `Prefixes` and
 `PolicyGlossary` and `Gloss` are `#[non_exhaustive]` structs: read their
 fields, and start from `ProfileLimits::default()` to change a limit. So is
 `edit::ChoiceSlot`: build one with `ChoiceSlot::new` and set its fields.
+
+Changed in 0.7.0: the npm packages have an edit mode. `@ds-labs/prose-wasm`
+adds `ProseEditorHandle` and `@ds-labs/prose-angular` adds
+`<ds-odrl-prose-editor>`, both over `OdrlProseView` in Edit mode. A host can
+cap any list with `setLimits` / `[limits]`, including the new `policyUid`
+limit (`EditRules.policy_uid`). In `OdrlProseView`, a list capped at 0 that is
+empty and inherits nothing is not shown, and an empty problems panel renders
+nothing. The "a policy has no permission, prohibition or obligation" note is
+recomputed after each edit. The edit code is linked into `prose_wasm_bg.wasm`,
+which grows by about 126 KB gzip.
 
 Changed in 0.6.1 (wording and markup): a Title Case label of two or more words
 reads in lower case inside a sentence ("Restricted Discovery Claim" becomes
@@ -1060,15 +1070,16 @@ Two packages are published to npmjs under the `@ds-labs` scope:
 | package | what | for |
 |---|---|---|
 | [`@ds-labs/prose-wasm`](prose-wasm/npm/README.md) | the wasm and its JavaScript glue; framework-neutral | any JavaScript host |
-| [`@ds-labs/prose-angular`](prose-angular/README.md) | `<ds-odrl-prose [json] [profile]>`, Angular 19 or newer | Angular apps; depends on the wasm package |
+| [`@ds-labs/prose-angular`](prose-angular/README.md) | `<ds-odrl-prose [json] [profile]>` (read) and `<ds-odrl-prose-editor [json] (jsonChange)>` (edit), Angular 19 or newer | Angular apps; depends on the wasm package |
 
 `@ds-labs/prose-wasm` also installs the `ds-prose-validate` command (see
-Strict validation), and both packages can validate a policy against profiles;
-the rendering itself is read-only.
+Strict validation), and both packages can validate a policy against profiles.
+Both render read-only (`ProseHandle`, `ds-odrl-prose`) or edit
+(`ProseEditorHandle`, `ds-odrl-prose-editor`).
 
 An Angular app needs `npm i @ds-labs/prose-angular` and one `angular.json`
 asset entry pointing at the wasm file inside `node_modules`; there is nothing
-to vendor or build. There is no edit mode in either.
+to vendor or build.
 
 Both take a profile as text: `ProseHandle.setProfile(text | null)` returns
 the profile's summary as JSON and throws on a text that is not a profile,
