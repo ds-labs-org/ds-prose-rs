@@ -231,7 +231,7 @@ fn apply_one(doc: &mut EditDoc, ev: &EditEvent, rules: &EditRules) -> Result<(),
             slot,
             expect,
             value,
-        } => set_text(doc, slot, *expect, value),
+        } => set_text(doc, rules, slot, *expect, value),
         EditEvent::SetChoice {
             slot,
             expect,
@@ -277,6 +277,7 @@ fn opt(value: &str) -> Option<String> {
 
 fn set_text(
     doc: &mut EditDoc,
+    rules: &EditRules,
     slot: &SlotPath,
     expect: NodeId,
     value: &str,
@@ -291,6 +292,13 @@ fn set_text(
             ));
         }
         (NodeMut::Policy(p), Field::Kind) => p.kind = value.to_string(),
+        (NodeMut::Policy(_), Field::Uid)
+            if !value.is_empty() && rules.policy_uid.max == Some(0) =>
+        {
+            return Err(EditError::NotAllowed(
+                "the policy identifier is not editable here".into(),
+            ));
+        }
         (NodeMut::Policy(p), Field::Uid) => p.uid = Some(value.to_string()),
         (NodeMut::Rule(r), Field::Uid) => r.uid = Some(value.to_string()),
         (NodeMut::Rule(r), Field::Reference) if r.reference.is_some() => {
@@ -457,7 +465,8 @@ fn new_node(
                 .unwrap_or(1);
             New::Policy(PolicyNode {
                 kind: rules.defaults.policy_kind.clone(),
-                uid: Some(format!("{}{n}", rules.defaults.uid_prefix)),
+                uid: (rules.policy_uid.max != Some(0))
+                    .then(|| format!("{}{n}", rules.defaults.uid_prefix)),
                 ..PolicyNode::default()
             })
         }
