@@ -30,8 +30,8 @@ pub use edit::{
     BASE_CSS, ButtonContent, Choice, Decoration, DecorationAt, EditConfig, EditMode, EmptyTexts,
     FieldNames, FocusKind, Labels, Nouns, OdrlProseView, OdrlProseViewProps, Placeholders,
     ProseClasses, ProseEditor, ProseEditorWith, ProseProblems, ProseProblemsProps, ProseStyles,
-    Reveal, SlotFocus, StrictEdit, Suggestion, Vocabulary, filter_suggestions, use_prose_editor,
-    use_prose_editor_with, use_validation,
+    Reveal, SlotFocus, StrictEdit, Suggestion, Vocabulary, filter_suggestions, go_to,
+    target_selectors, use_prose_editor, use_prose_editor_with, use_validation,
 };
 use edit::{fill, usage_line};
 /// The core crate, so hosts can reach `prose_yew::prose_core::edit::*`.

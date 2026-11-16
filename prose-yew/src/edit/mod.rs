@@ -58,7 +58,7 @@ pub use hook::{
     ProseEditor, ProseEditorWith, use_prose_editor, use_prose_editor_with, use_validation,
 };
 pub(crate) use problems::status;
-pub use problems::{ProseProblems, ProseProblemsProps};
+pub use problems::{ProseProblems, ProseProblemsProps, go_to, target_selectors};
 pub use prose_core::edit::StrictEdit;
 pub use suggest::filter_suggestions;
 pub use view::{OdrlProseView, OdrlProseViewProps};
