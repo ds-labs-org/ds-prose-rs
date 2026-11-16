@@ -220,6 +220,12 @@ pub(crate) fn apply_event(
     ev: &EditEvent,
     rules: &EditRules,
 ) -> Result<(), EditError> {
+    apply_one(doc, ev, rules)?;
+    super::jsonld_read::refresh_rule_note(doc);
+    Ok(())
+}
+
+fn apply_one(doc: &mut EditDoc, ev: &EditEvent, rules: &EditRules) -> Result<(), EditError> {
     match ev {
         EditEvent::SetText {
             slot,
