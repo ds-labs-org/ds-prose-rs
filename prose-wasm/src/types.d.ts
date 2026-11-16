@@ -153,6 +153,7 @@ export type LimitName =
   | "policyAssignee"
   | "policyTarget"
   | "policyAction"
+  | "policyUid"
   | "ruleAssigner"
   | "ruleAssignee"
   | "ruleTarget"
@@ -168,7 +169,9 @@ export type LimitName =
 /**
  * How many items a list may hold. A given entry replaces the editor's
  * default for that list: `min` defaults to 0 and `max` to `null`
- * (unbounded). `{ max: 0 }` removes the list's add button.
+ * (unbounded). `{ max: 0 }` removes the list's add button, and hides a list
+ * that is empty. On `policyUid` it hides the policy's identifier (an empty
+ * one is not shown, a present one is read-only) and a new policy gets none.
  */
 export interface LimitSpec {
   min?: number;

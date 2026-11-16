@@ -37,6 +37,7 @@ fn limit_field<'a>(r: &'a mut EditRules, name: &str) -> Option<&'a mut Limit> {
         "policyAssignee" => &mut r.policy_assignee,
         "policyTarget" => &mut r.policy_target,
         "policyAction" => &mut r.policy_action,
+        "policyUid" => &mut r.policy_uid,
         "ruleAssigner" => &mut r.rule_assigner,
         "ruleAssignee" => &mut r.rule_assignee,
         "ruleTarget" => &mut r.rule_target,
@@ -53,7 +54,7 @@ fn limit_field<'a>(r: &'a mut EditRules, name: &str) -> Option<&'a mut Limit> {
 }
 
 const LIMIT_NAMES: &str = "policies, permission, prohibition, obligation, duty, remedy, \
-consequence, policyAssigner, policyAssignee, policyTarget, policyAction, ruleAssigner, \
+consequence, policyAssigner, policyAssignee, policyTarget, policyAction, policyUid, ruleAssigner, \
 ruleAssignee, ruleTarget, ruleAction, actionRefinement, entityRefinement, constraints, \
 logicalChildren, rightOperandValues, profile, inheritFrom";
 

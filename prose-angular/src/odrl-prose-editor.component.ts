@@ -39,7 +39,9 @@ import { PROSE_WASM_MODULE, PROSE_WASM_URL, type ProseWasmModule, loadWasm } fro
  *
  * `profile` / `profiles` take the text of ODRL profiles, as for
  * `ds-odrl-prose`. `limits` sets how many items each list may hold
- * (`{ policyAssigner: { max: 0 } }` removes the assigner button). When
+ * (`{ policyAssigner: { max: 0 } }` removes the assigner button; a list
+ * capped at 0 is not shown, and `{ policyUid: { max: 0 } }` hides the policy
+ * identifier). When
  * validation is on (`validation`, or `strict`) the editor marks issues inline
  * and shows a problems panel with fix buttons; edits are flagged, never
  * refused. `validationChange` emits the report when the verdict or the
