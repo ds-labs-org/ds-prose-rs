@@ -32,8 +32,8 @@ those files, so the docs and the demos cannot drift apart.
 | `prose-yew/` | `<OdrlProse json={...} />`: lays a `Document` out as semantic HTML, with a glossary of profile terms. `<OdrlProseView>`: the same sentences for documents written with bare keys, read or edited |
 | `demo/` | Trunk app: paste a policy and read it, or edit the prose itself; a Profile field loads a profile by paste, preset, file or URL |
 | `demo/profiles/` | profile presets compiled into the demo only (the trimmed W3C ODRL 2.2 vocabulary) |
-| `prose-wasm/` | wasm-bindgen bridge that mounts the read-only `<OdrlProse>` into any DOM element, with `setProfile`, plus `validate` and the `ds-prose-validate` command; `prose-wasm/npm/` holds the metadata of the npm package |
-| `prose-angular/` | Angular wrapper, `<ds-odrl-prose [json] [profile]>`, over `prose-wasm` (read-only; no edit mode), with strict validation inputs; built with ng-packagr |
+| `prose-wasm/` | wasm-bindgen bridge that mounts the read-only `<OdrlProse>` (`ProseHandle`) or the editor (`ProseEditorHandle`, reports the JSON-LD after each edit) into any DOM element, with `setProfile`, plus `validate` and the `ds-prose-validate` command; `prose-wasm/npm/` holds the metadata of the npm package |
+| `prose-angular/` | Angular wrapper over `prose-wasm`: `<ds-odrl-prose [json] [profile]>` (read-only) and `<ds-odrl-prose-editor [json] (jsonChange)>` (edit mode), both with strict validation inputs; built with ng-packagr |
 | `demo-angular/` | Angular demo app; installs the two packed npm packages, like a downstream app |
 | `catalog/` | `compliance-catalog`: builds the site's [catalog](https://ds-labs-org.github.io/ds-prose-rs/catalog/) of real-world policies: the [ds-odrl-compliance-rdf](https://github.com/ds-labs-org/ds-odrl-compliance-rdf) corpus (translated from Turtle), the W3C ODRL Information Model examples, the EDC samples and the Dataspace Protocol examples, with a coverage table. `scripts/build-catalog.sh` fetches the sources at build time; nothing of them is kept here |
 

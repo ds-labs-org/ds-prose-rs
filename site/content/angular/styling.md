@@ -9,7 +9,7 @@ order: 3
 
 `ds-odrl-prose` ships no CSS and writes no `<style>` element. It declares no `styles` and no `encapsulation`, and its template is empty. The sentences are plain elements with `prose-*` classes, created by Yew inside the host element, so the whole job of styling is to choose where your stylesheet lives. The [CSS hooks](/angular/css-hooks/) page lists the classes and ends with a complete stylesheet.
 
-There is no editor in the Angular package, so there is no editor stylesheet to inject. The editor, and its `BASE_CSS`, exist only for Yew hosts.
+`ds-odrl-prose-editor` is different: the Yew editor injects its own `<style>` (`BASE_CSS`) into the host, so it renders usable without any stylesheet. To change its look, override the editor hooks listed on the [Yew CSS hooks](/yew/css-hooks/) page from a global stylesheet, with the `:root ` prefix of `prose-editor.css` so that the rules outrank `BASE_CSS`.
 
 ## Global stylesheet
 
@@ -78,4 +78,4 @@ The demo's own layout sheet, `src/styles.css`, stays on in both settings. It hol
 
 ## Shadow DOM
 
-Shadow DOM is not supported and not tested. `ProseHandle` mounts into an `Element`. Mounting inside a shadow root is possible for the read-only output, and global styles would then not apply there. Nothing in the repository mounts the component in a shadow root, so this page makes no promise about it.
+Shadow DOM is not supported and not tested. `ProseHandle` and `ProseEditorHandle` mount into an `Element`. Mounting inside a shadow root is possible for the read-only output, and global styles would then not apply there. Nothing in the repository mounts the component in a shadow root, so this page makes no promise about it.

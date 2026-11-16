@@ -7,7 +7,7 @@ order: 2
 ---
 # Angular interface
 
-The tables on this page are checked against `prose-angular/src/`. A test reads the `input()`, `output()` and `signal()` members of `OdrlProseComponent` and fails when a name, a type or a default differs from what is written here.
+The tables on this page are checked against `prose-angular/src/`. A test reads the `input()`, `output()` and `signal()` members of `OdrlProseComponent` and of `OdrlProseEditorComponent` and fails when a name, a type or a default differs from what is written here.
 
 The component is `ds-odrl-prose`, a standalone component with an empty template and `OnPush` change detection. It declares no `styles` and no `encapsulation`. It implements `OnChanges` and `OnDestroy`, and every input change runs one synchronisation with the wasm module.
 
@@ -46,6 +46,44 @@ The work of the wasm module runs outside the Angular zone (`NgZone.runOutsideAng
 The declared type is writable, because the source declares `readonly report = signal<...>(null)`. Treat it as read-only: read it, do not set it. The component overwrites it on every synchronisation.
 
 {{source prose-angular/test/docs-examples.ts#report_signal}}
+
+## Editor
+
+`ds-odrl-prose-editor` is a second standalone component with an empty template and `OnPush` change detection. It declares no `styles` and no `encapsulation`; the editor writes its own stylesheet (`BASE_CSS`) into the host. It is controlled: see [Editing](/angular/#editing). It uses the same `PROSE_WASM_URL` and `PROSE_WASM_MODULE` tokens and the same wasm file as `ds-odrl-prose`. Its class names are the [Yew editor hooks](/yew/css-hooks/).
+
+## Editor inputs
+
+| Input | Type | Default | Meaning |
+|---|---|---|---|
+| `json` | `string` | required | The ODRL policy as JSON-LD text. Controlled: bind back what `jsonChange` emits; the echo is ignored. A text that cannot be read emits `jsonError`. |
+| `articleClass` | `string` | `undefined` | Extra classes, separated by spaces, for the rendered `article.ds-prose.prose-edit`. |
+| `profile` | `string \| null` | `null` | One ODRL profile as JSON-LD text, or Turtle with the [Turtle build](#prose-wasm-module). The editor then words the sentences with it and suggests its terms. |
+| `profiles` | `string[] \| null` | `null` | Several profiles. A list wins over `profile`. |
+| `limits` | `EditLimits \| null` | `null` | How many items each list may hold, by list name; a given entry replaces that list's default (`min` 0, `max` unbounded). `{ policyAssigner: { max: 0 } }` removes the assigner button. Unreadable limits are logged and the previous ones stay. |
+| `strict` | `boolean` | `false` | Validate with a closed vocabulary: ODRL plus the loaded profiles. |
+| `validation` | `ValidateOptions \| null` | `null` | The full validation options. They win over `strict`. While validation is on, the editor marks issues inline and shows a problems panel with fix buttons; edits are flagged, never refused. |
+
+## Editor outputs
+
+| Output | Payload | Emitted when |
+|---|---|---|
+| `jsonChange` | `string` | After each committed edit, with the JSON-LD the editor writes. Not emitted for a document the host set through `json`. |
+| `jsonError` | `unknown` | `json` is not a readable ODRL policy. At the first mount nothing is mounted and the next input change tries again; later the document on screen stays. |
+| `loadFailed` | `unknown` | The wasm module cannot be loaded. The next input change tries again. |
+| `profileLoaded` | `ProfileSummary` | Once per profile read, after the `profile` or `profiles` input changed. |
+| `profileError` | `unknown` | A profile text cannot be read. The previous profile stays. |
+| `validationChange` | `ValidationReport` | The verdict or the set of findings changed, also after an edit. Never emitted for no report. |
+| `validationError` | `unknown` | The `validation` options cannot be read, or building the report threw. The previous options stay. |
+
+## Editor signal
+
+| Member | Type | Initial | Meaning |
+|---|---|---|---|
+| `report` | `WritableSignal<ValidationReport \| null>` | `null` | The latest report. `null` while validation is off. Read it, do not set it. |
+
+`EditLimits` maps a list name (`policies`, `permission`, `prohibition`, `obligation`, `duty`, `remedy`, `consequence`, `policyAssigner`, `policyAssignee`, `policyTarget`, `policyAction`, `ruleAssigner`, `ruleAssignee`, `ruleTarget`, `ruleAction`, `actionRefinement`, `entityRefinement`, `constraints`, `logicalChildren`, `rightOperandValues`, `profile`, `inheritFrom`) to `{ min?: number; max?: number | null }`.
+
+The wasm work runs outside the zone and `jsonChange` and `validationChange` are emitted inside it, as for `ds-odrl-prose`. When the wasm cannot be loaded, the host shows a `p.prose-error` with `role="alert"`: "The ODRL prose editor could not be loaded (the URL)."
 
 ## `PROSE_WASM_URL`
 
@@ -97,7 +135,8 @@ The package exports exactly these names from its entry point. Nothing else is pu
 
 | Name | Kind | Meaning |
 |---|---|---|
-| `OdrlProseComponent` | class | The component. |
+| `OdrlProseComponent` | class | The read-only component. |
+| `OdrlProseEditorComponent` | class | The editing component. |
 | `PROSE_WASM_URL` | token | Where the wasm file is fetched from. |
 | `PROSE_WASM_MODULE` | token | Which build of `@ds-labs/prose-wasm` runs: JSON-LD only (default) or with Turtle. |
 | `ProseWasmModule` | type | The JavaScript module of `@ds-labs/prose-wasm`, either build. |
@@ -108,6 +147,7 @@ The package exports exactly these names from its entry point. Nothing else is pu
 | `Finding` | type | One finding, from `@ds-labs/prose-wasm`. |
 | `RuleId` | type | A frozen rule id, from `@ds-labs/prose-wasm`. |
 | `RuleInfo` | type | One entry of the rule catalogue, from `@ds-labs/prose-wasm`. |
+| `EditLimits` | type | The `limits` input of the editor, from `@ds-labs/prose-wasm`. |
 | `ValidateOptions` | type | The validation options, from `@ds-labs/prose-wasm`. |
 | `ValidationReport` | type | The report, from `@ds-labs/prose-wasm`. |
 | `Verdict` | type | `"conforms"`, `"violations"` or `"incomplete"`. |
