@@ -11,12 +11,13 @@ const sec = (h) => {
   return s;
 };
 const COMPONENT = source('prose-angular/src/odrl-prose.component.ts');
+const EDITOR = source('prose-angular/src/odrl-prose-editor.component.ts');
 const col = (r, i) => r[i] ?? '';
 
-function members(kind) {
+function members(kind, file = COMPONENT) {
   // readonly name = input.required<T>() | input<T>(arg) | input(arg) | output<T>() | signal<T>(arg)
   const re = new RegExp(`readonly (\\w+) = ${kind}(\\.required)?(?:<((?:[^<>]|<[^<>]*>)*)>)?\\(([^)]*)\\)`, 'g');
-  return [...COMPONENT.matchAll(re)].map((m) => ({ name: m[1], required: !!m[2], generic: m[3] ? squash(m[3]) : null, arg: m[4].trim() }));
+  return [...file.matchAll(re)].map((m) => ({ name: m[1], required: !!m[2], generic: m[3] ? squash(m[3]) : null, arg: m[4].trim() }));
 }
 
 test('inputs: the table lists exactly the input() members, with type and default', () => {
@@ -56,6 +57,61 @@ test('the report signal: documented with its declared type, initial value, and t
   assert.equal(tick(col(row, 2)), sig.arg);
   assert.match(s, /writable/i, 'the page must say the type is writable');
   assert.match(s, /read it, do not set it|treat it as read-only/i);
+});
+
+test('editor inputs: the table lists exactly the input() members of the editor, with type and default', () => {
+  const inputs = members('input', EDITOR);
+  assert.equal(inputs.length, 7);
+  const rows = tableRows(sec('Editor inputs'));
+  assert.deepEqual(rows.map((r) => tick(col(r, 0))).sort(), inputs.map((i) => i.name).sort());
+  for (const i of inputs) {
+    const row = rows.find((r) => tick(col(r, 0)) === i.name);
+    const type = i.generic ?? (/^(true|false)$/.test(i.arg) ? 'boolean' : null);
+    assert.ok(type, `cannot infer the type of ${i.name}`);
+    assert.equal(squash(tick(col(row, 1)) ?? ''), type, `${i.name}: type`);
+    const def = i.required ? 'required' : i.arg === '' ? 'undefined' : i.arg;
+    assert.equal(i.required ? col(row, 2) : tick(col(row, 2)), def, `${i.name}: default`);
+    assert.ok(col(row, 3).length > 10, `${i.name}: no meaning`);
+  }
+});
+
+test('editor outputs: the table lists exactly the output() members of the editor and their payload types', () => {
+  const outputs = members('output', EDITOR);
+  assert.equal(outputs.length, 7);
+  const rows = tableRows(sec('Editor outputs'));
+  assert.deepEqual(rows.map((r) => tick(col(r, 0))).sort(), outputs.map((o) => o.name).sort());
+  for (const o of outputs) {
+    const row = rows.find((r) => tick(col(r, 0)) === o.name);
+    assert.equal(squash(tick(col(row, 1)) ?? ''), o.generic, `${o.name}: payload`);
+  }
+});
+
+test('the editor report signal: documented with its declared type and initial value', () => {
+  const [sig] = members('signal', EDITOR);
+  assert.equal(sig.name, 'report');
+  const row = tableRows(sec('Editor signal'))[0];
+  assert.equal(tick(col(row, 0)), 'report');
+  assert.equal(squash(tick(col(row, 1))), `WritableSignal<${sig.generic}>`);
+  assert.equal(tick(col(row, 2)), sig.arg);
+});
+
+test('editor component facts: selector, standalone, empty template, OnPush, no styles, no encapsulation', () => {
+  const meta = /@Component\(\{([\s\S]*?)\}\)\s*export class/.exec(EDITOR)[1];
+  assert.match(meta, /selector: 'ds-odrl-prose-editor'/);
+  assert.match(meta, /standalone: true/);
+  assert.match(meta, /template: ''/);
+  assert.match(meta, /ChangeDetectionStrategy\.OnPush/);
+  assert.doesNotMatch(meta, /\bstyles?\b|encapsulation/);
+  const md = frontMatterless(content('angular/index.md')) + interfaceMd;
+  assert.ok(md.includes('`ds-odrl-prose-editor`'), 'docs do not name the editor');
+  assert.ok(sec('Editor inputs').length > 0);
+});
+
+test('the editor keeps the zone rules and writes the same load-error element', () => {
+  assert.match(EDITOR, /this\.zone\.runOutsideAngular\(/);
+  assert.match(EDITOR, /this\.zone\.run\(/);
+  assert.match(EDITOR, /className = 'prose-error'/);
+  assert.match(EDITOR, /setAttribute\('role', 'alert'\)/);
 });
 
 test('component facts: selector, standalone, empty template, OnPush, no styles, no encapsulation', () => {
@@ -143,7 +199,7 @@ test('the package facts on the overview page: versions, peer range, client-side 
   assert.ok(md.includes(pkg.name) && md.includes('@ds-labs/prose-wasm'));
   assert.ok(md.includes(pkg.peerDependencies['@angular/core'].replace('>=', '')), 'Angular peer range');
   assert.match(md, /client-side only/i);
-  assert.match(md, /no editor|read-only/i);
+  assert.match(md, /`ds-odrl-prose-editor`/, 'the overview names the editor component');
   const version = pkg.version.split('.').slice(0, 2).join('.');
   assert.ok(md.includes(`@ds-labs/prose-angular@${version}`) || md.includes(`"@ds-labs/prose-angular": "^${version}`) || md.includes(`npm install @ds-labs/prose-angular`));
 });

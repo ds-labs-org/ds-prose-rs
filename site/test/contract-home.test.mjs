@@ -44,9 +44,12 @@ test('the page links the two demos and the two documentation sets, and shows bot
   assert.match(main, /npm install @ds-labs\/prose-angular/);
 });
 
-test('the claims about what the renderer does not do are the README\'s: no editor in npm, read-only components emit no CSS', () => {
+test('the npm row names the editor handle and component, and the read-only components emit no CSS', () => {
   const md = content('index.md');
   assert.match(md, /ships no CSS|emits no CSS|no stylesheet/i);
+  assert.match(md, /`ProseEditorHandle`/);
+  assert.match(md, /`<ds-odrl-prose-editor>`|`ds-odrl-prose-editor`/);
+  assert.doesNotMatch(md, /No editor\./);
 });
 
 test('the versions in the table are the packages\' versions', () => {

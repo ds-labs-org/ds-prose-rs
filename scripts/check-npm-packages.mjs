@@ -71,6 +71,14 @@ for (const file of files) {
     for (const type of ['ValidationReport', 'ValidateOptions', 'RuleId', 'Verdict', 'Finding']) {
       need(new RegExp(`export (interface|type) ${type}\\b`).test(dts), `${tag}: prose_wasm.d.ts does not declare ${type}`);
     }
+    // The editor: the handle, its methods and the limits types.
+    need(/export class ProseEditorHandle\b/.test(dts), `${tag}: prose_wasm.d.ts has no ProseEditorHandle`);
+    for (const method of ['setLimits(', 'setProfile(', 'setValidation(', 'update(', 'json()']) {
+      need(dts.includes(method), `${tag}: prose_wasm.d.ts has no ${method}`);
+    }
+    for (const type of ['EditLimits', 'LimitSpec', 'LimitName']) {
+      need(new RegExp(`export (interface|type) ${type}\\b`).test(dts), `${tag}: prose_wasm.d.ts does not declare ${type}`);
+    }
     need(/"profile\.unknown-term"/.test(dts) && /"input\.unreadable"/.test(dts), `${tag}: the RuleId union is missing rules`);
     // The ds-prose-validate command: declared, shipped, and executable.
     need(pkg.bin?.['ds-prose-validate'] === 'ds-prose-validate.mjs', `${tag}: no bin entry ds-prose-validate -> ds-prose-validate.mjs`);
@@ -86,7 +94,13 @@ for (const file of files) {
     for (const member of ['profile', 'profileLoaded', 'profileError', 'profiles', 'strict', 'validation', 'showViolations', 'validationChange', 'report']) {
       need(new RegExp(`\\breadonly ${member}:`).test(dts), `${tag}: the component has no ${member} member in its types`);
     }
+    const editorDts = has('odrl-prose-editor.component.d.ts') ? tar(file, ['-xzO', 'package/odrl-prose-editor.component.d.ts']) : '';
+    need(editorDts !== '', `${tag}: no odrl-prose-editor.component.d.ts`);
+    for (const member of ['json', 'jsonChange', 'jsonError', 'limits', 'profile', 'profiles', 'validation', 'report']) {
+      need(new RegExp(`\\breadonly ${member}:`).test(editorDts), `${tag}: the editor component has no ${member} member in its types`);
+    }
     const index = tar(file, ['-xzO', 'package/index.d.ts']);
+    need(/\bOdrlProseEditorComponent\b/.test(index), `${tag}: OdrlProseEditorComponent is not exported`);
     need(/ProfileSummary/.test(index), `${tag}: ProfileSummary is not exported`);
     for (const type of ['ValidationReport', 'ValidateOptions', 'RuleId']) {
       need(new RegExp(`\\b${type}\\b`).test(index), `${tag}: ${type} is not exported`);

@@ -62,11 +62,12 @@ test('the read-only renderer partial lists exactly the classes lib.rs emits', ()
   assert.deepEqual([...listed].sort(), [...emittedByReader].sort());
 });
 
-test('the Angular hooks page documents the renderer classes and no editor class', () => {
+test('the Angular hooks page documents the renderer classes only, and sends the editor to the Yew hooks', () => {
   const listed = documented(ngHooks, 'Stable');
   assert.deepEqual([...listed].sort(), [...emittedByReader].sort());
   for (const editorOnly of ['prose-edit', 'prose-slot', 'prose-add', 'prose-problems']) assert.ok(!listed.has(editorOnly));
-  assert.match(ngHooks, /editor is not available in Angular|no editor in the Angular package/i);
+  assert.match(ngHooks, /`ds-odrl-prose-editor`[^\n]*Yew editor hooks/i);
+  assert.ok(ngHooks.includes('(/yew/css-hooks/)'), 'links the Yew hooks page');
 });
 
 test('custom properties: the docs list every --prose-* name in the sources and no other', () => {
