@@ -7,13 +7,13 @@
 //! counter and receives the committed documents through one callback.
 use crate::{read_profile, summary_json, throw, to_json, validation};
 use prose_yew::prose_core::edit::{
-    EditDoc, EditRules, Limit, StrictEdit, check_profile, read_model, write_jsonld,
+    EditDoc, EditRules, IssueTarget, Limit, StrictEdit, check_profile, read_model, write_jsonld,
 };
 use prose_yew::prose_core::profile::Wording;
 use prose_yew::prose_core::validate::{Options, Report, Validator};
 use prose_yew::{
-    EditConfig, EditMode, OdrlProseView, ProseProblems, SharedWording, use_prose_editor_with,
-    use_validation,
+    EditConfig, EditMode, OdrlProseView, ProseProblems, SharedWording, go_to,
+    use_prose_editor_with, use_validation,
 };
 use serde_json::{Map, Value};
 use std::cell::RefCell;
@@ -245,8 +245,15 @@ fn editor_host(props: &HostProps) -> Html {
         )
     };
     let refusal = with.refused.as_ref().and_then(|(ev, e)| e.issue(ev));
+    let view = use_node_ref();
+    let onjump = {
+        let view = view.clone();
+        Callback::from(move |t: IssueTarget| {
+            go_to(&view, &t);
+        })
+    };
     html! {
-        <>
+        <div ref={view}>
             if let Some(e) = &editor.last_error {
                 <p class="prose-error" role="alert">{ e.to_string() }</p>
             }
@@ -260,9 +267,13 @@ fn editor_host(props: &HostProps) -> Html {
                 class={props.class.clone()}
             />
             if validating {
-                <ProseProblems report={report} onfix={with.apply_all.clone()} />
+                <ProseProblems
+                    report={report}
+                    onjump={onjump}
+                    onfix={with.apply_all.clone()}
+                />
             }
-        </>
+        </div>
     }
 }
 
@@ -273,8 +284,8 @@ struct Shared {
     validator: Option<Validator>,
 }
 
-/// A mounted editor. Call `destroy()` (or `free()`) when the host element
-/// goes away. The host must not touch the element's children, and must not
+/// A mounted editor. Call `destroy()` when the host element goes away;
+/// dropping or `free()`ing the handle unmounts it as well. The host must not touch the element's children, and must not
 /// call a method of the handle from inside its `onChange`.
 #[wasm_bindgen]
 pub struct ProseEditorHandle {
@@ -288,6 +299,12 @@ pub struct ProseEditorHandle {
     options: Option<Options>,
     limits: Option<Value>,
     config: Rc<EditConfig>,
+}
+
+impl Drop for ProseEditorHandle {
+    fn drop(&mut self) {
+        self.destroy();
+    }
 }
 
 #[wasm_bindgen]

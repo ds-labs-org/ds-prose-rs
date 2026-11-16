@@ -134,8 +134,9 @@ fn camel(name: &str) -> String {
     }
 }
 
-/// A mounted `<OdrlProse>`. Call `destroy()` (or `free()`) when the host
-/// element goes away.
+/// A mounted `<OdrlProse>`. Call `destroy()` when the host element goes
+/// away; `free()` alone releases the handle but leaves the rendered DOM and
+/// its listeners in place.
 #[wasm_bindgen]
 pub struct ProseHandle {
     app: Option<yew::AppHandle<OdrlProse>>,
