@@ -298,3 +298,21 @@ async fn dropping_the_handle_unmounts_the_editor() {
     settle().await;
     assert!(select(&c, ".prose-edit").is_none());
 }
+
+const NO_RULES_DOC: &str = r#"{"@context":"http://www.w3.org/ns/odrl.jsonld","@type":"Set"}"#;
+
+#[wasm_bindgen_test]
+async fn the_no_rule_note_goes_once_a_rule_is_added() {
+    let (c, _h, _calls) = mount(NO_RULES_DOC).await;
+    assert!(
+        select(&c, ".prose-warnings").is_some(),
+        "{}",
+        c.inner_html()
+    );
+    click(&c, ADD_PERMISSION).await;
+    assert!(
+        select(&c, ".prose-warnings").is_none(),
+        "{}",
+        c.inner_html()
+    );
+}
