@@ -356,16 +356,90 @@ fn a_suggest_only_source_never_loosens_a_closed_operand() {
     assert_eq!(h.sources.values, HintSource::Shapes);
 }
 
-#[test]
-fn a_closing_source_drops_what_an_open_base_only_suggested() {
-    // As the shapes do: closing makes binding only what the source says.
+/// An overlay that only suggests an operator, a unit and a datatype for
+/// `dx:purpose`.
+fn overlay_suggesting_purpose_facets() -> Overlay {
+    let doc = json!({
+        "@context": {"prose": PROSE, "odrl": "http://www.w3.org/ns/odrl/2/",
+                     "xsd": "http://www.w3.org/2001/XMLSchema#", "dx": DX},
+        "@graph": [{"@id": "dx:purpose",
+                    "prose:operator": [{"@id": "odrl:eq"}],
+                    "prose:unit": [{"@id": "dx:kg"}],
+                    "prose:datatype": {"@id": "xsd:string"}}]
+    });
+    Overlay::parse(&doc.to_string()).unwrap()
+}
+
+fn closing_purpose_source() -> ValueSources {
     let mut s = ValueSources::new();
     s.set_operand(
         &member("purpose"),
         ValueSource::new(vec![SourceValue::new(&member("research"))], true),
     );
-    let w = plain().with_value_sources(s);
-    assert!(hints(&w, "purpose").closed);
+    s
+}
+
+#[test]
+fn a_closed_source_gives_values_only_and_keeps_the_other_facets_of_an_open_base() {
+    let w = plain()
+        .with_overlay(overlay_suggesting_purpose_facets())
+        .with_value_sources(closing_purpose_source());
+    let h = hints(&w, "purpose");
+    assert!(h.closed);
+    assert_eq!(h.values, [member("research")]);
+    assert_eq!(h.sources.values, HintSource::Host);
+    // The host says nothing about operators, units or the datatype: the
+    // base's stay, with their own source, and only suggest.
+    assert_eq!(h.operators, ["http://www.w3.org/ns/odrl/2/eq"]);
+    assert_eq!(h.units, [member("kg")]);
+    assert_eq!(
+        h.datatype.as_deref(),
+        Some("http://www.w3.org/2001/XMLSchema#string")
+    );
+    assert_eq!(h.sources.operators, HintSource::Overlay);
+    assert_eq!(h.sources.units, HintSource::Overlay);
+    assert_eq!(h.sources.datatype, HintSource::Overlay);
+    assert!(h.values_only);
+    assert!(!h.binds_other_facets());
+}
+
+#[test]
+fn the_values_a_closed_source_binds_but_the_suggested_operator_only_suggests() {
+    let w = plain()
+        .with_overlay(overlay_suggesting_purpose_facets())
+        .with_value_sources(closing_purpose_source());
+    let text = policy(json!([
+        {"leftOperand": "dx:purpose", "operator": "lt", "rightOperand": {"@id": "dx:marketing"}}
+    ]));
+    let r = run(&text, &w);
+    let value = r
+        .findings
+        .iter()
+        .find(|f| f.rule.to_string() == "prose.value-not-allowed")
+        .unwrap_or_else(|| panic!("{:?}", r.findings));
+    assert_eq!(value.severity, Severity::Error);
+    let op = r
+        .findings
+        .iter()
+        .find(|f| f.rule.to_string() == "prose.operator-not-allowed")
+        .unwrap_or_else(|| panic!("{:?}", r.findings));
+    // A suggestion, not an error: the host closed the values only.
+    assert_eq!(op.severity, Severity::Info, "{op:?}");
+    assert!(op.message.contains("suggests"), "{}", op.message);
+    assert!(!op.expected.as_ref().unwrap().closed);
+    assert_eq!(
+        op.expected.as_ref().unwrap().source,
+        Some(HintSource::Overlay)
+    );
+}
+
+#[test]
+fn a_closed_source_over_a_closed_base_leaves_its_facets_binding() {
+    let w = plain()
+        .with_overlay(overlay_closing_purpose())
+        .with_value_sources(closing_purpose_source());
+    let h = hints(&w, "purpose");
+    assert!(h.closed && !h.values_only && h.binds_other_facets());
 }
 
 // --- the source's name -------------------------------------------------------

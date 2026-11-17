@@ -470,12 +470,22 @@ impl<'t> Reader<'t> {
     /// `literals` (the right operand's list); otherwise a literal ignores
     /// the whole list.
     fn list(&mut self, p: &str, here: &str, literals: bool) -> Option<Items> {
-        let items = items(&self.g, p, self.limits)?;
+        let mut items = items(&self.g, p, self.limits)?;
         if !literals && !items.literals.is_empty() {
-            self.notes.warn(format!(
-                "ignored the sh:in of {here}: it lists a literal, and only IRIs are read"
-            ));
-            return None;
+            // ODRL terms are IRIs, and a shape may write one as a string: an
+            // absolute IRI is that IRI. Anything else (a curie, a bare name)
+            // needs a prefix the reader does not guess, so it ignores the list.
+            if !items.literals.iter().all(|l| is_absolute_iri(l)) {
+                self.notes.warn(format!(
+                    "ignored the sh:in of {here}: it lists a string that is not an absolute IRI, and only IRIs are read"
+                ));
+                return None;
+            }
+            for l in std::mem::take(&mut items.literals) {
+                if !items.iris.contains(&l) {
+                    items.iris.push(l);
+                }
+            }
         }
         if items.cut {
             self.notes.warn(format!(
@@ -565,4 +575,23 @@ impl<'t> Reader<'t> {
             ));
         }
     }
+}
+
+/// Whether a string is written as an absolute IRI: `scheme://rest`, or a
+/// `urn:` / `did:` name. `odrl:eq` is a curie, not an IRI.
+fn is_absolute_iri(s: &str) -> bool {
+    let Some((scheme, rest)) = s.split_once(':') else {
+        return false;
+    };
+    let scheme_ok = scheme
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic())
+        && scheme
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c));
+    scheme_ok
+        && !s.chars().any(|c| c.is_whitespace())
+        && (rest.starts_with("//") && rest.len() > 2
+            || (["urn", "did"].contains(&scheme.to_ascii_lowercase().as_str()) && !rest.is_empty()))
 }

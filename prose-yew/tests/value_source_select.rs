@@ -5,7 +5,7 @@
 //! and flagged. A source that only suggests leaves the slot free text.
 //! Rendered on the server.
 #![cfg(not(target_arch = "wasm32"))]
-use prose_core::edit::{EditDoc, read_model};
+use prose_core::edit::{EditDoc, EntityRole, read_model};
 use prose_core::profile::{ProfileVocab, SourceValue, ValueSource, ValueSources, Wording};
 use prose_core::validate::Options;
 use prose_yew::{EditConfig, EditMode, OdrlProseView, TermInput};
@@ -210,4 +210,147 @@ async fn the_sources_survive_a_new_wording() {
     };
     let html = ssr(doc(r#"{"@id": "did:web:alpha.example"}"#), c).await;
     assert!(element(&html, RIGHT).starts_with("<select"));
+}
+
+#[tokio::test]
+async fn a_closed_source_over_an_open_base_keeps_the_units_a_suggestion() {
+    // An overlay only suggests units and operators for the left operand; the
+    // host closes its values. The values become a select, and the unit stays
+    // free text with its suggestions: the host binds the values alone.
+    let overlay = prose_core::profile::Overlay::parse(&format!(
+        r#"{{"@context": {{"prose": "https://ds-labs-org.github.io/ds-prose-rs/profile#",
+                         "dx": "{DX}"}},
+            "@graph": [{{"@id": "dx:participantType", "prose:unit": [{{"@id": "dx:kg"}}]}}]}}"#
+    ))
+    .unwrap();
+    let w = Rc::new(
+        Rc::try_unwrap(wording())
+            .unwrap_or_else(|_| unreachable!())
+            .with_overlay(overlay),
+    );
+    let c = EditConfig {
+        term_input: TermInput::Select,
+        ..EditConfig::default().with_wording(w)
+    }
+    .with_value_sources(dids(true));
+    let text = policy(r#"{"@id": "did:web:alpha.example"}"#).replace(
+        r#""operator": "eq""#,
+        r#""operator": "eq", "unit": "dx:kg""#,
+    );
+    let html = ssr(Rc::new(read_model(&text).unwrap()), c).await;
+    assert!(element(&html, RIGHT).starts_with("<select"));
+    let unit = element(&html, "policy[0].permission[0].constraint[0]#unit");
+    assert!(!unit.starts_with("<select"), "{unit}");
+}
+
+// A closed host source for a party role (assigner, assignee, target) is a
+// select of its values too, with a value it no longer lists kept.
+
+fn parties(closed: bool) -> ValueSources {
+    let mut s = ValueSources::new();
+    for role in [
+        EntityRole::Assigner,
+        EntityRole::Assignee,
+        EntityRole::Target,
+    ] {
+        s.set_role(
+            role,
+            ValueSource::new(
+                vec![
+                    SourceValue::new("did:web:alpha.example")
+                        .with_label("Alpha Corp")
+                        .with_group("Members"),
+                    SourceValue::new("did:web:beta.example").with_label("Beta Ltd"),
+                ],
+                closed,
+            ),
+        );
+    }
+    s
+}
+
+fn party_doc(assignee: &str) -> Rc<EditDoc> {
+    let text = format!(
+        r#"{{"@context": "http://www.w3.org/ns/odrl.jsonld", "@type": "Agreement",
+            "uid": "urn:p", "assigner": "did:web:alpha.example",
+            "permission": [{{"target": "did:web:beta.example", "assignee": "{assignee}",
+                            "action": "use"}}]}}"#
+    );
+    Rc::new(read_model(&text).unwrap())
+}
+
+const ASSIGNER: &str = "policy[0].assigner[0]#iri";
+const ASSIGNEE: &str = "policy[0].permission[0].assignee[0]#iri";
+const TARGET: &str = "policy[0].permission[0].target[0]#iri";
+
+fn party_config(sources: Option<ValueSources>, strict: bool) -> EditConfig {
+    config(sources, strict)
+}
+
+#[tokio::test]
+async fn a_closed_source_for_a_party_role_is_a_select_of_its_values() {
+    let html = ssr(
+        party_doc("did:web:beta.example"),
+        party_config(Some(parties(true)), false),
+    )
+    .await;
+    for slot in [ASSIGNER, ASSIGNEE, TARGET] {
+        let el = element(&html, slot);
+        assert!(el.starts_with("<select"), "{slot}: {el}");
+        assert!(el.contains("Alpha Corp"), "{el}");
+        assert!(el.contains("<optgroup label=\"Members\">"), "{el}");
+        assert!(!el.contains("data-outside"), "{el}");
+    }
+    let assignee = element(&html, ASSIGNEE);
+    assert!(
+        assignee.contains("<option value=\"did:web:beta.example\" selected=\"selected\""),
+        "{assignee}"
+    );
+}
+
+#[tokio::test]
+async fn a_party_the_closed_source_no_longer_lists_stays_selected_noted_and_flagged() {
+    let html = ssr(
+        party_doc("did:web:gone.example"),
+        party_config(Some(parties(true)), true),
+    )
+    .await;
+    let el = element(&html, ASSIGNEE);
+    assert!(el.starts_with("<select"), "{el}");
+    assert!(el.contains("data-outside=\"true\""), "{el}");
+    assert!(
+        el.contains("<option value=\"did:web:gone.example\" selected=\"selected\">"),
+        "{el}"
+    );
+    assert!(html.contains("(not in the host") && !html.contains("(not in the profile)"));
+    assert!(el.contains("prose-slot-invalid"), "{el}");
+}
+
+#[tokio::test]
+async fn a_suggest_only_or_missing_party_source_leaves_the_slot_free_text() {
+    for sources in [Some(parties(false)), None] {
+        let html = ssr(
+            party_doc("did:web:beta.example"),
+            party_config(sources, false),
+        )
+        .await;
+        assert!(!element(&html, ASSIGNEE).starts_with("<select"));
+    }
+}
+
+#[tokio::test]
+async fn only_the_role_the_host_closed_is_a_select() {
+    let mut s = ValueSources::new();
+    s.set_role(
+        EntityRole::Assignee,
+        ValueSource::new(vec![SourceValue::new("did:web:beta.example")], true),
+    );
+    let html = ssr(
+        party_doc("did:web:beta.example"),
+        party_config(Some(s), false),
+    )
+    .await;
+    assert!(element(&html, ASSIGNEE).starts_with("<select"));
+    assert!(!element(&html, ASSIGNER).starts_with("<select"));
+    assert!(!element(&html, TARGET).starts_with("<select"));
 }

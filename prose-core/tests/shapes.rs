@@ -383,7 +383,7 @@ fn a_mixed_list_allows_both_and_a_string_naming_an_iri_is_still_iri_expected() {
 }
 
 #[test]
-fn literals_in_the_operator_unit_action_and_operand_lists_are_still_ignored_with_a_warning() {
+fn names_that_are_not_iris_in_the_operator_and_unit_lists_are_ignored_with_a_warning() {
     let s = graph(json!([constraint_shape(
         "dx:purpose",
         vec![
@@ -392,10 +392,62 @@ fn literals_in_the_operator_unit_action_and_operand_lists_are_still_ignored_with
         ]
     )]));
     let joined = s.warnings().join("\n");
-    assert!(joined.contains("literal"), "{joined}");
+    assert!(joined.contains("not an absolute IRI"), "{joined}");
     let w = unshaped().with_shapes(s);
     assert!(hints(&w, "purpose").operators.is_empty());
     assert!(hints(&w, "purpose").units.is_empty());
+}
+
+#[test]
+fn a_string_that_is_an_absolute_iri_in_a_term_list_is_read_as_that_iri() {
+    // ODRL terms are IRIs, but a shape may write one as a string: an
+    // absolute IRI is taken as the IRI, anything else is not guessed at.
+    let s = graph(json!([constraint_shape(
+        "dx:purpose",
+        vec![
+            json!({"sh:path": {"@id": "odrl:operator"},
+                   "sh:in": {"@list": ["http://www.w3.org/ns/odrl/2/eq", {"@id": "odrl:neq"}]}}),
+            json!({"sh:path": {"@id": "odrl:unit"}, "sh:in": {"@list": ["urn:unit:kg"]}}),
+        ]
+    )]));
+    assert!(s.warnings().is_empty(), "{:?}", s.warnings());
+    let c = s.constraint(&format!("{DX}purpose")).unwrap();
+    let mut operators = c.operators.clone();
+    operators.sort();
+    assert_eq!(
+        operators,
+        [
+            "http://www.w3.org/ns/odrl/2/eq",
+            "http://www.w3.org/ns/odrl/2/neq"
+        ]
+    );
+    assert_eq!(c.units, ["urn:unit:kg"]);
+    // The action and left operand lists read them the same way.
+    let s = graph(json!([
+        {"@id": "dx:A", "@type": "sh:NodeShape", "sh:property": [
+            {"sh:path": {"@id": "odrl:action"},
+             "sh:in": {"@list": [format!("{DX}train")]}},
+            {"sh:path": {"@id": "odrl:leftOperand"},
+             "sh:in": {"@list": [format!("{DX}purpose")]}}
+        ]}
+    ]));
+    assert!(s.warnings().is_empty(), "{:?}", s.warnings());
+    assert_eq!(s.closed_actions().unwrap(), [format!("{DX}train")]);
+    assert_eq!(s.closed_left_operands().unwrap(), [format!("{DX}purpose")]);
+}
+
+#[test]
+fn a_string_that_is_not_an_absolute_iri_in_a_term_list_ignores_the_list_with_a_warning() {
+    // A curie or a bare name needs a prefix the reader does not guess.
+    let s = graph(json!([constraint_shape(
+        "dx:purpose",
+        vec![json!({"sh:path": {"@id": "odrl:operator"},
+                    "sh:in": {"@list": ["http://www.w3.org/ns/odrl/2/eq", "odrl:neq"]}})]
+    )]));
+    let joined = s.warnings().join("\n");
+    assert!(joined.contains("absolute IRI"), "{joined}");
+    let w = unshaped().with_shapes(s);
+    assert!(hints(&w, "purpose").operators.is_empty());
 }
 
 // --- limits ------------------------------------------------------------------

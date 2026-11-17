@@ -115,7 +115,10 @@ pub(crate) fn layer_overlay(base: &OperandHints, patch: &OperandHints) -> Operan
 /// whether it closes them. Recorded as [`HintSource::Host`], for the values
 /// facet alone.
 ///
-/// A closing source closes the left operand as [`layer`] does. An open one
+/// A closing source closes the left operand for its values alone: over an
+/// open base the base's operators, units and datatype stay as suggestions
+/// ([`OperandHints::values_only`]); over a closed base its facets stay
+/// binding, as with [`layer`]. An open one
 /// only suggests: it replaces the values of an operand that is not closed,
 /// and never loosens one that is, so what a closed source (a profile, an
 /// overlay or shapes) makes binding stays binding. A patch with no values is
@@ -124,7 +127,18 @@ pub(crate) fn layer_host(base: &OperandHints, patch: &OperandHints) -> OperandHi
     if patch.values.is_empty() {
         return base.clone();
     }
-    let mut out = if patch.closed {
+    let mut out = if patch.closed && !base.closed {
+        // The host gives values and nothing else: the base's other facets
+        // stay, and stay suggestions (the closing binds the values alone).
+        let mut out = base.clone();
+        out.values = patch.values.clone();
+        out.value_tree = patch.value_tree.clone();
+        out.literal_values.clear();
+        out.sources.values = HintSource::Host;
+        out.closed = true;
+        out.values_only = true;
+        out
+    } else if patch.closed {
         layer(base, patch, HintSource::Host)
     } else if base.closed {
         return base.clone();

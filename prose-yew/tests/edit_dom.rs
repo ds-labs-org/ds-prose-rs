@@ -1377,6 +1377,43 @@ async fn a_value_picked_into_a_text_slot_is_written_as_an_iri() {
 }
 
 #[wasm_bindgen_test]
+async fn a_literal_member_of_a_shapes_list_is_picked_as_text_not_as_an_iri() {
+    // The member `urn:code:1` looks like an IRI, but the shape lists it as a
+    // literal: picking it into a slot that holds a string writes text.
+    let shapes = r#"{
+      "@context": {"sh": "http://www.w3.org/ns/shacl#", "odrl": "http://www.w3.org/ns/odrl/2/",
+                   "dx": "https://example.org/dataspace/"},
+      "@graph": [{"@id": "dx:CodeShape", "@type": "sh:NodeShape", "sh:property": [
+        {"sh:path": {"@id": "odrl:leftOperand"}, "sh:hasValue": {"@id": "dx:code"}},
+        {"sh:path": {"@id": "odrl:rightOperand"}, "sh:in": {"@list": ["urn:code:1", "DEF-2"]}}
+      ]}]
+    }"#;
+    let profile = include_str!("../../prose-core/tests/shapes/dataspace-profile.jsonld");
+    let w = Rc::new(
+        Wording::new()
+            .with_profile(ProfileVocab::parse(profile).unwrap())
+            .with_shapes(prose_core::shapes::ShapesGraph::parse(shapes).unwrap()),
+    );
+    let json = r#"{"@context": ["http://www.w3.org/ns/odrl.jsonld", {"dx": "https://example.org/dataspace/"}],
+        "@type": "Set", "uid": "urn:p", "profile": "https://example.org/dataspace/profile",
+        "permission": [{"action": "use", "target": "urn:a",
+          "constraint": [{"leftOperand": "dx:code", "operator": "eq", "rightOperand": "tbd"}]}]}"#;
+    let (c, log, _h) = mount_worded(json, Some(w)).await;
+    let path = "policy[0].permission[0].constraint[0]#rightOperand[0]";
+    type_into(&slot(&c, path), "");
+    settle().await;
+    let labels: Vec<String> = shown_options(&c).into_iter().map(|(l, _)| l).collect();
+    assert_eq!(labels, ["urn:code:1", "DEF-2"]);
+    mousedown(&q(&c, "[role=option]"));
+    settle().await;
+    assert_eq!(set_iris(&log), vec![]);
+    assert_eq!(
+        set_texts(&log),
+        vec![(path.to_string(), "urn:code:1".to_string())]
+    );
+}
+
+#[wasm_bindgen_test]
 async fn a_typed_slot_is_not_offered_unrelated_profile_values() {
     // ex:dataSubjectCount says prose:datatype xsd:integer and suggests no
     // values: the profile's IRI values do not fit it.

@@ -158,3 +158,106 @@ async fn the_operator_groups_name_the_shapes_when_they_gave_the_list() {
     );
     assert!(!op.contains("by the profile"), "{op}");
 }
+
+// --- literal members of sh:in ----------------------------------------------------
+
+const LITERAL_SHAPES: &str = r#"{
+  "@context": {"sh": "http://www.w3.org/ns/shacl#", "odrl": "http://www.w3.org/ns/odrl/2/",
+               "dx": "https://example.org/dataspace/"},
+  "@graph": [
+    {"@id": "dx:CodeShape", "@type": "sh:NodeShape", "sh:property": [
+      {"sh:path": {"@id": "odrl:leftOperand"}, "sh:hasValue": {"@id": "dx:code"}},
+      {"sh:path": {"@id": "odrl:rightOperand"}, "sh:in": {"@list": ["ABC-1", "DEF-2"]}}
+    ]},
+    {"@id": "dx:PurposeShape", "@type": "sh:NodeShape", "sh:property": [
+      {"sh:path": {"@id": "odrl:leftOperand"}, "sh:hasValue": {"@id": "dx:purpose"}},
+      {"sh:path": {"@id": "odrl:rightOperand"}, "sh:in": {"@list": [{"@id": "dx:research"}, "other"]}}
+    ]}
+  ]
+}"#;
+
+fn literal_config(strict: bool) -> EditConfig {
+    let w = Wording::new()
+        .with_profile(ProfileVocab::parse(&file("dataspace-profile.jsonld")).unwrap())
+        .with_shapes(ShapesGraph::parse(LITERAL_SHAPES).unwrap());
+    let c = EditConfig {
+        term_input: TermInput::Select,
+        ..EditConfig::default().with_wording(Rc::new(w))
+    };
+    match strict {
+        true => c.with_strict(Options::strict()),
+        false => c,
+    }
+}
+
+fn code_policy(value: &str) -> Rc<EditDoc> {
+    let text = format!(
+        r#"{{
+  "@context": ["http://www.w3.org/ns/odrl.jsonld", {{"dx": "https://example.org/dataspace/"}}],
+  "@type": "Set", "uid": "urn:p", "profile": "https://example.org/dataspace/profile",
+  "permission": [{{"target": "urn:a", "action": "dx:train", "constraint": [
+    {{"leftOperand": "dx:code", "operator": "eq", "rightOperand": {value}}},
+    {{"leftOperand": "dx:purpose", "operator": "eq", "rightOperand": {{"@id": "dx:research"}}}}
+  ]}}]
+}}"#
+    );
+    Rc::new(read_model(&text).unwrap())
+}
+
+#[tokio::test]
+async fn a_right_operand_the_shapes_close_to_literals_is_a_select_of_them() {
+    let html = ssr(code_policy("\"ABC-1\""), literal_config(false)).await;
+    let right = element(&html, RIGHT);
+    assert!(right.starts_with("<select"), "{right}");
+    assert!(
+        right.contains("<option value=\"ABC-1\" selected=\"selected\">"),
+        "{right}"
+    );
+    assert!(right.contains("<option value=\"DEF-2\""), "{right}");
+    assert!(!right.contains("data-outside"), "{right}");
+}
+
+#[tokio::test]
+async fn a_list_with_iris_and_literals_offers_both() {
+    let html = ssr(code_policy("\"ABC-1\""), literal_config(true)).await;
+    let right = element(&html, OTHER_RIGHT);
+    assert!(right.starts_with("<select"), "{right}");
+    assert!(right.contains("value=\"dx:research\""), "{right}");
+    assert!(right.contains("<option value=\"other\""), "{right}");
+}
+
+#[tokio::test]
+async fn a_literal_outside_the_list_stays_selected_and_noted() {
+    let html = ssr(code_policy("\"XYZ-9\""), literal_config(true)).await;
+    let right = element(&html, RIGHT);
+    assert!(right.contains("data-outside=\"true\""), "{right}");
+    assert!(
+        right.contains("<option value=\"XYZ-9\" selected=\"selected\">"),
+        "{right}"
+    );
+}
+
+#[tokio::test]
+async fn without_the_literal_shapes_the_code_is_free_text() {
+    let html = ssr(code_policy("\"ABC-1\""), config(true, false)).await;
+    // The fixture shapes give dx:code a pattern only: no list, no select.
+    assert!(!element(&html, RIGHT).starts_with("<select"));
+}
+
+#[tokio::test]
+async fn advisory_validation_does_not_narrow_the_term_selects_to_the_closed_lists() {
+    // The shapes close the action and left-operand lists as an unknown
+    // term, which binds in strict mode only: advisory validation (explicit
+    // or none) offers the whole vocabulary, as it does for a profile's own
+    // closed lists.
+    let advisory = config(true, false).with_strict(Options::advisory());
+    for config in [config(true, false), advisory] {
+        let html = ssr(doc(), config).await;
+        let action = element(&html, ACTION);
+        assert!(action.contains("value=\"dx:publish\""), "{action}");
+        assert!(action.contains("value=\"dx:train\""), "{action}");
+        let left = element(&html, LEFT);
+        assert!(left.contains("value=\"dx:price\""), "{left}");
+        assert!(left.contains("value=\"dx:purpose\""), "{left}");
+    }
+}

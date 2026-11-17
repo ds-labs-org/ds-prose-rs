@@ -1848,7 +1848,7 @@ impl<'a> Checker<'a> {
         let hinted = hints
             .filter(|h| {
                 self.options
-                    .level_of(RuleId::ProseDatatypeLexical, h.closed)
+                    .level_of(RuleId::ProseDatatypeLexical, h.binds_other_facets())
                     >= self.options.level_of(RuleId::ProseIllTypedLiteral, false)
             })
             .and_then(|h| h.datatype.as_deref());
@@ -1869,7 +1869,7 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|o| local_name(o).to_string())
             .collect();
-        let binding = h.closed && self.options.mode() == Mode::Strict;
+        let binding = h.binds_other_facets() && self.options.mode() == Mode::Strict;
         let msg = format!(
             "{} the operators {} for \"{}\"",
             the(
@@ -1881,7 +1881,7 @@ impl<'a> Checker<'a> {
         );
         if let Some(f) = self.emit_term(
             RuleId::ProseOperatorNotAllowed,
-            h.closed,
+            h.binds_other_facets(),
             path,
             a.id,
             Field::Operator,
@@ -1890,7 +1890,7 @@ impl<'a> Checker<'a> {
         ) {
             f.expected = Some(Expected {
                 operators: h.operators.clone(),
-                closed: h.closed,
+                closed: h.binds_other_facets(),
                 source: Some(h.sources.operators),
                 ..Expected::default()
             });
@@ -1923,13 +1923,13 @@ impl<'a> Checker<'a> {
                 );
                 if let Some(f) = self.emit(
                     RuleId::ProseDatatypeLexical,
-                    h.closed,
+                    h.binds_other_facets(),
                     slot(path, Field::RightOperand(k)),
                     msg,
                 ) {
                     f.expected = Some(Expected {
                         datatype: h.datatype.clone(),
-                        closed: h.closed,
+                        closed: h.binds_other_facets(),
                         source: Some(h.sources.datatype),
                         ..Expected::default()
                     });
@@ -2131,7 +2131,7 @@ impl<'a> Checker<'a> {
             return;
         }
         let names: Vec<String> = h.units.iter().map(|u| local_name(u).to_string()).collect();
-        let binding = h.closed && self.options.mode() == Mode::Strict;
+        let binding = h.binds_other_facets() && self.options.mode() == Mode::Strict;
         let msg = format!(
             "{} the units {} for \"{}\"",
             the(
@@ -2143,7 +2143,7 @@ impl<'a> Checker<'a> {
         );
         if let Some(f) = self.emit_term(
             RuleId::ProseUnitNotAllowed,
-            h.closed,
+            h.binds_other_facets(),
             path,
             a.id,
             Field::Unit,
@@ -2152,7 +2152,7 @@ impl<'a> Checker<'a> {
         ) {
             f.expected = Some(Expected {
                 units: h.units.clone(),
-                closed: h.closed,
+                closed: h.binds_other_facets(),
                 source: Some(h.sources.units),
                 ..Expected::default()
             });
@@ -2167,7 +2167,7 @@ impl<'a> Checker<'a> {
         };
         let expected = || Expected {
             datatype: Some(want.to_string()),
-            closed: h.closed,
+            closed: h.binds_other_facets(),
             source: Some(h.sources.datatype),
             ..Expected::default()
         };
@@ -2185,7 +2185,7 @@ impl<'a> Checker<'a> {
                     );
                     if let Some(f) = self.emit(
                         RuleId::ProseDatatypeConflict,
-                        h.closed,
+                        h.binds_other_facets(),
                         slot(path, Field::RightOperand(k)),
                         msg,
                     ) {
@@ -2209,7 +2209,7 @@ impl<'a> Checker<'a> {
                 );
                 if let Some(f) = self.emit(
                     RuleId::ProseDatatypeConflict,
-                    h.closed,
+                    h.binds_other_facets(),
                     IssueTarget::Node(path.clone()),
                     msg,
                 ) {

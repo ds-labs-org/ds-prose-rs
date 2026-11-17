@@ -513,8 +513,22 @@ pub struct OperandHints {
     /// under; empty unless `sources.values` is [`HintSource::Host`]. They are
     /// the same values as `value_tree`, which is what validation reads.
     pub source_values: Vec<SourceValue>,
+    /// A host's closed value source closed this left operand over a base
+    /// that only suggested: the closing binds the values alone, so the
+    /// base's operators, units and datatype stay and stay suggestions
+    /// (see [`OperandHints::binds_other_facets`]).
+    pub values_only: bool,
     /// Where each facet came from.
     pub sources: HintSources,
+}
+
+impl OperandHints {
+    /// Whether the operators, units, datatype and lexical checks are binding
+    /// in strict validation: the left operand is `closed`, and not by a host
+    /// source that gave values alone.
+    pub fn binds_other_facets(&self) -> bool {
+        self.closed && !self.values_only
+    }
 }
 
 /// What a term is, as far as ODRL is concerned. One term can be several.

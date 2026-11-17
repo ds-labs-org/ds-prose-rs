@@ -51,6 +51,7 @@
 //!     }
 //! }
 //! ```
+//! ```
 //! #![deny(unreachable_patterns)]
 //! #![allow(dead_code)]
 //! use prose_core::edit::NewItem;
@@ -380,6 +381,7 @@
 //!         RuleId::OdrlRuleTarget => 0,
 //!         RuleId::OdrlRuleAction => 0,
 //!         RuleId::OdrlConstraintShape => 0,
+//!         RuleId::OdrlConstraintIncomplete => 0,
 //!         RuleId::OdrlSetOperatorCardinality => 0,
 //!         RuleId::OdrlConsequenceNesting => 0,
 //!         RuleId::OdrlInheritanceCycle => 0,
@@ -394,6 +396,8 @@
 //!         RuleId::InputUnchecked => 0,
 //!         RuleId::InputReaderNote => 0,
 //!         RuleId::HeuristicOrderedOnUnordered => 0,
+//!         RuleId::HeuristicSingleChildGroup => 0,
+//!         RuleId::HeuristicDuplicateAction => 0,
 //!         _ => 1,
 //!     }
 //! }

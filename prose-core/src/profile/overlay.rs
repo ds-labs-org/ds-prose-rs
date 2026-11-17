@@ -203,13 +203,20 @@ fn interpret(parsed: Parsed, limits: &ProfileLimits) -> Result<Overlay, OverlayE
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OverlayError {
+    /// The text is larger than the byte limit.
     TooLarge {
+        /// The size of the text.
         bytes: usize,
+        /// The limit it exceeded.
         limit: usize,
     },
+    /// The text is not valid JSON; carries the parser's message.
     Json(String),
+    /// The text looks like an HTML page, not overlay.
     LooksLikeHtml,
+    /// The text is Turtle and the `turtle` feature is off, or its format is unknown.
     UnsupportedFormat,
+    /// A limit on the number of entries was exceeded; names the limit.
     LimitExceeded(&'static str),
     /// The text was read as Turtle (the `turtle` feature) and is not valid
     /// Turtle.

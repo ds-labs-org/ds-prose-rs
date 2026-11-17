@@ -658,7 +658,7 @@ The enums that grow as the editor learns more of ODRL are `#[non_exhaustive]`,
 so adding a variant is a minor release, not a breaking one. In `prose-core`:
 `EditEvent`, `EditError`, `NewItem`, `FocusTarget`, `ListKind`, `Field`, `Step`,
 `NodeRef`, `Segment`, `SlotKind`, `ChoiceKind`, `EmptyText`, `IssueTarget`,
-`profile::TermKind`, `profile::ProfileError`, `StrictEdit`, `wording::ValueShape` (also `edit::ValueShape`) and, in `validate`, `Mode`, `Verdict`, `Tier`, `Basis`, `RuleId` and `RuleInfo`. In `prose-yew`: `FocusKind`
+`profile::TermKind`, `profile::ProfileError`, `StrictEdit`, `wording::ValueShape` (also `edit::ValueShape`) and, in `validate`, `Mode`, `Verdict`, `Tier`, `Basis`, `RuleId` and `RuleInfo`; unreleased also `profile::{HintSource, OverlayError}`, `shapes::ShapesError` and `edit::OutOfScope` (a struct). In `prose-yew`: `FocusKind`
 and `DecorationAt`. Outside the defining crate a `match` on one of them needs
 a wildcard arm with a sensible fallback. Units,
 `rightOperandReference` and `partOf` can be edited but not added today (see
@@ -676,6 +676,43 @@ The profile types can grow too: `ProfileVocab`, `Wording`, `Prefixes` and
 `PolicyGlossary` and `Gloss` are `#[non_exhaustive]` structs: read their
 fields, and start from `ProfileLimits::default()` to change a limit. So is
 `edit::ChoiceSlot`: build one with `ChoiceSlot::new` and set its fields.
+
+**Unreleased (after 0.8.0), at a glance.** This section is the release notes for the next
+version; the paragraphs after it give the detail. Nothing here is released or versioned yet.
+
+Added:
+
+- `outOfScope` (`'show'` | `'strip'` | `'reject'`): a `max: 0` limit can be the scope of an
+  incoming document (#72).
+- Ruleset 2 and the dataspace preset: `odrl.constraint-incomplete`,
+  `heuristic.single-child-group` (with an "Ungroup" fix), `heuristic.duplicate-action`,
+  `EditRules::logical_depth`, `StrictEdit::RefuseTerms` (`setRefuseTerms`) and
+  `preset="dataspace"` (#76 D and E).
+- Companion SHACL shapes (`ShapesGraph`, `setShapes`, `[shapes]`), operator overlays
+  (`Overlay`, `setOverlays`, `[overlays]`) and runtime host value sources
+  (`ValueSources`, `setValueSource(s)`, `[valueSources]`), which narrow operands, units
+  and terms, and which the editor shows as selects (#76 A, B and C). See the sections
+  "Companion SHACL shapes", "Operator overlay" and "Runtime value sources".
+
+Breaking, or needing a change in a caller:
+
+- `Labels` gained fields (`not_in_source` and the `*_overlay` / `*_shapes` group labels) and
+  `EditConfig` gained `strict_edit` and `value_sources`: a struct literal of either needs
+  `..Default::default()`.
+- `OperandHints`, `Term` and `Expected` gained fields; they are `#[non_exhaustive]`, so read
+  them by field and build them with the constructors.
+- The wasm `validate(json, profiles, options)` and `ProseValidatorService.validate` take
+  three more trailing positional arguments, `shapes`, `overlays` and `valueSources`. They
+  are optional, so a call that omits them is unchanged; a host that wraps `validate` with
+  its own fixed signature should pass them on.
+- On `<ds-odrl-prose-editor>`, `strict` and `termInput` default to `undefined` instead of
+  `false` and `'free'`, so that a `preset` can set them. With no preset the behaviour is
+  unchanged, but a host that read the input's default value now sees `undefined`.
+- `RULESET` is 2. The strict reports and the stored report goldens say `"ruleset": 2`, and
+  strict mode now reports `odrl.constraint-incomplete`; pin `Options::ruleset(1)` (or
+  `--ruleset 1`) to keep the old verdicts.
+- New variants of the `#[non_exhaustive]` enums (`RuleId`, `HintSource`, ...) need the
+  wildcard arm a match on them already needs.
 
 Unreleased: a limit of `max: 0` can be the scope of the incoming document, not
 only of the add buttons. `setOutOfScope('strip')` on `ProseEditorHandle` (and
@@ -701,7 +738,8 @@ terms, `logicalDepth` 2 and the two lints in one input, each still overridable.
 Added with the runtime value sources: `HintSource::Host`, `OperandHints::source_values`,
 `profile::{SourceValue, ValueSource, ValueSources}`, `Wording::{with_value_sources,
 value_sources, role_source, value_source_warnings}` and `EditConfig::{value_sources,
-with_value_sources}`; `Labels` gained `not_in_source` and `EditConfig` gained `value_sources`, so a
+with_value_sources}`, and `OperandHints::{values_only, binds_other_facets}` (a closed host source binds the
+values alone); `Labels` gained `not_in_source` and `EditConfig` gained `value_sources`, so a
 struct literal of either needs them (use `..Default::default()`).
 
 Added with the operator overlay: `HintSource::Overlay`, `profile::{Overlay, OverlayError}` and
@@ -891,8 +929,9 @@ This is not a SHACL engine. Only this subset is read:
   (the IRIs of that class in the profile, with `skos:broader` descendants),
   `sh:datatype`, and `sh:pattern`, `sh:minInclusive`, `sh:maxInclusive` (lexical
   checks; the pattern is a small regular expression subset);
-- `sh:in` on `odrl:operator` and `odrl:unit` there (IRIs only: a literal ignores the list,
-  with a warning);
+- `sh:in` on `odrl:operator` and `odrl:unit` there (IRIs; a string written as an absolute IRI,
+  `"http://www.w3.org/ns/odrl/2/eq"`, is read as that IRI, and any other string, a curie
+  included, ignores the list with a warning);
 - `sh:in` on `odrl:action` or `odrl:leftOperand`, which closes those lists for the
   whole policy (`profile.unknown-term` under strict validation). Like any unknown
   term this binds in strict mode only, and the editor narrows its action and left
@@ -966,14 +1005,18 @@ under `<optgroup>` headings for their groups and with their labels as the text; 
 value is `prose.value-not-allowed`, with `expected.source: "host"` and "the host allows" in
 the message. A source that only suggests leaves the slot free text with those suggestions,
 flags nothing as an error, and never loosens an operand a profile, an overlay or shapes
-closed. A policy may write a listed value as an IRI or as a string; either is that value.
+closed. A closed source binds the values alone: over a base that only suggested, the base's
+operators, units and datatype stay as suggestions (`OperandHints::values_only`;
+`binds_other_facets()` is false), while a base that was already closed keeps its facets
+binding. A policy may write a listed value as an IRI or as a string; either is that value.
 An empty source is no source, so a registry fetch that failed does not flag every value.
 
 A value the source no longer lists is never dropped: it stays in the document, the select
 shows it as an extra first option with the `not_in_source` note, and a closed source
 flags it. A source for a party role (`Wording::role_source`) feeds the suggestions of the
-assigner, assignee and target slots, and a closed one flags a party or asset it does not
-list. A source for a left operand no loaded profile declares is ignored
+assigner, assignee and target slots. A closed one makes each of them a select of its values
+(with `TermInput::Select`), keeps a party or asset it does not list as an extra first option,
+and flags it. A source for a left operand no loaded profile declares is ignored
 (`Wording::value_source_warnings`). On npm: `setValueSource(key, values, { closed })` and
 `setValueSources(map)` on the wasm handles, `validate(..., shapes, overlays,
 valueSources)`, and `[valueSources]` on the Angular components, with `valueSourcesLoaded` and

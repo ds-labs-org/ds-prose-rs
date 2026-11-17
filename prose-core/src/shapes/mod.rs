@@ -16,10 +16,12 @@
 //!   (with `sh:flags`), `sh:minInclusive` and `sh:maxInclusive` are lexical
 //!   checks.
 //! - `sh:in` on `odrl:operator` and `odrl:unit` in the same constraint
-//!   shape: the operators and units of that left operand (IRIs only: a
-//!   literal in one of these lists ignores the list, with a warning).
+//!   shape: the operators and units of that left operand (IRIs; a string
+//!   that is an absolute IRI is read as that IRI, any other string, such as
+//!   a curie, ignores the list with a warning).
 //! - `sh:in` on `odrl:action` or `odrl:leftOperand` (the latter without
-//!   `sh:hasValue`) closes the term list for the whole policy (IRIs only).
+//!   `sh:hasValue`) closes the term list for the whole policy (IRIs, read as
+//!   for the operator list).
 //!   The validator binds on these two lists in strict mode only, as it does
 //!   for every unknown term; the editor offers the closed action and left
 //!   operand lists only when strict validation is on.
@@ -211,13 +213,20 @@ impl ShapesGraph {
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ShapesError {
+    /// The text is larger than the byte limit.
     TooLarge {
+        /// The size of the text.
         bytes: usize,
+        /// The limit it exceeded.
         limit: usize,
     },
+    /// The text is not valid JSON; carries the parser's message.
     Json(String),
+    /// The text looks like an HTML page, not shapes.
     LooksLikeHtml,
+    /// The text is Turtle and the `turtle` feature is off, or its format is unknown.
     UnsupportedFormat,
+    /// A limit on the number of entries was exceeded; names the limit.
     LimitExceeded(&'static str),
     /// The text was read as Turtle (the `turtle` feature) and is not valid
     /// Turtle.

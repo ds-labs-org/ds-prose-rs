@@ -217,8 +217,9 @@ fn closure(env: &Env, slot: &Slot) -> Option<Closure> {
                 Level::Error
             );
             let closed_values = binding
-                && left_operand_hints(env, slot)
-                    .is_some_and(|h| h.closed && !h.value_tree.is_empty());
+                && left_operand_hints(env, slot).is_some_and(|h| {
+                    h.closed && (!h.value_tree.is_empty() || !h.literal_values.is_empty())
+                });
             closed_values.then_some(Closure::Values)
         }
         _ => None,
@@ -375,13 +376,28 @@ pub(crate) fn options_for(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<A
     }
 }
 
-/// The suggestions the host's value source for the slot's party role gives,
-/// when it gave one: its values with their labels and groups.
-fn role_source_list(env: &Env, slot: &Slot) -> Option<Vec<Suggestion>> {
+/// The host's value source for the slot's party (or asset) role, when it
+/// gave one.
+fn role_source<'e>(env: &'e Env, slot: &Slot) -> Option<&'e prose_core::profile::ValueSource> {
+    if !matches!(slot.kind, SlotKind::Party | SlotKind::Asset) {
+        return None;
+    }
     let Some(Step::Entity(role, _)) = slot.path.node.steps.last() else {
         return None;
     };
-    let source = env.cfg.wording.role_source(*role)?;
+    env.cfg.wording.role_source(*role)
+}
+
+/// Whether the host closes the values of the slot's party role: the slot is
+/// a select of them, with a value the source no longer lists kept.
+pub(crate) fn closed_role_source(env: &Env, slot: &Slot) -> bool {
+    role_source(env, slot).is_some_and(|s| s.is_closed())
+}
+
+/// The suggestions the host's value source for the slot's party role gives,
+/// when it gave one: its values with their labels and groups.
+fn role_source_list(env: &Env, slot: &Slot) -> Option<Vec<Suggestion>> {
+    let source = role_source(env, slot)?;
     Some(
         source
             .values()
@@ -400,6 +416,14 @@ fn role_source_list(env: &Env, slot: &Slot) -> Option<Vec<Suggestion>> {
 /// which lists them as text: a DID, an asset id.
 pub(crate) fn host_values(env: &Env, slot: &Slot) -> bool {
     left_operand_hints(env, slot).is_some_and(|h| h.sources.values == HintSource::Host)
+}
+
+/// The literal members a shape's `sh:in` lists for the slot's left operand:
+/// a pick of one is written as text, never as an IRI.
+pub(crate) fn literal_members(env: &Env, slot: &Slot) -> Vec<String> {
+    left_operand_hints(env, slot)
+        .map(|h| h.literal_values.clone())
+        .unwrap_or_default()
 }
 
 /// Whether a value a pick writes is an IRI. A right operand's profile
@@ -484,10 +508,10 @@ fn profile_values(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<AttrValue
         return (list, HashMap::new());
     }
     if let Some(h) = left
-        && !h.value_tree.is_empty()
+        && (!h.value_tree.is_empty() || !h.literal_values.is_empty())
     {
         let mut depth = HashMap::new();
-        let list = h
+        let mut list: Vec<Suggestion> = h
             .value_tree
             .iter()
             .map(|(iri, d)| {
@@ -498,6 +522,14 @@ fn profile_values(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<AttrValue
                 s
             })
             .collect();
+        // The literal members of a shape's `sh:in`: listed as written, after
+        // the IRIs.
+        list.extend(h.literal_values.iter().map(|l| Suggestion {
+            value: l.clone().into(),
+            label: l.clone().into(),
+            hint: None,
+            group: None,
+        }));
         return (list, depth);
     }
     if left
@@ -675,6 +707,8 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         && matches!(slot.path.field, Field::RightOperand(_))
         && !holds_iri(&env.doc, &slot.path);
     let host = host_values(&env, slot);
+    // A literal member of the list is text, not an IRI.
+    let literals = literal_members(&env, slot);
 
     let commit: Callback<How> = {
         let node_ref = node_ref.clone();
@@ -687,6 +721,7 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         let env = env.clone();
         let slot = slot.clone();
         let options = closed.map(|_| options.clone());
+        let literals = literals.clone();
         let invalid = invalid.clone();
         let announce = announce.clone();
         let open = open.clone();
@@ -722,7 +757,10 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                 let allowed = allowed_options(&env, &slot, closure, options);
                 match resolve(&env, &slot, closure, &allowed, &value, how == How::Enter) {
                     Some(v) => {
-                        as_iri = closure == Closure::Values && pick_as_iri && picks_iri(host, &v);
+                        as_iri = closure == Closure::Values
+                            && pick_as_iri
+                            && picks_iri(host, &v)
+                            && !literals.contains(&v);
                         value = v;
                     }
                     None if how == How::Blur => {
@@ -793,13 +831,14 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         let onedit = env.onedit.clone();
         let path = slot.path.clone();
         let owner = slot.owner;
+        let literals = literals.clone();
         Callback::from(move |value: AttrValue| {
             if let Some(el) = node_ref.cast::<web_sys::Element>() {
                 el.set_text_content(Some(&value));
             }
             *refocus.borrow_mut() = true;
             open.set(false);
-            if pick_as_iri && picks_iri(host, &value) {
+            if pick_as_iri && picks_iri(host, &value) && !literals.iter().any(|l| *l == *value) {
                 *dirty.borrow_mut() = false;
                 onedit.emit(EditEvent::SetIri {
                     slot: path.clone(),

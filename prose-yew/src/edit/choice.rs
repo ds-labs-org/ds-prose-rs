@@ -74,7 +74,7 @@ fn closes_operators(env: &Env, left: &str) -> bool {
     }
     w.lookup_written(&env.prefixes, left).is_some_and(|(t, _)| {
         let h = w.operand_hints(t);
-        h.closed && !h.operators.is_empty()
+        h.binds_other_facets() && !h.operators.is_empty()
     })
 }
 

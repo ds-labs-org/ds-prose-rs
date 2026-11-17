@@ -52,10 +52,12 @@ impl SourceValue {
         &self.value
     }
 
+    /// The label shown for the value, if the host gave one.
     pub fn label(&self) -> Option<&str> {
         self.label.as_deref()
     }
 
+    /// The group the value is listed under, if the host gave one.
     pub fn group(&self) -> Option<&str> {
         self.group.as_deref()
     }
@@ -81,10 +83,12 @@ impl ValueSource {
         ValueSource { values, closed }
     }
 
+    /// The values, in the host's order.
     pub fn values(&self) -> &[SourceValue] {
         &self.values
     }
 
+    /// Whether the source is closed: a value it does not list is a finding.
     pub fn is_closed(&self) -> bool {
         self.closed
     }
@@ -109,6 +113,7 @@ pub struct ValueSources {
 }
 
 impl ValueSources {
+    /// No sources.
     pub fn new() -> ValueSources {
         ValueSources::default()
     }
@@ -134,6 +139,7 @@ impl ValueSources {
         self.operands.len() != before
     }
 
+    /// The source for the left operand `iri`, if any.
     pub fn operand(&self, iri: &str) -> Option<&ValueSource> {
         self.operands.iter().find(|(i, _)| i == iri).map(|(_, s)| s)
     }
@@ -159,6 +165,7 @@ impl ValueSources {
         self.roles.len() != before
     }
 
+    /// The source for the party role `role`, if any.
     pub fn role(&self, role: EntityRole) -> Option<&ValueSource> {
         self.roles.iter().find(|(r, _)| *r == role).map(|(_, s)| s)
     }

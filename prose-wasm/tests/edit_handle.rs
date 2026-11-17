@@ -613,9 +613,37 @@ async fn a_logical_depth_limit_hides_the_group_buttons_that_would_nest_too_deep(
     // The document is kept as it was: the limit is not a scope.
     assert!(h.json().contains("\"and\""));
     assert!(h.set_limits(js(r#"{"logicalDepth":{"max":-1}}"#)).is_err());
+    assert!(h.set_limits(js(r#"{"logicalDepth":{"max":1.5}}"#)).is_err());
     h.set_limits(JsValue::NULL).expect("reset");
     settle().await;
     assert!(select(&c, INNER_GROUP).is_some());
+}
+
+#[wasm_bindgen_test]
+async fn a_logical_depth_limit_holds_for_the_groups_the_editor_adds() {
+    let (c, mut h, calls) = mount(GROUPED).await;
+    h.set_limits(js(r#"{"logicalDepth":{"max":1}}"#))
+        .expect("limits");
+    settle().await;
+    // One deep is allowed: a second group beside the first.
+    click(&c, TOP_GROUP).await;
+    assert_eq!(calls.borrow().len(), 1);
+    let json = h.json();
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let constraints = v["permission"][0]["constraint"].as_array().unwrap();
+    assert_eq!(constraints.len(), 2, "{json}");
+    // And what the editor added is no deeper than the limit: no group
+    // button on either group, new or old.
+    assert!(select(&c, INNER_GROUP).is_none());
+    assert!(
+        select(
+            &c,
+            "[data-add=\"policy[0].permission[0].constraint[1]@child\"][data-item=\"group\"]"
+        )
+        .is_none(),
+        "{}",
+        c.inner_html()
+    );
 }
 
 const CLOSED_POLICY: &str = r#"{"@context":["http://www.w3.org/ns/odrl.jsonld",{"ex":"https://example.org/odrl/profile/research/"}],"@type":"Set","uid":"urn:policy:s","profile":"https://example.org/odrl/profile/research","permission":[{"target":"urn:asset:1","assigner":"urn:party:a","action":"use","constraint":[{"leftOperand":"ex:researchPurpose","operator":"isAnyOf","rightOperand":[{"@id":"ex:academic"}]}]}]}"#;
@@ -748,6 +776,52 @@ async fn shapes_close_the_action_list_for_the_policy() {
     assert!(!html.contains("dx:publish"), "{html}");
 }
 
+const LITERAL_SHAPES: &str = r#"{"@context":{"sh":"http://www.w3.org/ns/shacl#","odrl":"http://www.w3.org/ns/odrl/2/","dx":"https://example.org/dataspace/"},"@graph":[{"@id":"dx:S","@type":"sh:NodeShape","sh:property":[{"sh:path":{"@id":"odrl:leftOperand"},"sh:hasValue":{"@id":"dx:purpose"}},{"sh:path":{"@id":"odrl:rightOperand"},"sh:in":{"@list":["urn:code:1","DEF-2"]}}]}]}"#;
+
+#[wasm_bindgen_test]
+async fn shapes_with_literal_values_make_a_select_and_a_pick_is_written_as_text() {
+    let policy = DX_POLICY.replace(r#"{"@id":"dx:clinical"}"#, r#""tbd""#);
+    let (c, mut h, calls) = mount(&policy).await;
+    h.set_profile(Some(DX_PROFILE.to_string())).unwrap();
+    h.set_term_input("select").unwrap();
+    h.set_validation(js("{}")).unwrap();
+    let summary = h.set_shapes(Some(LITERAL_SHAPES.to_string())).unwrap();
+    settle().await;
+    let s: serde_json::Value = serde_json::from_str(&summary).unwrap();
+    assert_eq!(s["warnings"], serde_json::json!([]), "{summary}");
+    let right = select(&c, DX_RIGHT).expect("the right operand");
+    assert_eq!(right.tag_name(), "SELECT", "{}", c.inner_html());
+    let html = right.inner_html();
+    assert!(
+        html.contains("value=\"urn:code:1\"") && html.contains("value=\"DEF-2\""),
+        "{html}"
+    );
+    // "tbd" is outside the list: kept, selected, and an error.
+    assert_eq!(right.get_attribute("data-outside").as_deref(), Some("true"));
+    let report = h.report().as_string().expect("a report");
+    assert!(report.contains("prose.value-not-allowed"), "{report}");
+    assert!(calls.borrow().is_empty());
+    // A pick that looks like an IRI is still the literal the shape lists.
+    let el: web_sys::HtmlSelectElement = right.dyn_into().unwrap();
+    el.set_value("urn:code:1");
+    let ev = web_sys::Event::new_with_event_init_dict("change", &{
+        let i = web_sys::EventInit::new();
+        i.set_bubbles(true);
+        i
+    })
+    .unwrap();
+    el.dispatch_event(&ev).unwrap();
+    settle().await;
+    assert_eq!(calls.borrow().len(), 1);
+    let json = h.json();
+    assert!(
+        json.contains(r#""rightOperand":"urn:code:1""#)
+            || json.contains(r#""rightOperand": "urn:code:1""#),
+        "a string, not {{\"@id\"}}: {json}"
+    );
+    assert!(!json.contains("@id\":\"urn:code:1"), "{json}");
+}
+
 // --- operator overlays (setOverlays) ---------------------------------------------
 
 const DX_OVERLAY: &str = include_str!("../../prose-core/tests/overlay/dataspace-overlay.jsonld");
@@ -845,26 +919,49 @@ async fn overlay_summaries_are_recomputed_when_the_profile_changes() {
     assert!(!after.contains("no loaded profile declares"), "{after}");
 }
 
+const UNBOUND: &str = r#"{"@context":"http://www.w3.org/ns/odrl.jsonld","@type":"Set","uid":"urn:policy:7","profile":"https://example.org/odrl/profile/research","permission":[{"target":"urn:asset:1","action":"ex:train"}]}"#;
+const FULL_TRAIN: &str = "https://example.org/odrl/profile/research/train";
+
+// The slots close under strict validation whatever the switch says, so a
+// typed term never reaches the reducer: the editor refuses it with
+// `setRefuseTerms` on or off. What the switch alone decides, a host event
+// the view did not vet, is pinned in prose-yew (`refuseterms_host_event_*`
+// against `flag_commits_and_marks`) and prose-core (`edit_strict`); the
+// handle offers no such path. Here: both settings refuse the typed term and
+// still take one the profile allows.
 #[wasm_bindgen_test]
-async fn with_refuse_terms_a_term_the_closed_profile_does_not_allow_is_not_committed() {
-    let (c, mut h, calls) = mount(FINE).await;
+async fn a_term_the_closed_profile_does_not_allow_is_not_sent_with_the_switch_either_way() {
+    for refuse in [true, false] {
+        let (c, mut h, calls) = mount(FINE).await;
+        h.set_profile(Some(CLOSED.to_string())).expect("profile");
+        h.set_validation(js("{}")).expect("validation");
+        h.set_refuse_terms(refuse);
+        settle().await;
+        let action = "[data-slot=\"policy[0].permission[0].action[0]#name\"]";
+        type_into(&c, action, "ex:nonsense").await;
+        assert!(calls.borrow().is_empty(), "refuse={refuse}");
+        assert!(!h.json().contains("ex:nonsense"), "refuse={refuse}");
+        type_into(&c, action, "ex:train").await;
+        assert_eq!(calls.borrow().len(), 1, "refuse={refuse}");
+        assert!(calls.borrow()[0].0.contains("ex:train"));
+    }
+}
+
+// The gate must not turn back what the profile allows: the fix for an unbound
+// prefix writes the full IRI of a declared term, and goes through with the
+// switch on.
+#[wasm_bindgen_test]
+async fn with_refuse_terms_a_fix_that_writes_an_allowed_term_still_applies() {
+    let (c, mut h, calls) = mount(UNBOUND).await;
     h.set_profile(Some(CLOSED.to_string())).expect("profile");
     h.set_validation(js("{}")).expect("validation");
     h.set_refuse_terms(true);
     settle().await;
-    let action = "[data-slot=\"policy[0].permission[0].action[0]#name\"]";
-    // Not in the profile: nothing is sent and the document is as it was.
-    type_into(&c, action, "ex:nonsense").await;
-    assert!(
-        calls.borrow().is_empty(),
-        "a refused term is not an edit: {:?}",
-        calls.borrow()
-    );
-    assert!(!h.json().contains("ex:nonsense"), "{}", h.json());
-    // One it allows is committed.
-    type_into(&c, action, "ex:train").await;
+    let report = h.report().as_string().expect("a report");
+    assert!(report.contains("profile.unbound-prefix"), "{report}");
+    click(&c, ".prose-problem-fix").await;
     assert_eq!(calls.borrow().len(), 1, "{}", c.inner_html());
-    assert!(calls.borrow()[0].0.contains("ex:train"));
+    assert!(h.json().contains(FULL_TRAIN), "{}", h.json());
 }
 
 // --- runtime value sources (setValueSource) --------------------------------------
