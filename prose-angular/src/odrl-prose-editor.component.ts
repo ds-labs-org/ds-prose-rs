@@ -10,7 +10,7 @@ import {
   output,
   signal,
 } from '@angular/core';
-import type { EditLimits, ProseEditorHandle, ValidateOptions, ValidationReport } from '@ds-labs/prose-wasm';
+import type { EditLimits, ProseEditorHandle, TermInput, ValidateOptions, ValidationReport } from '@ds-labs/prose-wasm';
 import { type EditorInputs, EditorSession } from './editor-sync';
 import type { ProfileSummary } from './profile-sync';
 import { parseReport, profileTexts, reportChanged, validationOptions } from './validation-sync';
@@ -44,7 +44,9 @@ import { PROSE_WASM_MODULE, PROSE_WASM_URL, type ProseWasmModule, loadWasm } fro
  * identifier). When
  * validation is on (`validation`, or `strict`) the editor marks issues inline
  * and shows a problems panel with fix buttons; edits are flagged, never
- * refused. `validationChange` emits the report when the verdict or the
+ * refused. `termInput="select"` turns the term slots (action, left operand,
+ * policy type, and a unit or right operand the profile lists entries for)
+ * into dropdowns of the loaded profiles' terms. `validationChange` emits the report when the verdict or the
  * findings change, also after edits; the `report` signal holds the latest.
  *
  * If `json` is not a readable ODRL policy, `jsonError` emits: at the first
@@ -73,6 +75,8 @@ export class OdrlProseEditorComponent implements OnChanges, OnDestroy {
   readonly strict = input(false);
   /** The full validation options; they take precedence over `strict`. */
   readonly validation = input<ValidateOptions | null>(null);
+  /** `'select'`: the term slots are dropdowns of the profile's terms instead of free text. */
+  readonly termInput = input<TermInput>('free');
   /** Emits the JSON-LD text the editor writes after each committed edit. */
   readonly jsonChange = output<string>();
   /** Emits when `json` is not a readable ODRL policy. */
@@ -126,6 +130,7 @@ export class OdrlProseEditorComponent implements OnChanges, OnDestroy {
       texts: profileTexts(this.profile(), this.profiles()),
       options: validationOptions(this.strict(), this.validation()),
       limits: this.limits(),
+      termInput: this.termInput(),
     };
     // Yew schedules its own work; keep it out of Angular's change detection.
     const outcome = this.zone.runOutsideAngular(() =>

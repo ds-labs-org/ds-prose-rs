@@ -1,4 +1,4 @@
-import type { EditLimits, ValidateOptions, ValidationReport } from '@ds-labs/prose-wasm';
+import type { EditLimits, TermInput, ValidateOptions, ValidationReport } from '@ds-labs/prose-wasm';
 import type { ProfileSummary } from './profile-sync';
 
 // No value imports from the sibling modules: `npm test` runs this file under
@@ -22,6 +22,7 @@ export interface EditorHandleLike {
   setProfiles(texts: string[]): string;
   setLimits(limits: EditLimits | null): void;
   setValidation(options: ValidateOptions | null): void;
+  setTermInput(mode: TermInput): void;
   report(): string | null;
   destroy(): void;
   free(): void;
@@ -42,6 +43,8 @@ export interface EditorInputs {
   texts: string[] | null;
   options: ValidateOptions | null;
   limits: EditLimits | null;
+  /** How the term slots take their value; `'free'` (the default) when left out. */
+  termInput?: TermInput;
 }
 
 /** What one `apply` found, for the component to emit. */
@@ -76,6 +79,8 @@ export class EditorSession<H extends EditorHandleLike = EditorHandleLike> {
   private readonly profilesChanged = tracker<string[]>();
   private readonly optionsChanged = tracker<ValidateOptions>();
   private readonly limitsChanged = tracker<EditLimits>();
+  /** The handle starts with free text: `setTermInput` is called only for a change from it. */
+  private termInput: TermInput = 'free';
 
   /**
    * Brings the handle in line with the inputs. `mount` makes the handle, and
@@ -124,6 +129,17 @@ export class EditorSession<H extends EditorHandleLike = EditorHandleLike> {
         // The previous limits stay; there is no output for this, a host
         // error in the limits is a programming error.
         console.error('ds-odrl-prose-editor: the limits are not readable', error);
+      }
+    }
+    const termInput = inputs.termInput ?? 'free';
+    if (termInput !== this.termInput) {
+      try {
+        handle.setTermInput(termInput);
+        this.termInput = termInput;
+      } catch (error) {
+        // The previous mode stays; as for the limits, a wrong name is a
+        // programming error of the host.
+        console.error('ds-odrl-prose-editor: the termInput is not readable', error);
       }
     }
     if (this.optionsChanged(inputs.options)) {

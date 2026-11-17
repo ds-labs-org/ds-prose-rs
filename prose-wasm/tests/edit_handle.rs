@@ -340,3 +340,80 @@ async fn a_policy_uid_limit_of_zero_hides_the_identifier() {
     settle().await;
     assert!(select(&c, "[data-slot=\"policy[0]#uid\"]").is_none());
 }
+
+const ACTION: &str = "[data-slot=\"policy[0].permission[0].action[0]#name\"]";
+
+#[wasm_bindgen_test]
+async fn term_input_select_turns_the_term_slots_into_dropdowns() {
+    let (c, mut h, calls) = mount(FINE).await;
+    h.set_profile(Some(RESEARCH.to_string())).expect("profile");
+    settle().await;
+    // Free text by default.
+    let action = select(&c, ACTION).expect("the action slot");
+    assert_eq!(action.tag_name(), "SPAN");
+    assert!(action.has_attribute("contenteditable"));
+
+    h.set_term_input("select").expect("select");
+    settle().await;
+    let action = select(&c, ACTION)
+        .expect("the action select")
+        .dyn_into::<web_sys::HtmlSelectElement>()
+        .unwrap();
+    assert!(action.class_list().contains("prose-term-select"));
+    assert_eq!(action.value(), "ex:fineTune");
+    // No term slot takes typed text.
+    for css in ["[data-slot=\"policy[0]#kind\"]", ACTION] {
+        assert!(
+            select(&c, &format!("{css}[contenteditable]")).is_none(),
+            "{css}: {}",
+            c.inner_html()
+        );
+    }
+    assert!(
+        calls.borrow().is_empty(),
+        "switching the mode is not an edit"
+    );
+
+    // Picking an option is one SetText, reported as JSON-LD.
+    action.set_value("ex:train");
+    let init = web_sys::EventInit::new();
+    init.set_bubbles(true);
+    action
+        .dispatch_event(&web_sys::Event::new_with_event_init_dict("change", &init).unwrap())
+        .unwrap();
+    settle().await;
+    let recorded = calls.borrow().clone();
+    assert_eq!(recorded.len(), 1, "{recorded:?}");
+    assert!(recorded[0].0.contains("\"ex:train\""), "{}", recorded[0].0);
+
+    // Back to free text; an unknown mode throws and keeps the select.
+    h.set_term_input("free").expect("free");
+    settle().await;
+    assert_eq!(select(&c, ACTION).unwrap().tag_name(), "SPAN");
+    assert!(h.set_term_input("dropdown").is_err());
+}
+
+#[wasm_bindgen_test]
+async fn term_input_survives_a_new_profile_and_validation() {
+    let (c, mut h, _calls) = mount(FOREIGN).await;
+    h.set_term_input("select").expect("select");
+    h.set_profile(Some(CLOSED.to_string())).expect("profile");
+    h.set_validation(js("{}")).expect("validation");
+    settle().await;
+    let action = select(&c, ACTION).expect("the action select");
+    assert_eq!(action.tag_name(), "SELECT", "{}", c.inner_html());
+    // The stored term the profile does not define is kept and flagged.
+    assert_eq!(
+        action.get_attribute("data-outside").as_deref(),
+        Some("true")
+    );
+    assert_eq!(
+        action
+            .dyn_into::<web_sys::HtmlSelectElement>()
+            .unwrap()
+            .value(),
+        "foo:bar"
+    );
+    let report = h.report().as_string().expect("a report");
+    assert!(report.contains("profile.unknown-term"), "{report}");
+}

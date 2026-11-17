@@ -44,6 +44,7 @@ const editor = new ProseEditorHandle(root, policyJsonText, null, (json, report) 
 editor.setProfile(profileText);     // as ProseHandle.setProfile
 editor.setLimits({ policyAssigner: { max: 0 } }); // no assigner button
 editor.setValidation({});           // inline markers, problems panel, report in onChange
+editor.setTermInput('select');      // term slots as dropdowns of the profile's terms
 editor.update(policyJsonText);      // no-op: it is what the editor emitted
 editor.destroy();
 ```
@@ -57,7 +58,11 @@ history. The editor reads and writes the bare keys of ODRL JSON-LD
 from inside `onChange`. `setLimits(limits | null)` sets how many items each
 list may hold (`EditLimits`: `{ min?, max? }` per list name; a given entry
 replaces the default for that list) and throws on an unknown name, a negative
-or fractional number, or `min` above `max`.
+or fractional number, or `min` above `max`. `setTermInput('select')` turns
+the term slots (action, left operand, policy type, and a unit or right
+operand the profile lists entries for) into dropdowns of the loaded
+profiles' terms; `'free'`, the default, keeps typed text with suggestions. A
+stored value outside the list stays selected and flagged.
 
 ## Documentation
 

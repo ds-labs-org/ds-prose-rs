@@ -183,3 +183,10 @@ export interface LimitSpec {
 
 /** The lists to limit, by name; a list not named keeps its default. */
 export type EditLimits = Partial<Record<LimitName, LimitSpec>>;
+
+/**
+ * How the editor's term slots take their value (`setTermInput`): `"free"`
+ * (the default) is typed text with suggestions; `"select"` is a dropdown of
+ * the terms the loaded profiles define.
+ */
+export type TermInput = "free" | "select";

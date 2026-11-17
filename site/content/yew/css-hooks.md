@@ -54,7 +54,7 @@ The tables are checked against the code. A test collects every `prose-*` string 
 | `.prose-slot-invalid` | slot | Error state. A slot with `aria-invalid="true"` is styled the same. |
 | `.prose-slot-warning` | slot | Warning state. |
 | `.prose-slot-whitespace` | slot | The text has leading, trailing or non-breaking whitespace. |
-| `.prose-slot-note` | `small` | The "not in the profile" note under a closed slot. |
+| `.prose-slot-note` | `small` | The "not in the profile" note under a closed slot, or under a term select whose value is none of its options. |
 | `.prose-slot-message` | `span` | Why typed text was refused, positioned above the slot. Also has `.prose-issue` and `.prose-issue-error`. |
 | `.prose-suggestions` | `ul[role="listbox"]` | The open suggestion list. |
 | `.prose-suggestion` | `li[role="option"]` | One option. |
@@ -63,11 +63,12 @@ The tables are checked against the code. A test collects every `prose-*` string 
 | `.prose-suggestion-group` | `li[role="group"]` | A heading and its options, written when some suggestion has a group. |
 | `.prose-suggestion-group-label` | `span` | The group heading. |
 | `.prose-select` | `select` | A closed choice such as an operator. |
+| `.prose-term-select` | `select[data-slot]` | With `TermInput::Select`: a term slot as a dropdown of the profile's terms. It is next to `.prose-select`. |
 | `.prose-rule-kind` | `select` | The select that sets the kind of a rule: may, must not or must. It is next to `.prose-select`. |
 | `.prose-issue` | `span` | An issue message the host passed in `issues` or `refusal`. |
 | `.prose-issue-error`, `.prose-issue-warning`, `.prose-issue-info` | `span` | The severity of an issue, next to `.prose-issue`. |
 
-Two more selectors have no class. A closed slot has `data-closed="true"`. A rule also carries `prose-` plus the name of its list (`permission`, `prohibition`, `obligation`, `duty`, `remedy` or `consequence`), built at run time. Select the first three through the kind classes above, and do not select the other three.
+Three more selectors have no class. A closed slot has `data-closed="true"`. A term select whose stored value is none of its options has `data-outside="true"`. A rule also carries `prose-` plus the name of its list (`permission`, `prohibition`, `obligation`, `duty`, `remedy` or `consequence`), built at run time. Select the first three through the kind classes above, and do not select the other three.
 
 ## Stable hooks: problems panel
 
@@ -101,7 +102,7 @@ Also internal: the element ids (`prose-sugg-<slot>`, `prose-note-<slot>`, `prose
 
 ## Data attributes and roles
 
-`data-node` marks a policy, rule or condition container and holds its path. `data-slot` marks a slot or select and holds its path. `data-add` marks an add button and holds the path of the list it adds to; `data-item="group"` marks the button that adds a group. `data-closed="true"` marks a closed slot, which takes only the values the profile lists. `data-placeholder` holds the text an empty slot shows. `data-iri` holds the full IRI of a profile term in read mode. `data-safe` on a fix button says whether the fix is lossless. The paths are the strings of `NodePath`, `SlotPath` and `ListPath` from `prose-core`, and `ProseProblems::onjump` hands them to a host that moves focus. A slot is a `combobox` when suggestions are on and a `textbox` when they are off.
+`data-node` marks a policy, rule or condition container and holds its path. `data-slot` marks a slot or select and holds its path. `data-add` marks an add button and holds the path of the list it adds to; `data-item="group"` marks the button that adds a group. `data-closed="true"` marks a closed slot, which takes only the values the profile lists. `data-outside="true"` marks a term select (`TermInput::Select`) whose stored value is none of its options. `data-placeholder` holds the text an empty slot shows. `data-iri` holds the full IRI of a profile term in read mode. `data-safe` on a fix button says whether the fix is lossless. The paths are the strings of `NodePath`, `SlotPath` and `ListPath` from `prose-core`, and `ProseProblems::onjump` hands them to a host that moves focus. A slot is a `combobox` when suggestions are on and a `textbox` when they are off.
 
 ## Custom properties
 
