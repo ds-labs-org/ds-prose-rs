@@ -460,7 +460,7 @@ order. A change to `@1` may only add keys; removing or renaming one is `@2`.
 
 ```json
 { "schema": "ds-prose/validation-report@1",
-  "tool": {"name": "ds-prose-rs", "version": "0.7.0"},
+  "tool": {"name": "ds-prose-rs", "version": "0.8.0"},
   "mode": "strict",
   "tiers": ["profile", "prose", "input"],
   "ruleset": 1,
@@ -669,14 +669,14 @@ The profile types can grow too: `ProfileVocab`, `Wording`, `Prefixes` and
 fields, and start from `ProfileLimits::default()` to change a limit. So is
 `edit::ChoiceSlot`: build one with `ChoiceSlot::new` and set its fields.
 
-Unreleased: the editor can show its term slots as dropdowns of the loaded
+Changed in 0.8.0: the editor can show its term slots as dropdowns of the loaded
 profiles' terms instead of free text: `EditConfig::term_input =
 TermInput::Select` in Yew, `setTermInput('select')` on `ProseEditorHandle`,
 `[termInput]="'select'"` on `<ds-odrl-prose-editor>`. The action, left
 operand and policy type are dropdowns; a unit or right operand is one only
 when the profile closes its left operand (`prose:closed`). The default,
-`free`, renders as before. `@ds-labs/prose-angular` needs a
-`@ds-labs/prose-wasm` that has `setTermInput` for `'select'`.
+`free`, renders as before. `@ds-labs/prose-angular` 0.8.0 depends on
+`@ds-labs/prose-wasm` ^0.8.0, the first with `setTermInput`.
 
 Changed in 0.7.0: the npm packages have an edit mode. `@ds-labs/prose-wasm`
 adds `ProseEditorHandle` and `@ds-labs/prose-angular` adds
