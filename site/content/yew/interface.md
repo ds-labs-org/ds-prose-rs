@@ -158,6 +158,7 @@ The whole configuration of an editing view. It is `Clone`, `PartialEq` and `Defa
 | `max_suggestions` | `usize` | `8` | The cap of the suggestion list. |
 | `host_plans_operator_switches` | `bool` | `false` | The host translates an operator switch the reducer would refuse, so the select offers every operator. Off, it offers only the switches the reducer accepts. |
 | `term_input` | `TermInput` | `TermInput::Free` | How the term slots take their value. `TermInput::Select` renders them as `select.prose-select.prose-term-select`; see below. |
+| `strict_edit` | `StrictEdit` | `StrictEdit::Flag` | What the editor does with an edit that writes a term the validator (see `with_strict`) does not allow: `Flag` commits it and the report marks it, `RefuseTerms` refuses it. Does nothing without a validator. |
 | `wording` | `Rc<Wording>` | `Rc::new(Wording::default())` | The loaded profiles. Set it with `with_wording`. |
 | `validator` | `Option<Validator>` | `None` | Set it with `with_strict`. `None` validates nothing. |
 

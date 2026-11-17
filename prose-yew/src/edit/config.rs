@@ -2,7 +2,9 @@
 //! [`EditRules`]), wording, class names, inline styles, vocabularies and
 //! button looks. Nothing here is specific to a host; the defaults are the
 //! ODRL JSON-LD preset.
-use prose_core::edit::{EditRules, EmptyText, Field, ListKind, ListPath, NodePath, RuleList, Step};
+use prose_core::edit::{
+    EditRules, EmptyText, Field, ListKind, ListPath, NodePath, RuleList, Step, StrictEdit,
+};
 use prose_core::profile::{Prefixes, ProfileVocab, Term, TermKind, Wording};
 use prose_core::validate::{Options, Validator};
 use prose_core::wording;
@@ -920,6 +922,11 @@ pub struct EditConfig {
     /// (the default), or a `<select>` of the terms the vocabulary and the
     /// loaded profiles define. See [`TermInput`].
     pub term_input: TermInput,
+    /// What the editor does with an edit that writes a term the validator
+    /// (see [`EditConfig::with_strict`]) does not allow: [`StrictEdit::Flag`]
+    /// (the default) commits it and the report marks it;
+    /// [`StrictEdit::RefuseTerms`] refuses it. Without a validator it does nothing.
+    pub strict_edit: StrictEdit,
     /// The loaded profiles: their labels in the sentences, their terms in
     /// the suggestions and selects. Set it with [`EditConfig::with_wording`],
     /// which also extends `vocab`.
@@ -1073,6 +1080,7 @@ impl Default for EditConfig {
             max_suggestions: 8,
             host_plans_operator_switches: false,
             term_input: TermInput::Free,
+            strict_edit: StrictEdit::Flag,
             wording: Rc::new(Wording::default()),
             validator: None,
         }
@@ -1541,6 +1549,13 @@ mod tests {
         assert!(EditConfig::default().validator.is_none());
         let cfg = EditConfig::default().with_wording(Rc::new(research_closed()));
         assert!(cfg.validator.is_none());
+    }
+
+    #[test]
+    fn strict_edit_flags_by_default_and_the_rules_nest_without_a_limit() {
+        let c = EditConfig::default();
+        assert_eq!(c.strict_edit, StrictEdit::Flag);
+        assert_eq!(c.rules.logical_depth, prose_core::edit::Limit::ANY);
     }
 
     #[test]

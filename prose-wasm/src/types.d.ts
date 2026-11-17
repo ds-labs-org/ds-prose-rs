@@ -32,6 +32,7 @@ export type RuleId =
   | "odrl.set-operator-cardinality"
   | "odrl.consequence-nesting"
   | "odrl.inheritance-cycle"
+  | "odrl.constraint-incomplete"
   | "prose.operator-not-allowed"
   | "prose.value-not-allowed"
   | "prose.iri-expected"
@@ -42,7 +43,9 @@ export type RuleId =
   | "input.unreadable"
   | "input.unchecked"
   | "input.reader-note"
-  | "heuristic.ordered-on-unordered";
+  | "heuristic.ordered-on-unordered"
+  | "heuristic.single-child-group"
+  | "heuristic.duplicate-action";
 
 /**
  * What to check and how loudly. Every field is optional; an options object
@@ -162,6 +165,7 @@ export type LimitName =
   | "entityRefinement"
   | "constraints"
   | "logicalChildren"
+  | "logicalDepth"
   | "rightOperandValues"
   | "profile"
   | "inheritFrom";
@@ -175,6 +179,11 @@ export type LimitName =
  * The `odrl.policy-uid` validation rule still fires on a policy without an
  * identifier: a host that caps `policyUid` at 0 sets it to `"off"` in
  * `ValidateOptions.rules`.
+ *
+ * `logicalDepth` is not a list: its `max` is how deep `and`/`or`/`xone` groups
+ * may nest (`{ max: 2 }`: a group may hold a group, and no deeper; `{ max: 0 }`
+ * allows none). It limits adding and grouping, and the buttons go; a document
+ * that already nests deeper is kept as written, and `min` is not used.
  */
 export interface LimitSpec {
   min?: number;
@@ -190,3 +199,22 @@ export type EditLimits = Partial<Record<LimitName, LimitSpec>>;
  * the terms the loaded profiles define.
  */
 export type TermInput = "free" | "select";
+
+/**
+ * What the editor does with a section whose limit is `max: 0` when a
+ * document holds one (`setOutOfScope`): `"show"` (the default) keeps and
+ * shows it; `"strip"` drops it on load and reports it (`removed()`);
+ * `"reject"` refuses the document with an `OutOfScopeError` whose `paths`
+ * name the offending sections.
+ */
+export type OutOfScopeMode = "show" | "strip" | "reject";
+
+/** A section the editor dropped under `"strip"`. */
+export interface RemovedSection {
+  /** Where it sat: keys and indexes from the document root, such as `permission[0].duty[1].assigner`. */
+  path: string;
+  /** The key as written: `assigner`, `odrl:assigner` or a full IRI. */
+  key: string;
+  /** The `EditLimits` name of the list that left it out, such as `ruleAssigner`. */
+  limit: LimitName;
+}

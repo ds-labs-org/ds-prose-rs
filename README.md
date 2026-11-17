@@ -398,6 +398,7 @@ that makes this finding, and only under `StrictEdit::RefuseTerms`.
 | <a id="rule-odrl-set-operator-cardinality"></a>`odrl.set-operator-cardinality` | several right operand values with a comparison operator (eq, neq, gt, gteq, lt, lteq); isA, hasPart, isPartOf, isAnyOf, isAllOf and isNoneOf are set-based in ODRL22.ttl and take a list (IM §2.5.1) | off, error | standard | no |
 | <a id="rule-odrl-consequence-nesting"></a>`odrl.consequence-nesting` | a consequence on a consequence, or a remedy that has a consequence (IM §2.6.3, §2.6.7) | off, error | standard | no |
 | <a id="rule-odrl-inheritance-cycle"></a>`odrl.inheritance-cycle` | policies in the document that inherit from each other in a circle (IM §2.9) | off, error | standard | no |
+| <a id="rule-odrl-constraint-incomplete"></a>`odrl.constraint-incomplete` | a constraint left unfinished: no left operand, no operator, no right operand, or an empty right operand value (IM §2.5.1). On in strict mode without `structural`; when `odrl.constraint-shape` is on and reports a missing part, the constraint is not reported twice (ruleset 2) | off, error | standard | no |
 | <a id="rule-prose-operator-not-allowed"></a>`prose.operator-not-allowed` | an operator outside the left operand's `prose:operator` | info, info; closed: error | convention | closed only |
 | <a id="rule-prose-value-not-allowed"></a>`prose.value-not-allowed` | an IRI value outside `prose:rightOperand` and the values narrower than it | off, info; closed: error | convention | no |
 | <a id="rule-prose-iri-expected"></a>`prose.iri-expected` | a plain string that names an allowed value where an IRI is expected | off, off; closed: error | convention | no (a fix is offered) |
@@ -409,13 +410,18 @@ that makes this finding, and only under `StrictEdit::RefuseTerms`.
 | <a id="rule-input-unchecked"></a>`input.unchecked` | something the validator could not check; a gap (an error with `fail_closed`) | off, warning | input | no |
 | <a id="rule-input-reader-note"></a>`input.reader-note` | a note the reader made while reading | off, info | input | no |
 | <a id="rule-heuristic-ordered-on-unordered"></a>`heuristic.ordered-on-unordered` | `gt`, `gteq`, `lt` or `lteq` on an IRI or boolean value; the IM states no requirement | off, off | heuristic | no |
+| <a id="rule-heuristic-single-child-group"></a>`heuristic.single-child-group` | an `and`, `or` or `xone` group that holds one condition; the fix "Ungroup" replaces it by that condition (ruleset 2) | off, off | heuristic | no |
+| <a id="rule-heuristic-duplicate-action"></a>`heuristic.duplicate-action` | the same action listed twice in one rule, in any spelling of its IRI; the fix removes the second (ruleset 2) | off, off | heuristic | no |
 
 Tiers. Strict turns on `profile.*`, `prose.*` and `input.*`. The `odrl.*`
 tier (the IM's own structural requirements) is **off by default**, even in
 strict, and `Options::structural(true)` switches it on: a Dataspace Protocol
 catalog offer is often written without the assigner or target the IM asks
-for, so the tier must not block a profile user by default. The heuristic rule
-is switched on only with `Options::level`. `Options::level(rule, level)`
+for, so the tier must not block a profile user by default. The one exception is
+`odrl.constraint-incomplete`: a constraint with no left operand, no operator or
+no (or an empty) right operand is an error in strict mode, structural or not,
+so a Save path can check it through the report. The heuristic rules are
+switched on only with `Options::level`. `Options::level(rule, level)`
 sets any rule's level, over everything else (`input.unreadable` stays an
 error); `fail_closed(true)` makes `input.unchecked` an error and
 `deny_deprecated(true)` does the same for `profile.deprecated-term`.
@@ -425,7 +431,9 @@ the rule is newer than the pinned ruleset; off if it is an `odrl.*` rule and
 `structural` is not set; the catalogue's level for the mode; for `prose.*`,
 the closed column when the left operand is closed.
 
-**Ruleset pinning.** `RULESET` is the ruleset this build implements (1), and
+**Ruleset pinning.** `RULESET` is the ruleset this build implements (2: ruleset 2 added
+`odrl.constraint-incomplete`, `heuristic.single-child-group` and
+`heuristic.duplicate-action`), and
 each rule records `since_ruleset`. `Options::ruleset(n)` checks only the rules
 of ruleset `n` and earlier, so a CI that pins `n` does not turn red when a
 later release adds a rule to a policy that did not change. Rule ids are never
@@ -462,8 +470,8 @@ order. A change to `@1` may only add keys; removing or renaming one is `@2`.
 { "schema": "ds-prose/validation-report@1",
   "tool": {"name": "ds-prose-rs", "version": "0.8.0"},
   "mode": "strict",
-  "tiers": ["profile", "prose", "input"],
-  "ruleset": 1,
+  "tiers": ["profile", "odrl", "prose", "input"],
+  "ruleset": 2,
   "verdict": "violations",
   "vocabulary": {"odrl": "common",
                  "profiles": [{"iri": "...", "title": "...", "version": "..."}]},
@@ -668,6 +676,27 @@ The profile types can grow too: `ProfileVocab`, `Wording`, `Prefixes` and
 `PolicyGlossary` and `Gloss` are `#[non_exhaustive]` structs: read their
 fields, and start from `ProfileLimits::default()` to change a limit. So is
 `edit::ChoiceSlot`: build one with `ChoiceSlot::new` and set its fields.
+
+Unreleased: a limit of `max: 0` can be the scope of the incoming document, not
+only of the add buttons. `setOutOfScope('strip')` on `ProseEditorHandle` (and
+`[outOfScope]="'strip'"` on `<ds-odrl-prose-editor>`) drops every section held in
+such a list when a document loads, in the bare, prefixed and full-IRI
+spellings of the key, and `removed()` (`(outOfScopeRemoved)`) reports it;
+`'reject'` fails the load with the offending paths (`OutOfScopeError`,
+`jsonError`). The default, `'show'`, is unchanged. In Rust,
+`edit::out_of_scope` and `edit::strip_out_of_scope` do the same on a
+`serde_json::Value`, with an `EditRules`.
+
+Unreleased: for a dataspace that wants members to write only policies it can
+evaluate. Ruleset 2 adds `odrl.constraint-incomplete` (an error in strict mode:
+a constraint with no left operand, operator or right operand, or an empty
+value), and the lints `heuristic.single-child-group` (with an "Ungroup" fix)
+and `heuristic.duplicate-action`. `EditRules::logical_depth` (`logicalDepth` in
+`EditLimits`) caps how deep groups nest. `EditConfig::strict_edit` and
+`setRefuseTerms(true)` on `ProseEditorHandle` make the editor refuse a term the
+validator does not allow. `preset="dataspace"` on `<ds-odrl-prose-editor>`
+turns on strict and structural validation, `termInput="select"`, refusing
+terms, `logicalDepth` 2 and the two lints in one input, each still overridable.
 
 Changed in 0.8.0: the editor can show its term slots as dropdowns of the loaded
 profiles' terms instead of free text: `EditConfig::term_input =

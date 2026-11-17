@@ -7,10 +7,11 @@
   "mode": "strict",
   "tiers": [
     "profile",
+    "odrl",
     "prose",
     "input"
   ],
-  "ruleset": 1,
+  "ruleset": 2,
   "verdict": "violations",
   "vocabulary": {
     "odrl": "common",

@@ -161,8 +161,20 @@ fn structural_bad() {
     );
     // Without the switch, strict says nothing about structure.
     let r = validate_json(&text, &Wording::new(), &Options::strict());
-    assert!(odrl_findings(&r).is_empty());
-    assert!(r.findings.iter().all(|f| f.rule.tier() != Tier::Odrl));
+    // Except for a constraint left unfinished, which strict mode reports
+    // alone (the first one here has no operator).
+    assert_eq!(
+        odrl_findings(&r),
+        pairs(&[(
+            "odrl.constraint-incomplete",
+            "policy[0].permission[0].constraint[0]"
+        )])
+    );
+    assert!(
+        r.findings
+            .iter()
+            .all(|f| f.rule.tier() != Tier::Odrl || f.rule == RuleId::OdrlConstraintIncomplete)
+    );
 }
 
 #[test]

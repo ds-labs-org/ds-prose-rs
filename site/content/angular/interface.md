@@ -60,16 +60,20 @@ The declared type is writable, because the source declares `readonly report = si
 | `profile` | `string \| null` | `null` | One ODRL profile as JSON-LD text, or Turtle with the [Turtle build](#prose-wasm-module). The editor then words the sentences with it and suggests its terms. |
 | `profiles` | `string[] \| null` | `null` | Several profiles. A list wins over `profile`. |
 | `limits` | `EditLimits \| null` | `null` | How many items each list may hold, by list name; a given entry replaces that list's default (`min` 0, `max` unbounded). `{ policyAssigner: { max: 0 } }` removes the assigner button. Unreadable limits are logged and the previous ones stay. |
-| `strict` | `boolean` | `false` | Validate with a closed vocabulary: ODRL plus the loaded profiles. |
+| `strict` | `boolean \| undefined` | `undefined` | Validate with a closed vocabulary: ODRL plus the loaded profiles. Not set means `false`, or the `preset`'s. |
 | `validation` | `ValidateOptions \| null` | `null` | The full validation options. They win over `strict`. While validation is on, the editor marks issues inline and shows a problems panel with fix buttons; edits are flagged, never refused. |
-| `termInput` | `TermInput` | `'free'` | `'select'` turns the term slots into dropdowns of the terms the loaded profiles define: the action, the left operand and the policy type always, a unit or a right operand only when the profile closes the left operand (`prose:closed`) and lists units or values for it. Other values, such as dates and numbers, stay free text. Options show the profile label, grouped by profile; with strict validation only what it takes is listed. Deprecated terms are listed last, or hidden when `denyDeprecated` makes them an error. A stored value outside the list stays selected and is flagged with `data-outside="true"`. `'free'` keeps typed text with suggestions. |
+| `refuseTerms` | `boolean \| undefined` | `undefined` | `true`: under validation (`strict`), an edit that writes a term the loaded profiles do not define into an action, left operand, operator, unit, conflict strategy or policy type is refused and shown at the slot, and never reaches `jsonChange` (`StrictEdit::RefuseTerms`). Not set means `false` (the edit is committed and flagged), or the `preset`'s. |
+| `preset` | `'dataspace' \| null` | `null` | One switch for a dataspace whose members write only policies it can evaluate. `'dataspace'` sets: strict validation (a closed vocabulary: ODRL plus the loaded profiles) with the structural tier on, so `odrl.rule-target` and the other structural rules apply; `termInput` `'select'`; `refuseTerms`; `limits` of `{ logicalDepth: { max: 2 } }`; and `heuristic.single-child-group` and `heuristic.duplicate-action` as warnings. Whatever you set yourself wins: `strict`, `termInput`, `refuseTerms`, and `validation` key by key (its `rules` are added to the preset's) and `limits` list by list. An unknown name is logged and ignored. See [Running in a dataspace](/angular/dataspace/). |
+| `outOfScope` | `OutOfScopeMode` | `'show'` | What to do with a section whose limit is `max: 0` when `json` holds one, so that limits are the scope of the incoming document and not only of the add buttons. `'show'` keeps and shows it. `'strip'` drops it on load and on every later `json`: the policy-level and rule-level (duty included) assigner and assignee, and any other list capped at 0, in the bare, prefixed (`odrl:assigner`) and full-IRI spellings of the key; `outOfScopeRemoved` emits what went, and `jsonChange` never holds it. `'reject'` refuses a document that holds one: `jsonError` emits an `OutOfScopeError` whose `paths` name the sections, at the first mount nothing is mounted. Use it where a host accepts one kind of document, such as policy definitions without parties: `[limits]="{ policyAssigner: { max: 0 }, policyAssignee: { max: 0 }, ruleAssigner: { max: 0 }, ruleAssignee: { max: 0 } }" outOfScope="strip"`. |
+| `termInput` | `TermInput \| undefined` | `undefined` | Not set means `'free'`, or the `preset`'s. `'select'` turns the term slots into dropdowns of the terms the loaded profiles define: the action, the left operand and the policy type always, a unit or a right operand only when the profile closes the left operand (`prose:closed`) and lists units or values for it. Other values, such as dates and numbers, stay free text. Options show the profile label, grouped by profile; with strict validation only what it takes is listed. Deprecated terms are listed last, or hidden when `denyDeprecated` makes them an error. A stored value outside the list stays selected and is flagged with `data-outside="true"`. `'free'` keeps typed text with suggestions. |
 
 ## Editor outputs
 
 | Output | Payload | Emitted when |
 |---|---|---|
 | `jsonChange` | `string` | After each committed edit, with the JSON-LD the editor writes. Not emitted for a document the host set through `json`. |
-| `jsonError` | `unknown` | `json` is not a readable ODRL policy. At the first mount nothing is mounted and the next input change tries again; later the document on screen stays. |
+| `outOfScopeRemoved` | `RemovedSection[]` | `outOfScope="strip"` dropped sections from the document, each time it did. Each entry has the `path` (`permission[0].assignee`), the `key` as written and the `limit` that left it out (`ruleAssignee`). |
+| `jsonError` | `unknown` | `json` is not a readable ODRL policy, or `outOfScope="reject"` refuses it (an `OutOfScopeError` with `paths`). At the first mount nothing is mounted and the next input change tries again; later the document on screen stays. |
 | `loadFailed` | `unknown` | The wasm module cannot be loaded. The next input change tries again. |
 | `profileLoaded` | `ProfileSummary` | Once per profile read, after the `profile` or `profiles` input changed. |
 | `profileError` | `unknown` | A profile text cannot be read. The previous profile stays. |
@@ -82,7 +86,7 @@ The declared type is writable, because the source declares `readonly report = si
 |---|---|---|---|
 | `report` | `WritableSignal<ValidationReport \| null>` | `null` | The latest report. `null` while validation is off. Read it, do not set it. |
 
-`EditLimits` maps a list name (`policies`, `permission`, `prohibition`, `obligation`, `duty`, `remedy`, `consequence`, `policyAssigner`, `policyAssignee`, `policyTarget`, `policyAction`, `policyUid`, `ruleAssigner`, `ruleAssignee`, `ruleTarget`, `ruleAction`, `actionRefinement`, `entityRefinement`, `constraints`, `logicalChildren`, `rightOperandValues`, `profile`, `inheritFrom`) to `{ min?: number; max?: number | null }`. A host that caps `policyUid` at 0 (the identifier lives elsewhere) should also set the `odrl.policy-uid` rule to `"off"` in `validation.rules`: the rule would otherwise report a policy without an identifier that nobody can set.
+`EditLimits` maps a list name (`policies`, `permission`, `prohibition`, `obligation`, `duty`, `remedy`, `consequence`, `policyAssigner`, `policyAssignee`, `policyTarget`, `policyAction`, `policyUid`, `ruleAssigner`, `ruleAssignee`, `ruleTarget`, `ruleAction`, `actionRefinement`, `entityRefinement`, `constraints`, `logicalChildren`, `logicalDepth`, `rightOperandValues`, `profile`, `inheritFrom`) to `{ min?: number; max?: number | null }`. `logicalDepth` is not a list: its `max` is how deep `and`, `or` and `xone` groups may nest, and the editor hides the buttons that would go past it. A host that caps `policyUid` at 0 (the identifier lives elsewhere) should also set the `odrl.policy-uid` rule to `"off"` in `validation.rules`: the rule would otherwise report a policy without an identifier that nobody can set.
 
 The wasm work runs outside the zone and `jsonChange` and `validationChange` are emitted inside it, as for `ds-odrl-prose`. When the wasm cannot be loaded, the host shows a `p.prose-error` with `role="alert"`: "The ODRL prose editor could not be loaded (the URL)."
 
@@ -143,12 +147,16 @@ The package exports exactly these names from its entry point. Nothing else is pu
 | `ProseWasmModule` | type | The JavaScript module of `@ds-labs/prose-wasm`, either build. |
 | `ProseValidatorService` | class | Validation without rendering. |
 | `ProfileSummary` | type | What `profileLoaded` emits. |
+| `DATASPACE_PRESET` | constant | What `preset="dataspace"` sets: the validation options, `termInput`, `limits` and `refuseTerms`, as one object. |
+| `Preset` | type | The shape of `DATASPACE_PRESET`. |
 | `reportChanged` | function | Whether a report differs from the previous one in verdict or findings. This is the rule behind `validationChange`. |
 | `ReportLike` | type | What `reportChanged` reads: a `verdict` and optional findings with a `fingerprint` and a `severity`. |
 | `Finding` | type | One finding, from `@ds-labs/prose-wasm`. |
 | `RuleId` | type | A frozen rule id, from `@ds-labs/prose-wasm`. |
 | `RuleInfo` | type | One entry of the rule catalogue, from `@ds-labs/prose-wasm`. |
 | `EditLimits` | type | The `limits` input of the editor, from `@ds-labs/prose-wasm`. |
+| `OutOfScopeMode` | type | The `outOfScope` input of the editor, `"show"`, `"strip"` or `"reject"`, from `@ds-labs/prose-wasm`. |
+| `RemovedSection` | type | What `outOfScopeRemoved` emits per section, from `@ds-labs/prose-wasm`. |
 | `TermInput` | type | The `termInput` input of the editor, `"free"` or `"select"`, from `@ds-labs/prose-wasm`. |
 | `ValidateOptions` | type | The validation options, from `@ds-labs/prose-wasm`. |
 | `ValidationReport` | type | The report, from `@ds-labs/prose-wasm`. |

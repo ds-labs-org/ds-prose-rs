@@ -16,6 +16,7 @@ mod jsonld_write;
 mod model;
 mod path;
 mod rules;
+mod scope;
 mod segments;
 
 pub use crate::words::ValueShape;
@@ -32,6 +33,7 @@ pub use path::{
     EntityRole, Field, ListKind, ListPath, NodePath, PathError, RuleList, SlotPath, Step,
 };
 pub use rules::{EditRules, Limit, NewNodeDefaults, odrl_position};
+pub use scope::{OutOfScope, out_of_scope, strip_out_of_scope};
 pub use segments::{
     ChoiceKind, ChoiceSlot, ConditionList, ConditionProse, Conj, EmptyText, FollowUpProse,
     ListItem, Locked, PolicyProse, RefinementGroup, RuleKindSlot, RuleProse, Segment, Sentence,

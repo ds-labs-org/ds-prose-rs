@@ -421,3 +421,230 @@ async fn term_input_survives_a_new_profile_and_validation() {
     let report = h.report().as_string().expect("a report");
     assert!(report.contains("profile.unknown-term"), "{report}");
 }
+
+/// Parties at the policy, rule and duty level, in the three spellings.
+const PARTIES: &str = r#"{"@context":["http://www.w3.org/ns/odrl.jsonld",{"o":"http://www.w3.org/ns/odrl/2/"}],"@type":"Set","uid":"urn:policy:9","assigner":"urn:a","odrl:assignee":"urn:b","permission":[{"target":"urn:asset:1","action":"use","http://www.w3.org/ns/odrl/2/assigner":"urn:a","assignee":"urn:b","duty":[{"action":"inform","o:assignee":"urn:b"}]}]}"#;
+const NO_PARTIES: &str = r#"{"policyAssigner":{"max":0},"policyAssignee":{"max":0},"ruleAssigner":{"max":0},"ruleAssignee":{"max":0}}"#;
+
+fn removed_paths(h: &ProseEditorHandle) -> Vec<String> {
+    let v: serde_json::Value = serde_json::from_str(&h.removed()).unwrap();
+    v.as_array()
+        .unwrap()
+        .iter()
+        .map(|o| o["path"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+fn error_paths(e: &JsValue) -> Vec<String> {
+    js_sys::Array::from(&js_sys::Reflect::get(e, &"paths".into()).unwrap())
+        .iter()
+        .map(|p| p.as_string().unwrap())
+        .collect()
+}
+
+#[wasm_bindgen_test]
+async fn out_of_scope_show_is_the_default_and_keeps_the_sections() {
+    let (c, mut h, calls) = mount(PARTIES).await;
+    h.set_limits(js(NO_PARTIES)).expect("limits");
+    settle().await;
+    assert_eq!(h.removed(), "[]");
+    assert_eq!(h.json(), PARTIES);
+    click(&c, ADD_PERMISSION).await;
+    let json = calls.borrow()[0].0.clone();
+    assert!(
+        json.contains("\"urn:a\"") && json.contains("\"urn:b\""),
+        "{json}"
+    );
+    assert!(h.set_out_of_scope("drop").is_err());
+}
+
+#[wasm_bindgen_test]
+async fn out_of_scope_strip_drops_the_sections_and_reports_them() {
+    let (c, mut h, calls) = mount(PARTIES).await;
+    h.set_out_of_scope("strip").expect("mode");
+    h.set_limits(js(NO_PARTIES)).expect("limits");
+    settle().await;
+    assert_eq!(
+        removed_paths(&h),
+        [
+            "assigner",
+            "odrl:assignee",
+            "permission[0].http://www.w3.org/ns/odrl/2/assigner",
+            "permission[0].assignee",
+            "permission[0].duty[0].o:assignee",
+        ]
+    );
+    assert!(calls.borrow().is_empty(), "a strip is not an edit");
+    for gone in ["\"urn:a\"", "\"urn:b\""] {
+        assert!(!h.json().contains(gone), "{gone} in {}", h.json());
+    }
+    assert!(
+        !c.text_content().unwrap().contains("urn:a "),
+        "{}",
+        c.inner_html()
+    );
+    // jsonChange never carries them.
+    click(&c, ADD_PERMISSION).await;
+    let json = calls.borrow()[0].0.clone();
+    assert!(
+        !json.contains("\"urn:a\"") && !json.contains("\"urn:b\""),
+        "{json}"
+    );
+    assert_eq!(count(&json, "permission"), 2, "{json}");
+}
+
+#[wasm_bindgen_test]
+async fn out_of_scope_strip_applies_to_later_updates_and_the_echo_is_a_no_op() {
+    let (c, mut h, _calls) = mount(ONE).await;
+    h.set_out_of_scope("strip").unwrap();
+    h.set_limits(js(NO_PARTIES)).unwrap();
+    h.update(PARTIES, None).expect("a document with parties");
+    settle().await;
+    assert_eq!(removed_paths(&h).len(), 5, "{}", h.removed());
+    assert!(!h.json().contains("\"urn:a\""));
+    let before = c.inner_html();
+    h.update(PARTIES, None).expect("the same text again");
+    settle().await;
+    assert_eq!(c.inner_html(), before);
+    assert_eq!(removed_paths(&h).len(), 5, "a no-op keeps the report");
+    h.update(ONE, None).unwrap();
+    assert_eq!(h.removed(), "[]", "the report is of the last load");
+}
+
+#[wasm_bindgen_test]
+async fn out_of_scope_reject_refuses_a_document_and_names_the_paths() {
+    let (c, mut h, _calls) = mount(ONE).await;
+    h.set_out_of_scope("reject").expect("mode");
+    h.set_limits(js(NO_PARTIES)).expect("ONE has no parties");
+    settle().await;
+    let before = c.inner_html();
+    let err = h.update(PARTIES, None).expect_err("refused");
+    assert_eq!(error_paths(&err).len(), 5, "{err:?}");
+    assert!(error_paths(&err).contains(&"permission[0].assignee".to_string()));
+    let message = js_sys::Reflect::get(&err, &"message".into())
+        .unwrap()
+        .as_string()
+        .unwrap();
+    assert!(message.contains("permission[0].assignee"), "{message}");
+    assert_eq!(
+        js_sys::Reflect::get(&err, &"name".into())
+            .unwrap()
+            .as_string()
+            .unwrap(),
+        "OutOfScopeError"
+    );
+    settle().await;
+    assert_eq!(c.inner_html(), before, "the document stays");
+    assert_eq!(h.json(), ONE);
+}
+
+#[wasm_bindgen_test]
+async fn out_of_scope_reject_refuses_limits_the_document_on_screen_breaks() {
+    let (c, mut h, _calls) = mount(PARTIES).await;
+    h.set_out_of_scope("reject")
+        .expect("default limits: all in scope");
+    settle().await;
+    let before = c.inner_html();
+    assert!(h.set_limits(js(NO_PARTIES)).is_err());
+    settle().await;
+    assert_eq!(c.inner_html(), before);
+    // The limits did not stick: the add slot of the policy assigner is back.
+    assert!(select(&c, "[data-add=\"policy[0]@assigner\"]").is_some());
+}
+
+#[wasm_bindgen_test]
+async fn out_of_scope_other_limits_at_zero_are_covered() {
+    let (c, mut h, _calls) = mount(ONE).await;
+    h.set_out_of_scope("strip").unwrap();
+    h.set_limits(js(r#"{"policyUid":{"max":0},"ruleTarget":{"max":0}}"#))
+        .unwrap();
+    settle().await;
+    assert_eq!(removed_paths(&h), ["uid", "permission[0].target"]);
+    assert!(!h.json().contains("urn:policy:1"));
+    assert!(select(&c, ".prose-edit").is_some());
+}
+
+/// Types `text` into the slot `css` and leaves it, which commits it.
+async fn type_into(c: &Element, css: &str, text: &str) {
+    let el = select(c, css)
+        .unwrap_or_else(|| panic!("{css} in {}", c.inner_html()))
+        .dyn_into::<HtmlElement>()
+        .unwrap();
+    el.focus().unwrap();
+    el.set_text_content(Some(text));
+    let input = web_sys::InputEventInit::new();
+    input.set_bubbles(true);
+    el.dispatch_event(&web_sys::InputEvent::new_with_event_init_dict("input", &input).unwrap())
+        .unwrap();
+    let out = web_sys::FocusEventInit::new();
+    out.set_bubbles(true);
+    el.dispatch_event(
+        &web_sys::FocusEvent::new_with_focus_event_init_dict("focusout", &out).unwrap(),
+    )
+    .unwrap();
+    settle().await;
+}
+
+const GROUPED: &str = r#"{"@context":"http://www.w3.org/ns/odrl.jsonld","@type":"Set","uid":"urn:policy:5","permission":[{"target":"urn:asset:1","action":"use","constraint":[{"and":[{"leftOperand":"count","operator":"lteq","rightOperand":3}]}]}]}"#;
+const TOP_GROUP: &str = "[data-add=\"policy[0].permission[0]@constraint\"][data-item=\"group\"]";
+const INNER_GROUP: &str =
+    "[data-add=\"policy[0].permission[0].constraint[0]@child\"][data-item=\"group\"]";
+
+#[wasm_bindgen_test]
+async fn a_logical_depth_limit_hides_the_group_buttons_that_would_nest_too_deep() {
+    let (c, mut h, _calls) = mount(GROUPED).await;
+    assert!(select(&c, TOP_GROUP).is_some());
+    assert!(select(&c, INNER_GROUP).is_some());
+    h.set_limits(js(r#"{"logicalDepth":{"max":1}}"#))
+        .expect("limits");
+    settle().await;
+    assert!(select(&c, TOP_GROUP).is_some(), "one deep is allowed");
+    assert!(select(&c, INNER_GROUP).is_none(), "two deep is not");
+    // Ungrouping what the document has stays.
+    assert!(
+        c.inner_html().contains("Ungroup condition 1"),
+        "{}",
+        c.inner_html()
+    );
+    h.set_limits(js(r#"{"logicalDepth":{"max":0}}"#))
+        .expect("limits");
+    settle().await;
+    assert!(select(&c, TOP_GROUP).is_none());
+    // The document is kept as it was: the limit is not a scope.
+    assert!(h.json().contains("\"and\""));
+    assert!(h.set_limits(js(r#"{"logicalDepth":{"max":-1}}"#)).is_err());
+    h.set_limits(JsValue::NULL).expect("reset");
+    settle().await;
+    assert!(select(&c, INNER_GROUP).is_some());
+}
+
+const CLOSED_POLICY: &str = r#"{"@context":["http://www.w3.org/ns/odrl.jsonld",{"ex":"https://example.org/odrl/profile/research/"}],"@type":"Set","uid":"urn:policy:s","profile":"https://example.org/odrl/profile/research","permission":[{"target":"urn:asset:1","assigner":"urn:party:a","action":"use","constraint":[{"leftOperand":"ex:researchPurpose","operator":"isAnyOf","rightOperand":[{"@id":"ex:academic"}]}]}]}"#;
+
+#[wasm_bindgen_test]
+async fn refuse_terms_is_a_switch_that_leaves_the_document_and_the_rest_alone() {
+    // The slots already close under strict validation; the switch makes the
+    // reducer refuse a host's event (a fix, say) that writes an inadmissible
+    // term. It changes nothing on screen by itself and survives the other
+    // setters.
+    let (c, mut h, calls) = mount(CLOSED_POLICY).await;
+    h.set_refuse_terms(true);
+    settle().await; // no validation: nothing to gate, nothing breaks
+    h.set_profile(Some(CLOSED.to_string())).expect("profile");
+    h.set_validation(js("{}")).expect("validation");
+    h.set_term_input("select").expect("select");
+    h.set_limits(js(r#"{"logicalDepth":{"max":2}}"#))
+        .expect("limits");
+    settle().await;
+    let before = c.inner_html();
+    h.set_refuse_terms(true);
+    settle().await;
+    assert_eq!(c.inner_html(), before, "setting it again changes nothing");
+    h.set_refuse_terms(false);
+    h.set_refuse_terms(true);
+    settle().await;
+    assert_eq!(c.inner_html(), before);
+    assert!(calls.borrow().is_empty(), "a setting is not an edit");
+    // The editor still edits.
+    click(&c, "[data-add=\"policy[0]@permission\"]").await;
+    assert_eq!(calls.borrow().len(), 1);
+}

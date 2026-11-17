@@ -2,13 +2,21 @@
 // or skip, which inputs to hand over, what a change does), against a fake handle.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { EditorSession } from '../src/editor-sync.ts';
+import { DATASPACE_PRESET, EditorSession, resolvePreset } from '../src/editor-sync.ts';
 
 const A = '{"@type":"Set","uid":"a"}';
 const B = '{"@type":"Set","uid":"b"}';
 
+/** What the wasm handle throws for a document its scope refuses. */
+function outOfScope(paths) {
+  const e = new Error(`the document holds sections out of scope: ${paths.join(', ')}`);
+  e.name = 'OutOfScopeError';
+  e.paths = paths;
+  return e;
+}
+
 /** A handle that records its calls; `bad` makes the constructor or `update` throw for that text. */
-function fake(bad = new Set()) {
+function fake(bad = new Set(), scope = {}) {
   const calls = [];
   const made = [];
   const mount = (json, cls, onChange) => {
@@ -22,11 +30,26 @@ function fake(bad = new Set()) {
       },
       setProfile: (t) => (calls.push(['setProfile', t]), t == null ? 'null' : '{"name":"P","terms":1}'),
       setProfiles: (t) => (calls.push(['setProfiles', t]), '[]'),
-      setLimits: (l) => calls.push(['setLimits', l]),
+      setLimits: (l) => {
+        calls.push(['setLimits', l]);
+        if (scope.refuseLimits) throw outOfScope(['permission[0].assignee']);
+      },
       setValidation: (o) => calls.push(['setValidation', o]),
+      setRefuseTerms: (on) => calls.push(['setRefuseTerms', on]),
       setTermInput: (m) => {
         calls.push(['setTermInput', m]);
         if (m !== 'free' && m !== 'select') throw new Error(`termInput ${m}`);
+      },
+      // `scope.refuse` names what `setLimits` / `update` refuse as out of scope; `scope.removed` is what the next load took out.
+      setOutOfScope: (m) => {
+        calls.push(['setOutOfScope', m]);
+        if (scope.refuseMode) throw outOfScope(['assigner']);
+      },
+      removed: () => {
+        calls.push(['removed']);
+        const r = scope.removed ?? [];
+        scope.removed = [];
+        return JSON.stringify(r);
       },
       report: () => (calls.push(['report']), null),
       destroy: () => calls.push(['destroy']),
@@ -186,4 +209,209 @@ test('termInput: a mode the handle refuses keeps the previous one and is tried a
   } finally {
     console.error = error;
   }
+});
+
+const GONE = [{ path: 'assigner', key: 'assigner', limit: 'policyAssigner' }];
+
+test('outOfScope: show (the default) is never handed over and removed() is never read', () => {
+  const s = new EditorSession();
+  const f = fake();
+  const out = s.apply(inputs({ limits: { policyAssigner: { max: 0 } } }), f.mount);
+  assert.ok(!names(f.calls).includes('setOutOfScope'));
+  assert.ok(!names(f.calls).includes('removed'));
+  assert.equal(out.removed, undefined);
+});
+
+test('outOfScope: strip is handed over once, before the limits, and what it removed is reported', () => {
+  const s = new EditorSession();
+  const scope = { removed: [] };
+  const f = fake(new Set(), scope);
+  const lim = { policyAssigner: { max: 0 } };
+  // The limits are what strips: the handle reports it after setLimits.
+  f.mount0 = f.mount;
+  const mount = (...a) => {
+    const h = f.mount0(...a);
+    const setLimits = h.setLimits;
+    h.setLimits = (l) => {
+      setLimits(l);
+      scope.removed = GONE;
+    };
+    return h;
+  };
+  const out = s.apply(inputs({ outOfScope: 'strip', limits: lim }), mount);
+  const order = names(f.calls);
+  assert.ok(order.indexOf('setOutOfScope') < order.indexOf('setLimits'), order.join());
+  assert.deepEqual(f.calls.find((c) => c[0] === 'setOutOfScope'), ['setOutOfScope', 'strip']);
+  assert.deepEqual(out.removed, GONE);
+  assert.equal(out.jsonError, undefined);
+  f.calls.length = 0;
+  const again = s.apply(inputs({ outOfScope: 'strip', limits: lim }), mount);
+  assert.ok(!names(f.calls).includes('setOutOfScope'), 'once');
+  assert.equal(again.removed, undefined, 'nothing new was removed');
+});
+
+test('outOfScope: a later json that loses sections reports them', () => {
+  const s = new EditorSession();
+  const scope = { removed: [] };
+  const f = fake(new Set(), scope);
+  s.apply(inputs({ outOfScope: 'strip' }), f.mount);
+  scope.removed = GONE;
+  const out = s.apply(inputs({ outOfScope: 'strip', json: B }), f.mount);
+  assert.deepEqual(f.calls.find((c) => c[0] === 'update'), ['update', B, null]);
+  assert.deepEqual(out.removed, GONE);
+});
+
+test('outOfScope: reject, a json the handle refuses is a jsonError and the document stays', () => {
+  const s = new EditorSession();
+  const f = fake(new Set([B]));
+  s.apply(inputs({ outOfScope: 'reject' }), f.mount);
+  const out = s.apply(inputs({ outOfScope: 'reject', json: B }), f.mount);
+  assert.match(String(out.jsonError), /unreadable/);
+  assert.equal(s.lastJson, A);
+});
+
+test('outOfScope: reject, limits the first document breaks fail the mount as a jsonError', () => {
+  const s = new EditorSession();
+  const scope = { refuseLimits: true };
+  const f = fake(new Set(), scope);
+  const lim = { policyAssigner: { max: 0 } };
+  const out = s.apply(inputs({ outOfScope: 'reject', limits: lim }), f.mount);
+  assert.equal(out.jsonError.name, 'OutOfScopeError');
+  assert.deepEqual(out.jsonError.paths, ['permission[0].assignee']);
+  assert.equal(s.handle, undefined, 'nothing stays mounted');
+  assert.deepEqual(names(f.calls).filter((n) => n === 'destroy' || n === 'free'), ['destroy', 'free']);
+  assert.equal(s.lastJson, undefined);
+  // The next change of an input tries again, with the same limits and mode.
+  scope.refuseLimits = false;
+  f.calls.length = 0;
+  const out2 = s.apply(inputs({ json: B, outOfScope: 'reject', limits: lim }), f.mount);
+  assert.equal(out2.jsonError, undefined);
+  assert.equal(s.handle, f.made[1]);
+  assert.deepEqual(f.calls.filter((c) => c[0] === 'setOutOfScope'), [['setOutOfScope', 'reject']]);
+  assert.ok(names(f.calls).includes('setLimits'));
+});
+
+test('outOfScope: reject, limits a later document breaks are a jsonError, the handle stays and the limits are tried again', () => {
+  const s = new EditorSession();
+  const scope = {};
+  const f = fake(new Set(), scope);
+  s.apply(inputs({ outOfScope: 'reject' }), f.mount);
+  scope.refuseLimits = true;
+  const lim = { ruleAssigner: { max: 0 } };
+  const out = s.apply(inputs({ outOfScope: 'reject', limits: lim }), f.mount);
+  assert.equal(out.jsonError.name, 'OutOfScopeError');
+  assert.equal(s.handle, f.made[0]);
+  assert.ok(!names(f.calls).includes('destroy'));
+  scope.refuseLimits = false;
+  f.calls.length = 0;
+  s.apply(inputs({ outOfScope: 'reject', limits: lim }), f.mount);
+  assert.deepEqual(f.calls.filter((c) => c[0] === 'setLimits'), [['setLimits', lim]]);
+});
+
+test('outOfScope: a mode the handle refuses for another reason keeps the previous mode and is tried again', () => {
+  const s = new EditorSession();
+  const f = fake();
+  const error = console.error;
+  console.error = () => {};
+  try {
+    s.apply(inputs(), f.mount);
+    f.made[0].setOutOfScope = (m) => {
+      f.calls.push(['setOutOfScope', m]);
+      throw new Error('outOfScope bogus');
+    };
+    const out = s.apply(inputs({ outOfScope: 'bogus' }), f.mount);
+    assert.equal(out.jsonError, undefined);
+    f.calls.length = 0;
+    s.apply(inputs({ outOfScope: 'bogus' }), f.mount);
+    assert.deepEqual(f.calls.filter((c) => c[0] === 'setOutOfScope'), [['setOutOfScope', 'bogus']]);
+  } finally {
+    console.error = error;
+  }
+});
+
+// --- the preset ----------------------------------------------------------------
+
+const none = { strict: undefined, validation: null, termInput: undefined, limits: null, refuseTerms: undefined };
+
+test('no preset leaves every input as the host gave it', () => {
+  assert.deepEqual(resolvePreset(null, none), {
+    options: null, termInput: 'free', limits: null, refuseTerms: false,
+  });
+  assert.deepEqual(resolvePreset(undefined, { ...none, strict: true, termInput: 'select', limits: { policies: { max: 1 } } }), {
+    options: { strict: true }, termInput: 'select', limits: { policies: { max: 1 } }, refuseTerms: false,
+  });
+});
+
+test("preset 'dataspace' is strict, structural, select, refusing, two groups deep, with the heuristic lints on", () => {
+  const r = resolvePreset('dataspace', none);
+  assert.deepEqual(r, {
+    options: {
+      strict: true,
+      structural: true,
+      rules: { 'heuristic.single-child-group': 'warning', 'heuristic.duplicate-action': 'warning' },
+    },
+    termInput: 'select',
+    limits: { logicalDepth: { max: 2 } },
+    refuseTerms: true,
+  });
+  assert.deepEqual(r, {
+    options: DATASPACE_PRESET.validation, termInput: DATASPACE_PRESET.termInput,
+    limits: DATASPACE_PRESET.limits, refuseTerms: DATASPACE_PRESET.refuseTerms,
+  });
+});
+
+test('every input overrides the one thing the preset sets', () => {
+  // The preset is not changed by what is resolved from it.
+  const before = JSON.stringify(DATASPACE_PRESET);
+  assert.equal(resolvePreset('dataspace', { ...none, strict: false }).options.strict, false);
+  assert.equal(resolvePreset('dataspace', { ...none, strict: false }).options.structural, true);
+  assert.equal(resolvePreset('dataspace', { ...none, termInput: 'free' }).termInput, 'free');
+  assert.equal(resolvePreset('dataspace', { ...none, refuseTerms: false }).refuseTerms, false);
+  assert.deepEqual(resolvePreset('dataspace', { ...none, limits: { logicalDepth: { max: 4 }, policies: { max: 1 } } }).limits, {
+    logicalDepth: { max: 4 }, policies: { max: 1 },
+  });
+  assert.deepEqual(resolvePreset('dataspace', { ...none, limits: { policies: { max: 1 } } }).limits, {
+    logicalDepth: { max: 2 }, policies: { max: 1 },
+  });
+  // `validation` wins key by key, and its rules are added to the preset's.
+  const o = resolvePreset('dataspace', {
+    ...none, validation: { structural: false, rules: { 'heuristic.duplicate-action': 'off', 'prose.value-not-allowed': 'error' } },
+  }).options;
+  assert.deepEqual(o, {
+    strict: true,
+    structural: false,
+    rules: { 'heuristic.single-child-group': 'warning', 'heuristic.duplicate-action': 'off', 'prose.value-not-allowed': 'error' },
+  });
+  assert.equal(JSON.stringify(DATASPACE_PRESET), before);
+  // What is resolved is a copy.
+  const a = resolvePreset('dataspace', none);
+  a.options.rules['x'] = 'off';
+  a.limits.logicalDepth.max = 9;
+  assert.equal(JSON.stringify(DATASPACE_PRESET), before);
+});
+
+test('an unknown preset throws and names the presets', () => {
+  assert.throws(() => resolvePreset('nope', none), /dataspace/);
+});
+
+test('refuseTerms is handed over once, and only a change from the default', () => {
+  const s = new EditorSession();
+  const f = fake();
+  s.apply(inputs(), f.mount);
+  assert.ok(!names(f.calls).includes('setRefuseTerms'));
+  s.apply(inputs({ refuseTerms: true }), f.mount);
+  assert.deepEqual(f.calls.filter((c) => c[0] === 'setRefuseTerms'), [['setRefuseTerms', true]]);
+  f.calls.length = 0;
+  s.apply(inputs({ refuseTerms: true }), f.mount);
+  assert.ok(!names(f.calls).includes('setRefuseTerms'));
+  s.apply(inputs({ refuseTerms: false }), f.mount);
+  assert.deepEqual(f.calls.filter((c) => c[0] === 'setRefuseTerms'), [['setRefuseTerms', false]]);
+});
+
+test('a first apply with the preset hands everything over once', () => {
+  const s = new EditorSession();
+  const f = fake();
+  const r = resolvePreset('dataspace', none);
+  s.apply(inputs({ options: r.options, limits: r.limits, termInput: r.termInput, refuseTerms: r.refuseTerms }), f.mount);
+  assert.deepEqual(names(f.calls), ['new', 'setLimits', 'setTermInput', 'setRefuseTerms', 'setValidation', 'report']);
 });

@@ -10,10 +10,10 @@ import {
   output,
   signal,
 } from '@angular/core';
-import type { EditLimits, ProseEditorHandle, TermInput, ValidateOptions, ValidationReport } from '@ds-labs/prose-wasm';
-import { type EditorInputs, EditorSession } from './editor-sync';
+import type { EditLimits, OutOfScopeMode, ProseEditorHandle, RemovedSection, TermInput, ValidateOptions, ValidationReport } from '@ds-labs/prose-wasm';
+import { type EditorInputs, EditorSession, resolvePreset } from './editor-sync';
 import type { ProfileSummary } from './profile-sync';
-import { parseReport, profileTexts, reportChanged, validationOptions } from './validation-sync';
+import { parseReport, profileTexts, reportChanged } from './validation-sync';
 import { PROSE_WASM_MODULE, PROSE_WASM_URL, type ProseWasmModule, loadWasm } from './wasm-runtime';
 
 /**
@@ -44,7 +44,15 @@ import { PROSE_WASM_MODULE, PROSE_WASM_URL, type ProseWasmModule, loadWasm } fro
  * identifier). When
  * validation is on (`validation`, or `strict`) the editor marks issues inline
  * and shows a problems panel with fix buttons; edits are flagged, never
- * refused. `termInput="select"` turns the term slots (action, left operand,
+ * refused. `outOfScope` turns a limit of `max: 0` into the scope of the
+ * incoming document: `'strip'` drops those sections from `json` (parties
+ * of a policy definition, say) in any spelling of the key, and
+ * `outOfScopeRemoved` emits what went; `jsonChange` never holds them.
+ * `'reject'` refuses a document that holds one: `jsonError` emits, with the
+ * offending `paths`. `'show'` (the default) keeps them.
+ * `preset="dataspace"` turns on what a dataspace asks of its members in one
+ * switch (see `preset`); each input you set yourself still wins.
+ * `termInput="select"` turns the term slots (action, left operand,
  * policy type, and a unit or right operand the profile lists entries for)
  * into dropdowns of the loaded profiles' terms. `validationChange` emits the report when the verdict or the
  * findings change, also after edits; the `report` signal holds the latest.
@@ -71,15 +79,39 @@ export class OdrlProseEditorComponent implements OnChanges, OnDestroy {
   readonly profiles = input<string[] | null>(null);
   /** How many items each list may hold; a list not named keeps its default. */
   readonly limits = input<EditLimits | null>(null);
-  /** Validate with a closed vocabulary: ODRL plus the loaded profiles. */
-  readonly strict = input(false);
-  /** The full validation options; they take precedence over `strict`. */
+  /** Validate with a closed vocabulary: ODRL plus the loaded profiles. Default `false`; with a `preset`, the preset's. */
+  readonly strict = input<boolean | undefined>(undefined);
+  /** The full validation options; they take precedence over `strict`, key by key over a `preset`'s. */
   readonly validation = input<ValidateOptions | null>(null);
-  /** `'select'`: the term slots are dropdowns of the profile's terms instead of free text. */
-  readonly termInput = input<TermInput>('free');
+  /** `'select'`: the term slots are dropdowns of the profile's terms instead of free text. Default `'free'`; with a `preset`, the preset's. */
+  readonly termInput = input<TermInput | undefined>(undefined);
+  /**
+   * `true`: an edit that writes a term the validation does not allow (see
+   * `strict`) is refused, not committed and flagged. Default `false`; with a
+   * `preset`, the preset's.
+   */
+  readonly refuseTerms = input<boolean | undefined>(undefined);
+  /**
+   * `'dataspace'` sets, for a dataspace whose members write only policies it
+   * can evaluate: strict validation (a closed vocabulary) with the structural
+   * tier on, `termInput` `'select'`, `refuseTerms`, `limits` of
+   * `{ logicalDepth: { max: 2 } }`, and warnings for a group of one condition
+   * and an action listed twice. Each of `strict`, `validation`, `termInput`,
+   * `refuseTerms` and `limits` you set yourself still wins, key by key. Null
+   * (the default) sets nothing.
+   */
+  readonly preset = input<'dataspace' | null>(null);
+  /**
+   * What to do with a section whose limit is `max: 0` when `json` holds one:
+   * `'show'` keeps it, `'strip'` drops it (see `outOfScopeRemoved`), `'reject'`
+   * fails the load through `jsonError` (an `OutOfScopeError` with `paths`).
+   */
+  readonly outOfScope = input<OutOfScopeMode>('show');
   /** Emits the JSON-LD text the editor writes after each committed edit. */
   readonly jsonChange = output<string>();
-  /** Emits when `json` is not a readable ODRL policy. */
+  /** Emits what `outOfScope="strip"` dropped from a document, each time something was. */
+  readonly outOfScopeRemoved = output<RemovedSection[]>();
+  /** Emits when `json` is not a readable ODRL policy, or `outOfScope="reject"` refuses it. */
   readonly jsonError = output<unknown>();
   /** Emits when the wasm module could not be loaded. */
   readonly loadFailed = output<unknown>();
@@ -123,14 +155,36 @@ export class OdrlProseEditorComponent implements OnChanges, OnDestroy {
     if (this.session.destroyed) return;
     // Only the error message can be in the host before the first mount.
     if (!this.session.handle) this.host.replaceChildren();
+    let resolved: ReturnType<typeof resolvePreset>;
+    try {
+      resolved = resolvePreset(this.preset(), {
+        strict: this.strict(),
+        validation: this.validation(),
+        termInput: this.termInput(),
+        limits: this.limits(),
+        refuseTerms: this.refuseTerms(),
+      });
+    } catch (error) {
+      // A preset the editor does not know is ignored; the host's inputs stand.
+      console.error('ds-odrl-prose-editor: the preset is not readable', error);
+      resolved = resolvePreset(null, {
+        strict: this.strict(),
+        validation: this.validation(),
+        termInput: this.termInput(),
+        limits: this.limits(),
+        refuseTerms: this.refuseTerms(),
+      });
+    }
     const inputs: EditorInputs = {
       json: this.json(),
       cls: this.articleClass() ?? null,
       single: this.profiles() == null,
       texts: profileTexts(this.profile(), this.profiles()),
-      options: validationOptions(this.strict(), this.validation()),
-      limits: this.limits(),
-      termInput: this.termInput(),
+      options: resolved.options,
+      limits: resolved.limits,
+      termInput: resolved.termInput,
+      outOfScope: this.outOfScope(),
+      refuseTerms: resolved.refuseTerms,
     };
     // Yew schedules its own work; keep it out of Angular's change detection.
     const outcome = this.zone.runOutsideAngular(() =>
@@ -142,6 +196,7 @@ export class OdrlProseEditorComponent implements OnChanges, OnDestroy {
     );
     if (!outcome) return;
     if (outcome.jsonError !== undefined) this.jsonError.emit(outcome.jsonError);
+    if (outcome.removed) this.outOfScopeRemoved.emit(outcome.removed);
     if (outcome.profileError !== undefined) this.profileError.emit(outcome.profileError);
     for (const summary of outcome.summaries ?? []) this.profileLoaded.emit(summary);
     if (outcome.validationError !== undefined) this.validationError.emit(outcome.validationError);

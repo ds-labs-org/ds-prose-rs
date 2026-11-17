@@ -7,7 +7,8 @@
 //! counter and receives the committed documents through one callback.
 use crate::{read_profile, summary_json, throw, to_json, validation};
 use prose_yew::prose_core::edit::{
-    EditDoc, EditRules, IssueTarget, Limit, StrictEdit, check_profile, read_model, write_jsonld,
+    EditDoc, EditRules, IssueTarget, Limit, OutOfScope, StrictEdit, check_profile, out_of_scope,
+    read_model, strip_out_of_scope, write_jsonld,
 };
 use prose_yew::prose_core::profile::Wording;
 use prose_yew::prose_core::validate::{Options, Report, Validator};
@@ -46,6 +47,7 @@ fn limit_field<'a>(r: &'a mut EditRules, name: &str) -> Option<&'a mut Limit> {
         "entityRefinement" => &mut r.entity_refinement,
         "constraints" => &mut r.constraints,
         "logicalChildren" => &mut r.logical_children,
+        "logicalDepth" => &mut r.logical_depth,
         "rightOperandValues" => &mut r.right_operand_values,
         "profile" => &mut r.profile,
         "inheritFrom" => &mut r.inherit_from,
@@ -56,7 +58,7 @@ fn limit_field<'a>(r: &'a mut EditRules, name: &str) -> Option<&'a mut Limit> {
 const LIMIT_NAMES: &str = "policies, permission, prohibition, obligation, duty, remedy, \
 consequence, policyAssigner, policyAssignee, policyTarget, policyAction, policyUid, ruleAssigner, \
 ruleAssignee, ruleTarget, ruleAction, actionRefinement, entityRefinement, constraints, \
-logicalChildren, rightOperandValues, profile, inheritFrom";
+logicalChildren, logicalDepth, rightOperandValues, profile, inheritFrom";
 
 /// A non-negative integer of a limit entry.
 fn count(name: &str, key: &str, v: &Value) -> Result<usize, String> {
@@ -120,6 +122,118 @@ pub(crate) fn apply_limits(rules: &mut EditRules, limits: Option<&Value>) -> Res
     }
     *rules = next;
     Ok(())
+}
+
+/// What the editor does with a section whose limit is `max: 0` when the
+/// document it loads holds one (`setOutOfScope`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Scope {
+    /// Shown and kept, as before limits were a scope.
+    #[default]
+    Show,
+    /// Dropped on load and reported.
+    Strip,
+    /// The load fails, naming the paths.
+    Reject,
+}
+
+/// `Scope` by its `setOutOfScope` name.
+pub(crate) fn scope_of(name: &str) -> Result<Scope, String> {
+    match name {
+        "show" => Ok(Scope::Show),
+        "strip" => Ok(Scope::Strip),
+        "reject" => Ok(Scope::Reject),
+        other => Err(format!(
+            "outOfScope must be \"show\", \"strip\" or \"reject\", not {other:?}"
+        )),
+    }
+}
+
+/// A document the scope refuses (`Scope::Reject`).
+#[derive(Debug, PartialEq)]
+pub(crate) struct ScopeError {
+    pub message: String,
+    pub paths: Vec<String>,
+}
+
+/// The text a document loads as, and what the scope took out of it.
+#[derive(Debug, PartialEq)]
+pub(crate) struct Scoped {
+    pub text: String,
+    pub removed: Vec<OutOfScope>,
+}
+
+/// `text` under `rules` and `mode`: unchanged while nothing is out of scope
+/// (and always for `Show`); without the sections otherwise (`Strip`), or
+/// refused (`Reject`). Text that is not JSON passes through: the reader
+/// refuses it with its own error.
+pub(crate) fn apply_scope(
+    text: &str,
+    rules: &EditRules,
+    mode: Scope,
+) -> Result<Scoped, ScopeError> {
+    let keep = |text: &str| Scoped {
+        text: text.to_owned(),
+        removed: Vec::new(),
+    };
+    if mode == Scope::Show {
+        return Ok(keep(text));
+    }
+    let Ok(mut value) = serde_json::from_str::<Value>(text) else {
+        return Ok(keep(text));
+    };
+    match mode {
+        Scope::Show => Ok(keep(text)),
+        Scope::Strip => {
+            let removed = strip_out_of_scope(&mut value, rules);
+            if removed.is_empty() {
+                return Ok(keep(text));
+            }
+            Ok(Scoped {
+                text: serde_json::to_string(&value).unwrap_or_default(),
+                removed,
+            })
+        }
+        Scope::Reject => {
+            let found = out_of_scope(&value, rules);
+            if found.is_empty() {
+                return Ok(keep(text));
+            }
+            let list: Vec<String> = found
+                .iter()
+                .map(|o| format!("{} ({})", o.path, o.limit))
+                .collect();
+            Err(ScopeError {
+                message: format!(
+                    "the document holds sections out of scope: {}",
+                    list.join(", ")
+                ),
+                paths: found.into_iter().map(|o| o.path).collect(),
+            })
+        }
+    }
+}
+
+/// The removed sections as JSON text: `[{"path","key","limit"}]`.
+pub(crate) fn removed_json(removed: &[OutOfScope]) -> String {
+    let items: Vec<Value> = removed
+        .iter()
+        .map(|o| serde_json::json!({ "path": o.path, "key": o.key, "limit": o.limit }))
+        .collect();
+    serde_json::to_string(&items).unwrap_or_default()
+}
+
+/// The error a refused document throws: an `Error` named `OutOfScopeError`
+/// with the offending `paths` as an array.
+fn scope_error(e: &ScopeError) -> JsValue {
+    let err = js_sys::Error::new(&e.message);
+    err.set_name("OutOfScopeError");
+    let paths = js_sys::Array::new();
+    for p in &e.paths {
+        paths.push(&JsValue::from_str(p));
+    }
+    let _ = js_sys::Reflect::set(&err, &JsValue::from_str("paths"), &paths);
+    err.into()
 }
 
 /// The JSON-LD the editor writes for `doc`, compact.
@@ -194,7 +308,7 @@ fn editor_host(props: &HostProps) -> Html {
         move || (*initial).clone(),
         rules,
         config.validator.clone(),
-        StrictEdit::Flag,
+        config.strict_edit,
     );
     let editor = with.editor.clone();
     let quiet = use_mut_ref(|| Quiet {
@@ -280,8 +394,11 @@ fn editor_host(props: &HostProps) -> Html {
 
 /// What the callback and the handle share.
 struct Shared {
-    /// The text last set or emitted.
+    /// The text last set or emitted, as the scope left it.
     text: String,
+    /// The text the host last set, or the last one emitted: setting it
+    /// again changes nothing, even when the scope loaded another text from it.
+    source: String,
     validator: Option<Validator>,
 }
 
@@ -300,7 +417,11 @@ pub struct ProseEditorHandle {
     options: Option<Options>,
     limits: Option<Value>,
     term_input: TermInput,
+    strict_edit: StrictEdit,
     config: Rc<EditConfig>,
+    scope: Scope,
+    /// What the last load or scope change took out.
+    removed: Vec<OutOfScope>,
 }
 
 /// `TermInput` by its `setTermInput` name.
@@ -342,6 +463,7 @@ impl ProseEditorHandle {
         let doc = Rc::new(read_model(json).map_err(|e| throw(e.to_string()))?);
         let shared = Rc::new(RefCell::new(Shared {
             text: json.to_owned(),
+            source: json.to_owned(),
             validator: None,
         }));
         let onchange = {
@@ -352,6 +474,7 @@ impl ProseEditorHandle {
                 let report = {
                     let mut s = shared.borrow_mut();
                     s.text.clone_from(&text);
+                    s.source.clone_from(&text);
                     s.validator
                         .as_ref()
                         .map(|v| validation::validate_text(&text, v))
@@ -374,22 +497,40 @@ impl ProseEditorHandle {
             options: None,
             limits: None,
             term_input: TermInput::Free,
+            strict_edit: StrictEdit::Flag,
             config,
+            scope: Scope::Show,
+            removed: Vec::new(),
         };
         h.app = Some(yew::Renderer::<EditorHost>::with_root_and_props(root, h.props()).render());
         Ok(h)
     }
 
     /// Replaces the document. No-op when `json` equals the text the handle
-    /// holds (the last set or emitted), so binding back what `onChange`
-    /// emitted keeps the undo history. Throws on unreadable `json`; the
+    /// holds (the last set or emitted), or the last one the host set, so
+    /// binding back what `onChange` emitted keeps the undo history. Under
+    /// the scope (`setOutOfScope`) the sections whose limit is `max: 0` are
+    /// dropped (`"strip"`; see `removed()`) or refuse the document
+    /// (`"reject"`). Throws on unreadable `json`, or on one the scope
+    /// refuses (an `OutOfScopeError` with the offending `paths`); the
     /// document stays. `class` replaces the root element's class.
-    pub fn update(&mut self, json: &str, class: Option<String>) -> Result<(), JsError> {
-        let same = self.shared.borrow().text == json;
+    pub fn update(&mut self, json: &str, class: Option<String>) -> Result<(), JsValue> {
+        let same = {
+            let s = self.shared.borrow();
+            s.text == json || s.source == json
+        };
         if !same {
-            self.doc = Rc::new(read_model(json).map_err(|e| throw(e.to_string()))?);
+            let scoped =
+                apply_scope(json, &self.config.rules, self.scope).map_err(|e| scope_error(&e))?;
+            self.doc =
+                Rc::new(read_model(&scoped.text).map_err(|e| JsValue::from(throw(e.to_string())))?);
             self.generation += 1;
-            self.shared.borrow_mut().text = json.to_owned();
+            {
+                let mut s = self.shared.borrow_mut();
+                s.text = scoped.text;
+                s.source = json.to_owned();
+            }
+            self.removed = scoped.removed;
         }
         let class_changed = self.class != class;
         self.class = class;
@@ -458,13 +599,16 @@ impl ProseEditorHandle {
     }
 
     /// Sets how many items each list may hold (see `EditLimits`); `null`
-    /// restores the defaults. Throws on an unknown name, a negative or
-    /// fractional number, or `min` above `max`; the previous limits stay.
+    /// restores the defaults. Under `setOutOfScope("strip")` a list limited
+    /// to `max: 0` is also dropped from the document on screen (see
+    /// `removed()`); under `"reject"` a document that holds one refuses the
+    /// limits (an `OutOfScopeError`). Throws on an unknown name, a negative
+    /// or fractional number, or `min` above `max`; the previous limits stay.
     #[wasm_bindgen(js_name = setLimits)]
     pub fn set_limits(
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "EditLimits | null")] limits: JsValue,
-    ) -> Result<(), JsError> {
+    ) -> Result<(), JsValue> {
         let limits = to_json(&limits, "limits")
             .map_err(throw)?
             .filter(|v| !v.is_null());
@@ -473,10 +617,40 @@ impl ProseEditorHandle {
             self.options.as_ref(),
             limits.as_ref(),
         )?;
+        let scoped = self.rescope(&config.rules, self.scope)?;
         self.install(config);
         self.limits = limits;
+        self.take(scoped);
         self.render();
         Ok(())
+    }
+
+    /// What the editor does with a section whose limit is `max: 0` when a
+    /// document holds one: `"show"` (the default) keeps and shows it;
+    /// `"strip"` drops it on load and on every later `update()` or limits
+    /// change, and `removed()` lists what went; `"reject"` refuses the
+    /// document (an `OutOfScopeError` with the offending `paths`). The
+    /// document on screen is checked at once. Throws on any other name, or
+    /// when `"reject"` refuses the document on screen; the previous mode
+    /// stays.
+    #[wasm_bindgen(js_name = setOutOfScope)]
+    pub fn set_out_of_scope(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "OutOfScopeMode")] mode: &str,
+    ) -> Result<(), JsValue> {
+        let mode = scope_of(mode).map_err(|e| JsValue::from(throw(e)))?;
+        let scoped = self.rescope(&self.config.rules.clone(), mode)?;
+        self.scope = mode;
+        self.take(scoped);
+        self.render();
+        Ok(())
+    }
+
+    /// What the last load took out under `"strip"` (the constructor,
+    /// `update()`, `setLimits()` or `setOutOfScope()`), as JSON text:
+    /// `[{"path","key","limit"}]`, `"[]"` when it took nothing out.
+    pub fn removed(&self) -> String {
+        removed_json(&self.removed)
     }
 
     /// How the term slots take their value: `"free"` (the default) is
@@ -500,6 +674,28 @@ impl ProseEditorHandle {
             self.render();
         }
         Ok(())
+    }
+
+    /// Under validation, whether an edit that writes a term the validator
+    /// does not allow into a vocabulary slot (an action, a left operand, an
+    /// operator, a unit, a conflict strategy or a policy type) is refused
+    /// (`true`, as `StrictEdit::RefuseTerms`) or committed and flagged
+    /// (`false`, the default). The document and its history stay. Without
+    /// validation it does nothing.
+    #[wasm_bindgen(js_name = setRefuseTerms)]
+    pub fn set_refuse_terms(&mut self, on: bool) {
+        let mode = if on {
+            StrictEdit::RefuseTerms
+        } else {
+            StrictEdit::Flag
+        };
+        if mode != self.strict_edit {
+            self.strict_edit = mode;
+            let mut config = (*self.config).clone();
+            config.strict_edit = mode;
+            self.install(config);
+            self.render();
+        }
     }
 
     /// The validation report for the current text, as JSON text, or `null`
@@ -546,6 +742,27 @@ impl ProseEditorHandle {
         }
     }
 
+    /// The current text under `rules` and `mode`, or the error to throw.
+    fn rescope(&self, rules: &EditRules, mode: Scope) -> Result<Option<Scoped>, JsValue> {
+        let text = self.shared.borrow().text.clone();
+        let scoped = apply_scope(&text, rules, mode).map_err(|e| scope_error(&e))?;
+        Ok(Some(scoped).filter(|s| s.text != text))
+    }
+
+    /// Takes the document a scope change made, if it made one. It is set
+    /// by the host, so it is not reported as an edit.
+    fn take(&mut self, scoped: Option<Scoped>) {
+        self.removed.clear();
+        if let Some(s) = scoped {
+            if let Ok(doc) = read_model(&s.text) {
+                self.doc = Rc::new(doc);
+                self.generation += 1;
+                self.shared.borrow_mut().text = s.text;
+            }
+            self.removed = s.removed;
+        }
+    }
+
     fn render(&mut self) {
         let props = self.props();
         if let Some(app) = self.app.as_mut() {
@@ -555,6 +772,7 @@ impl ProseEditorHandle {
 
     fn install(&mut self, mut config: EditConfig) {
         config.term_input = self.term_input;
+        config.strict_edit = self.strict_edit;
         self.shared.borrow_mut().validator = config.validator.clone();
         self.config = Rc::new(config);
     }
@@ -583,7 +801,7 @@ mod tests {
     const POLICY: &str = include_str!("../../prose-core/tests/profiles/research-policy.json");
 
     /// Every name with the limit it sets.
-    fn fields(r: &EditRules) -> [(&'static str, Limit); 23] {
+    fn fields(r: &EditRules) -> [(&'static str, Limit); 24] {
         [
             ("policies", r.policies),
             ("permission", r.permission),
@@ -605,6 +823,7 @@ mod tests {
             ("entityRefinement", r.entity_refinement),
             ("constraints", r.constraints),
             ("logicalChildren", r.logical_children),
+            ("logicalDepth", r.logical_depth),
             ("rightOperandValues", r.right_operand_values),
             ("profile", r.profile),
             ("inheritFrom", r.inherit_from),
@@ -626,7 +845,7 @@ mod tests {
     fn every_name_sets_its_own_field() {
         let defaults = EditRules::default();
         let names: Vec<&str> = fields(&defaults).iter().map(|(n, _)| *n).collect();
-        assert_eq!(names.len(), 23);
+        assert_eq!(names.len(), 24);
         for (i, name) in names.iter().enumerate() {
             let r = limits(json!({ *name: { "min": 2, "max": 5 } })).unwrap();
             let want = Limit {
@@ -738,5 +957,87 @@ mod tests {
         assert!(c.validator.is_none());
         assert_eq!(fields(&c.rules), fields(&EditRules::default()));
         assert!(build_config(None, None, Some(&json!({ "x": {} }))).is_err());
+    }
+
+    const PARTIES: &str = r#"{"@type":"Set","uid":"urn:p:1","assigner":"urn:a","permission":[{"action":"use","odrl:assignee":"urn:b"}]}"#;
+
+    fn no_parties() -> EditRules {
+        let mut r = EditRules::default();
+        apply_limits(
+            &mut r,
+            Some(&json!({
+                "policyAssigner": { "max": 0 }, "policyAssignee": { "max": 0 },
+                "ruleAssigner": { "max": 0 }, "ruleAssignee": { "max": 0 }
+            })),
+        )
+        .unwrap();
+        r
+    }
+
+    #[test]
+    fn the_scope_names_are_show_strip_reject() {
+        assert_eq!(scope_of("show"), Ok(Scope::Show));
+        assert_eq!(scope_of("strip"), Ok(Scope::Strip));
+        assert_eq!(scope_of("reject"), Ok(Scope::Reject));
+        let e = scope_of("drop").unwrap_err();
+        assert!(
+            e.contains("show") && e.contains("strip") && e.contains("reject"),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn show_keeps_the_text_and_reports_nothing() {
+        let s = apply_scope(PARTIES, &no_parties(), Scope::Show).unwrap();
+        assert_eq!(s.text, PARTIES);
+        assert!(s.removed.is_empty());
+    }
+
+    #[test]
+    fn strip_drops_the_sections_in_every_spelling_and_reports_them() {
+        let s = apply_scope(PARTIES, &no_parties(), Scope::Strip).unwrap();
+        let v: Value = serde_json::from_str(&s.text).unwrap();
+        assert_eq!(
+            v,
+            json!({"@type":"Set","uid":"urn:p:1","permission":[{"action":"use"}]})
+        );
+        let paths: Vec<&str> = s.removed.iter().map(|o| o.path.as_str()).collect();
+        assert_eq!(paths, ["assigner", "permission[0].odrl:assignee"]);
+        let j: Value = serde_json::from_str(&removed_json(&s.removed)).unwrap();
+        assert_eq!(
+            j[1],
+            json!({"path":"permission[0].odrl:assignee","key":"odrl:assignee","limit":"ruleAssignee"})
+        );
+    }
+
+    #[test]
+    fn strip_and_reject_leave_a_document_in_scope_alone() {
+        let in_scope = r#"{"@type":"Set","permission":[{"action":"use"}]}"#;
+        for mode in [Scope::Strip, Scope::Reject] {
+            let s = apply_scope(in_scope, &no_parties(), mode).unwrap();
+            assert_eq!(s.text, in_scope);
+            assert!(s.removed.is_empty());
+        }
+    }
+
+    #[test]
+    fn reject_names_the_offending_paths() {
+        let e = apply_scope(PARTIES, &no_parties(), Scope::Reject).unwrap_err();
+        assert_eq!(e.paths, ["assigner", "permission[0].odrl:assignee"]);
+        assert!(e.message.contains("assigner"), "{}", e.message);
+        assert!(
+            e.message.contains("permission[0].odrl:assignee"),
+            "{}",
+            e.message
+        );
+        assert!(e.message.contains("ruleAssignee"), "{}", e.message);
+    }
+
+    #[test]
+    fn unreadable_text_passes_through_for_the_reader_to_refuse() {
+        for mode in [Scope::Strip, Scope::Reject] {
+            let s = apply_scope("not json", &no_parties(), mode).unwrap();
+            assert_eq!(s.text, "not json");
+        }
     }
 }

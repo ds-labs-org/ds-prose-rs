@@ -1010,16 +1010,13 @@ impl Rend<'_> {
         }
         let cfg = self.cfg();
         let add = if self.edit {
-            let logical = if cfg.rules.allow_logical {
-                self.add_button(
-                    &cl.list,
-                    cl.items.len(),
-                    NewItem::Logical(LogicalOp::And),
-                    None,
-                )
-            } else {
-                Html::default()
-            };
+            let group = NewItem::Logical(LogicalOp::And);
+            let logical =
+                if cfg.rules.allow_logical && cfg.rules.can_add_item(self.doc, &cl.list, group) {
+                    self.add_button(&cl.list, cl.items.len(), group, None)
+                } else {
+                    Html::default()
+                };
             html! {
                 <div class={cls!(cfg, add_bar, "prose-add-bar")} style={cfg.styles.add_bar.clone()}>
                     { self.add_button(&cl.list, cl.items.len(), NewItem::Default, None) }
@@ -1058,7 +1055,10 @@ impl Rend<'_> {
         let condition_style = merge_styles(&styles);
         let expect = c.node;
         let has_next = c.index + 1 < cl.items.len();
+        // Ungrouping stays possible at any depth; grouping has to fit the
+        // depth limit.
         let wrap = if self.edit && cfg.rules.allow_logical && c.locked.is_none() {
+            let can_wrap = cfg.rules.can_wrap(self.doc, &c.path);
             let l = &cfg.labels;
             let owner = l.describe(&c.path.parent().unwrap_or_else(|| c.path.clone()));
             let noun = l.nouns.condition.to_string();
@@ -1080,9 +1080,11 @@ impl Rend<'_> {
             let can_unwrap = c.children.as_ref().is_some_and(|k| k.items.len() == 1);
             html! {
                 <>
-                    { wrap_btn(&name(&l.wrap), &l.wrap_text, EditEvent::Wrap {
-                        constraint: c.path.clone(), expect, op: LogicalOp::And,
-                    }) }
+                    if can_wrap {
+                        { wrap_btn(&name(&l.wrap), &l.wrap_text, EditEvent::Wrap {
+                            constraint: c.path.clone(), expect, op: LogicalOp::And,
+                        }) }
+                    }
                     if can_unwrap {
                         { wrap_btn(&name(&l.unwrap), &l.unwrap_text, EditEvent::Unwrap {
                             constraint: c.path.clone(), expect,

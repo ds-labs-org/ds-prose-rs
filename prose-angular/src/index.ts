@@ -4,5 +4,7 @@ export type { ProseWasmModule } from './wasm-runtime';
 export { ProseValidatorService } from './validator.service';
 export type { ProfileSummary } from './profile-sync';
 export { reportChanged } from './validation-sync';
+export { DATASPACE_PRESET } from './editor-sync';
+export type { Preset } from './editor-sync';
 export type { ReportLike } from './validation-sync';
-export type { EditLimits, Finding, RuleId, RuleInfo, TermInput, ValidateOptions, ValidationReport, Verdict } from '@ds-labs/prose-wasm';
+export type { EditLimits, Finding, OutOfScopeMode, RemovedSection, RuleId, RuleInfo, TermInput, ValidateOptions, ValidationReport, Verdict } from '@ds-labs/prose-wasm';

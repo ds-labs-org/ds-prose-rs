@@ -170,7 +170,13 @@ impl Options {
         match self.mode {
             Mode::Advisory => info.advisory,
             Mode::Strict => {
-                if info.tier == Tier::Odrl && !self.structural {
+                // `odrl.constraint-incomplete` is the one structural rule that
+                // is on in strict mode alone: a half-written constraint is
+                // not a catalog offer missing its assigner.
+                if info.tier == Tier::Odrl
+                    && !self.structural
+                    && rule != RuleId::OdrlConstraintIncomplete
+                {
                     return Level::Off;
                 }
                 match rule {

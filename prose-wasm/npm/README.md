@@ -63,6 +63,18 @@ the term slots (action, left operand, policy type, and a unit or right
 operand the profile lists entries for) into dropdowns of the loaded
 profiles' terms; `'free'`, the default, keeps typed text with suggestions. A
 stored value outside the list stays selected and flagged.
+`setOutOfScope('show' | 'strip' | 'reject')` makes the limits the scope of the
+document: with `'strip'`, a section in a list limited to `max: 0` (the
+assigner of a policy definition, in the bare, prefixed or full-IRI spelling of
+its key) is dropped when a document is loaded or the limits change, and
+`removed()` returns what went as JSON text (`[{ path, key, limit }]`); with
+`'reject'`, `update` and `setLimits` throw an `OutOfScopeError` whose `paths`
+name the sections. `'show'`, the default, keeps them.
+`setRefuseTerms(true)` makes the editor refuse, under validation, an edit that
+writes a term the loaded profiles do not define into a vocabulary slot, rather
+than commit and flag it. `setLimits({ logicalDepth: { max: 2 } })` caps how
+deep `and`/`or`/`xone` groups nest: the buttons that would go deeper are
+hidden and the editor refuses the edit; a document already deeper is kept.
 
 ## Documentation
 

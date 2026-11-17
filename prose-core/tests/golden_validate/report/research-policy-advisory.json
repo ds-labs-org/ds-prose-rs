@@ -10,7 +10,7 @@
     "prose",
     "input"
   ],
-  "ruleset": 1,
+  "ruleset": 2,
   "verdict": "conforms",
   "vocabulary": {
     "odrl": "common",

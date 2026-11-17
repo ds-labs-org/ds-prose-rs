@@ -251,6 +251,9 @@ struct Checker<'a> {
     /// imported or nested), which may bind any prefix or term: no policy's
     /// terms read as they would in JSON-LD for certain.
     context_unread: bool,
+    /// The reader skipped ODRL property keys (see `Checker::unread_keys`): a
+    /// constraint that looks bare may hold its parts under them.
+    keys_unread: bool,
     /// Per policy: on an inheritance cycle within the document. Empty when
     /// the structural tier is off.
     cycles: Vec<bool>,
@@ -564,6 +567,7 @@ impl<'a> Checker<'a> {
             cur: None,
             unsure: false,
             context_unread: false,
+            keys_unread: !doc.unread.is_empty(),
             cycles: Vec::new(),
             remote: Vec::new(),
             inherited: Vec::new(),
@@ -1353,10 +1357,15 @@ impl<'a> Checker<'a> {
 
     /// An atomic constraint's shape (IM 2.5.1).
     fn constraint_structure(&mut self, path: &NodePath, a: &AtomicConstraint) {
-        if self.options.level_of(RuleId::OdrlConstraintShape, false) == Level::Off
+        let shape = self.options.level_of(RuleId::OdrlConstraintShape, false) != Level::Off;
+        if !shape
             && self
                 .options
                 .level_of(RuleId::OdrlSetOperatorCardinality, false)
+                == Level::Off
+            && self
+                .options
+                .level_of(RuleId::OdrlConstraintIncomplete, false)
                 == Level::Off
         {
             return;
@@ -1378,11 +1387,17 @@ impl<'a> Checker<'a> {
         } else if a.right == RightOperand::Missing {
             missing.push("no right operand");
         }
-        if !missing.is_empty() {
+        // A part that is missing is `odrl.constraint-shape`'s when that rule
+        // is on; the constraint is not reported twice.
+        let said = shape && !missing.is_empty();
+        if said {
             let msg = format!("this constraint has {}", missing.join(" and "));
             if let Some(f) = self.emit(RuleId::OdrlConstraintShape, false, node(), msg) {
                 f.node = Some(a.id);
             }
+        }
+        if !said {
+            self.unfinished(path, a);
         }
         if let RightOperand::Values(values) = &a.right
             && values.len() > 1
@@ -1403,6 +1418,56 @@ impl<'a> Checker<'a> {
                     f.node = Some(a.id);
                 }
             }
+        }
+    }
+
+    /// A constraint left unfinished: no left operand, no operator, no right
+    /// operand, or a right operand that is an empty string.
+    fn unfinished(&mut self, path: &NodePath, a: &AtomicConstraint) {
+        if self.keys_unread
+            || self
+                .options
+                .level_of(RuleId::OdrlConstraintIncomplete, false)
+                == Level::Off
+        {
+            return;
+        }
+        let blank = |s: &str| s.trim().is_empty();
+        let mut lacks: Vec<&str> = Vec::new();
+        if blank(&a.left) {
+            lacks.push("no left operand");
+        }
+        if blank(&a.operator) {
+            lacks.push("no operator");
+        }
+        match &a.right {
+            RightOperand::Missing => lacks.push("no right operand"),
+            RightOperand::Reference(r) if blank(r) => lacks.push("no right operand"),
+            RightOperand::Values(v) if v.is_empty() => lacks.push("no right operand"),
+            RightOperand::Values(v)
+                if v.iter().any(|l| matches!(l, Literal::Str(s) if blank(s))) =>
+            {
+                lacks.push("an empty right operand");
+            }
+            _ => {}
+        }
+        if lacks.is_empty() {
+            return;
+        }
+        let last = lacks.pop().unwrap_or_default();
+        let what = if lacks.is_empty() {
+            last.to_string()
+        } else {
+            format!("{} and {last}", lacks.join(", "))
+        };
+        let msg = format!("this constraint is not finished: it has {what}");
+        if let Some(f) = self.emit(
+            RuleId::OdrlConstraintIncomplete,
+            false,
+            IssueTarget::Node(path.clone()),
+            msg,
+        ) {
+            f.node = Some(a.id);
         }
     }
 
@@ -1498,6 +1563,84 @@ impl<'a> Checker<'a> {
             self.term(&path, a.id, Field::Name, &a.name, Pos::Action);
             self.constraints(&path, Step::Refinement, &a.refinement);
         }
+        self.duplicate_actions(owner, actions);
+    }
+
+    /// An action listed again in the same rule (or policy), in any
+    /// spelling of the same IRI.
+    fn duplicate_actions(&mut self, owner: &NodePath, actions: &[ActionNode]) {
+        if self
+            .options
+            .level_of(RuleId::HeuristicDuplicateAction, false)
+            == Level::Off
+        {
+            return;
+        }
+        let mut seen: HashSet<String> = HashSet::new();
+        for (i, a) in actions.iter().enumerate() {
+            if a.locked.is_some() || a.name.is_empty() {
+                continue;
+            }
+            if seen.insert(self.expand(&a.name)) {
+                continue;
+            }
+            let msg = format!("the action \"{}\" is listed twice in this rule", a.name);
+            let list = ListPath::of(owner, ListKind::Actions);
+            let remove = EditEvent::Remove {
+                list,
+                index: i,
+                expect: a.id,
+            };
+            let path = owner.child(Step::Action(i));
+            if let Some(f) = self.emit_term(
+                RuleId::HeuristicDuplicateAction,
+                false,
+                &path,
+                a.id,
+                Field::Name,
+                &a.name,
+                msg,
+            ) {
+                f.fixes.push(Fix {
+                    label: "Remove the duplicate".into(),
+                    safe: true,
+                    replacement: String::new(),
+                    events: vec![remove],
+                });
+            }
+        }
+    }
+
+    /// An `and`, `or` or `xone` group around one condition.
+    fn single_child_group(&mut self, path: &NodePath, l: &LogicalConstraint) {
+        if l.children.len() != 1
+            || self
+                .options
+                .level_of(RuleId::HeuristicSingleChildGroup, false)
+                == Level::Off
+        {
+            return;
+        }
+        let op = l.op.as_str();
+        let msg = format!("this \"{op}\" group holds one condition; the group adds nothing");
+        let unwrap = EditEvent::Unwrap {
+            constraint: path.clone(),
+            expect: l.id,
+        };
+        if let Some(f) = self.emit(
+            RuleId::HeuristicSingleChildGroup,
+            false,
+            IssueTarget::Node(path.clone()),
+            msg,
+        ) {
+            f.node = Some(l.id);
+            f.fixes.push(Fix {
+                label: "Ungroup".into(),
+                safe: true,
+                replacement: String::new(),
+                events: vec![unwrap],
+            });
+        }
     }
 
     fn constraints(&mut self, owner: &NodePath, step: fn(usize) -> Step, list: &[ConstraintNode]) {
@@ -1505,7 +1648,10 @@ impl<'a> Checker<'a> {
             let path = owner.child(step(i));
             match c {
                 ConstraintNode::Atomic(a) => self.atomic(&path, a),
-                ConstraintNode::Logical(l) => self.constraints(&path, Step::Child, &l.children),
+                ConstraintNode::Logical(l) => {
+                    self.single_child_group(&path, l);
+                    self.constraints(&path, Step::Child, &l.children);
+                }
                 ConstraintNode::Reference { id, iri, .. } => {
                     let msg = format!(
                         "the constraint <{iri}> is only referenced, so it could not be checked"

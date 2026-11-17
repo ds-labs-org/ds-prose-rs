@@ -117,7 +117,11 @@ emitted text. The editor reads and writes the bare keys of ODRL JSON-LD
 | `articleClass`, `profile`, `profiles`, `strict`, `validation` | inputs | as for `ds-odrl-prose`; with validation on, the editor shows inline markers and a problems panel with fix buttons |
 | `limits` | input | how many items each list may hold, by name (`{ min?, max? }`); a given entry replaces the default for that list |
 | `termInput` | input | `'free'` (the default) or `'select'`: the term slots (action, left operand, policy type, and a unit or right operand of a left operand the profile closes) become dropdowns of the loaded profiles' terms |
+| `refuseTerms` | input | `true`: under validation, an edit that writes a term the loaded profiles do not define is refused instead of committed and flagged (default `false`, or the preset's) |
+| `preset` | input | `'dataspace'` sets strict and structural validation, `termInput` `'select'`, `refuseTerms`, `limits` of `{ logicalDepth: { max: 2 } }` and the lints `heuristic.single-child-group` and `heuristic.duplicate-action` as warnings; each of `strict`, `validation`, `termInput`, `refuseTerms` and `limits` you set yourself wins |
+| `outOfScope` | input | `'show'` (the default), `'strip'` or `'reject'`: what to do with a section whose limit is `max: 0` (say the assigner and assignee of a policy definition) when `json` holds one, in any spelling of its key. `'strip'` drops it and `outOfScopeRemoved` emits what went; `'reject'` fails the load through `jsonError` with the offending `paths` |
 | `jsonChange` | output | the JSON-LD text after each committed edit |
+| `outOfScopeRemoved` | output | the `{ path, key, limit }` of each section `'strip'` dropped |
 | `jsonError`, `loadFailed`, `profileLoaded`, `profileError`, `validationChange`, `validationError` | outputs | as for `ds-odrl-prose` (`jsonError`: the `json` input is not a readable policy) |
 | `report` | signal | the latest validation report, or `null` |
 

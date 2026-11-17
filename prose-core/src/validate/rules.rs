@@ -67,6 +67,7 @@ pub enum RuleId {
     OdrlSetOperatorCardinality,
     OdrlConsequenceNesting,
     OdrlInheritanceCycle,
+    OdrlConstraintIncomplete,
     ProseOperatorNotAllowed,
     ProseValueNotAllowed,
     ProseIriExpected,
@@ -78,6 +79,8 @@ pub enum RuleId {
     InputUnchecked,
     InputReaderNote,
     HeuristicOrderedOnUnordered,
+    HeuristicSingleChildGroup,
+    HeuristicDuplicateAction,
 }
 
 impl RuleId {
@@ -154,6 +157,12 @@ pub struct RuleInfo {
 }
 
 impl RuleInfo {
+    /// The same row, first in ruleset `n`.
+    const fn since(mut self, n: u32) -> RuleInfo {
+        self.since_ruleset = n;
+        self
+    }
+
     #[allow(clippy::too_many_arguments)]
     const fn new(
         id: RuleId,
@@ -184,7 +193,9 @@ impl RuleInfo {
 }
 
 /// The ruleset this build implements.
-pub const RULESET: u32 = 1;
+/// Ruleset 2 added `odrl.constraint-incomplete`,
+/// `heuristic.single-child-group` and `heuristic.duplicate-action`.
+pub const RULESET: u32 = 2;
 
 use Level::*;
 
@@ -473,6 +484,20 @@ pub static RULES: &[RuleInfo] = &[
         refusable = false
     ),
     rule!(
+        OdrlConstraintIncomplete,
+        "odrl.constraint-incomplete",
+        Odrl,
+        Standard,
+        "ODRL IM 2.5.1",
+        "A constraint left unfinished: no left operand, no operator, or no right operand (an empty value counts)",
+        Off,
+        Error,
+        None,
+        gap = false,
+        refusable = false
+    )
+    .since(2),
+    rule!(
         ProseOperatorNotAllowed,
         "prose.operator-not-allowed",
         Prose,
@@ -615,4 +640,32 @@ pub static RULES: &[RuleInfo] = &[
         gap = false,
         refusable = false
     ),
+    rule!(
+        HeuristicSingleChildGroup,
+        "heuristic.single-child-group",
+        Heuristic,
+        Heuristic,
+        "none: the ODRL IM allows a logical constraint with one operand",
+        "An and, or or xone group that holds one condition",
+        Off,
+        Off,
+        None,
+        gap = false,
+        refusable = false
+    )
+    .since(2),
+    rule!(
+        HeuristicDuplicateAction,
+        "heuristic.duplicate-action",
+        Heuristic,
+        Heuristic,
+        "none: the ODRL IM states no requirement here",
+        "The same action listed twice in one rule",
+        Off,
+        Off,
+        None,
+        gap = false,
+        refusable = false
+    )
+    .since(2),
 ];

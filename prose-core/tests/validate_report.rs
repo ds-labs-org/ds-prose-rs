@@ -58,8 +58,8 @@ fn report_json_shape() {
             "schema": "ds-prose/validation-report@1",
             "tool": {"name": "ds-prose-rs", "version": "<version>"},
             "mode": "strict",
-            "tiers": ["profile", "prose", "input"],
-            "ruleset": 1,
+            "tiers": ["profile", "odrl", "prose", "input"],
+            "ruleset": 2,
             "verdict": "violations",
             "vocabulary": {
                 "odrl": "common",
