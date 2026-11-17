@@ -153,14 +153,14 @@ pub(crate) struct SlotEditorProps {
 const PROBE: &str = "https://ds-prose.invalid/not-a-term";
 
 /// The validator of a strict configuration.
-fn strict(env: &Env) -> Option<&Validator> {
+pub(crate) fn strict(env: &Env) -> Option<&Validator> {
     env.cfg
         .validator
         .as_ref()
         .filter(|v| v.options().mode() == Mode::Strict)
 }
 
-fn set_text(slot: &Slot, value: &str) -> EditEvent {
+pub(crate) fn set_text(slot: &Slot, value: &str) -> EditEvent {
     EditEvent::SetText {
         slot: slot.path.clone(),
         expect: slot.owner,
@@ -170,7 +170,7 @@ fn set_text(slot: &Slot, value: &str) -> EditEvent {
 
 /// How strict validation closes a slot.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Closure {
+pub(crate) enum Closure {
     /// The validator refuses a term outside the vocabulary.
     Terms,
     /// The left operand is closed to the values the profile lists.
@@ -242,7 +242,7 @@ fn closure_at_commit(env: &Env, slot: &Slot) -> Option<Closure> {
 
 /// What a closed slot offers: the entries the validator would take. Asks it
 /// about all of them in one call, which reads the document once.
-fn allowed_options(
+pub(crate) fn allowed_options(
     env: &Env,
     slot: &Slot,
     closure: Closure,
@@ -324,7 +324,7 @@ fn outside(env: &Env, slot: &Slot, closure: Closure, options: &[Suggestion]) -> 
 
 /// The suggestions for a slot, and the depth of each nested one (a value
 /// under a broader suggested value), by value.
-fn options_for(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<AttrValue, usize>) {
+pub(crate) fn options_for(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<AttrValue, usize>) {
     let v = &env.cfg.vocab;
     // A profile term is listed by its full IRI and written as the policy's
     // prefixes allow.
@@ -374,7 +374,7 @@ fn options_for(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<AttrValue, u
 }
 
 /// The loaded term the slot's constraint names as its left operand.
-fn left_operand_term<'e>(env: &'e Env, slot: &Slot) -> Option<&'e Term> {
+pub(crate) fn left_operand_term<'e>(env: &'e Env, slot: &Slot) -> Option<&'e Term> {
     let w = &env.cfg.wording;
     if w.is_empty() {
         return None;
@@ -385,7 +385,7 @@ fn left_operand_term<'e>(env: &'e Env, slot: &Slot) -> Option<&'e Term> {
 
 /// A suggestion for the IRI `iri`: the loaded term's label and definition
 /// when a profile declares it.
-fn profile_suggestion(env: &Env, iri: &str, group: Option<&AttrValue>) -> Suggestion {
+pub(crate) fn profile_suggestion(env: &Env, iri: &str, group: Option<&AttrValue>) -> Suggestion {
     let w = &env.cfg.wording;
     let term = w.lookup(iri).map(|(t, _)| t);
     let label = match term {
@@ -449,7 +449,7 @@ fn profile_values(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<AttrValue
 }
 
 /// Whether the right operand value at `path` is an IRI reference.
-fn holds_iri(doc: &EditDoc, path: &SlotPath) -> bool {
+pub(crate) fn holds_iri(doc: &EditDoc, path: &SlotPath) -> bool {
     let Field::RightOperand(k) = path.field else {
         return false;
     };
@@ -461,7 +461,7 @@ fn holds_iri(doc: &EditDoc, path: &SlotPath) -> bool {
     }
 }
 
-fn placeholder(env: &Env, slot: &Slot) -> AttrValue {
+pub(crate) fn placeholder(env: &Env, slot: &Slot) -> AttrValue {
     if slot.kind == SlotKind::Literal
         && let Some(dt) = left_operand_term(env, slot).and_then(|t| t.hints.datatype.as_deref())
         && let Some((_, p)) = env

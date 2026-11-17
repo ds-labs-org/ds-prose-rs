@@ -62,6 +62,7 @@ The declared type is writable, because the source declares `readonly report = si
 | `limits` | `EditLimits \| null` | `null` | How many items each list may hold, by list name; a given entry replaces that list's default (`min` 0, `max` unbounded). `{ policyAssigner: { max: 0 } }` removes the assigner button. Unreadable limits are logged and the previous ones stay. |
 | `strict` | `boolean` | `false` | Validate with a closed vocabulary: ODRL plus the loaded profiles. |
 | `validation` | `ValidateOptions \| null` | `null` | The full validation options. They win over `strict`. While validation is on, the editor marks issues inline and shows a problems panel with fix buttons; edits are flagged, never refused. |
+| `termInput` | `TermInput` | `'free'` | `'select'` turns the term slots into dropdowns of the terms the loaded profiles define: the action, the left operand and the policy type always, a unit or a right operand only when the profile closes the left operand (`prose:closed`) and lists units or values for it. Other values, such as dates and numbers, stay free text. Options show the profile label, grouped by profile; with strict validation only what it takes is listed. Deprecated terms are listed last, or hidden when `denyDeprecated` makes them an error. A stored value outside the list stays selected and is flagged with `data-outside="true"`. `'free'` keeps typed text with suggestions. |
 
 ## Editor outputs
 
@@ -148,6 +149,7 @@ The package exports exactly these names from its entry point. Nothing else is pu
 | `RuleId` | type | A frozen rule id, from `@ds-labs/prose-wasm`. |
 | `RuleInfo` | type | One entry of the rule catalogue, from `@ds-labs/prose-wasm`. |
 | `EditLimits` | type | The `limits` input of the editor, from `@ds-labs/prose-wasm`. |
+| `TermInput` | type | The `termInput` input of the editor, `"free"` or `"select"`, from `@ds-labs/prose-wasm`. |
 | `ValidateOptions` | type | The validation options, from `@ds-labs/prose-wasm`. |
 | `ValidationReport` | type | The report, from `@ds-labs/prose-wasm`. |
 | `Verdict` | type | `"conforms"`, `"violations"` or `"incomplete"`. |

@@ -24,6 +24,10 @@ function fake(bad = new Set()) {
       setProfiles: (t) => (calls.push(['setProfiles', t]), '[]'),
       setLimits: (l) => calls.push(['setLimits', l]),
       setValidation: (o) => calls.push(['setValidation', o]),
+      setTermInput: (m) => {
+        calls.push(['setTermInput', m]);
+        if (m !== 'free' && m !== 'select') throw new Error(`termInput ${m}`);
+      },
       report: () => (calls.push(['report']), null),
       destroy: () => calls.push(['destroy']),
       free: () => calls.push(['free']),
@@ -146,4 +150,40 @@ test('destroy releases the handle once; a destroy before the apply mounts nothin
   late.destroy(); // the component went away while the wasm was loading
   assert.equal(late.apply(inputs(), g.mount), null);
   assert.equal(g.made.length, 0);
+});
+
+test('termInput: free (the default) is never handed over; select is, once, and back to free', () => {
+  const s = new EditorSession();
+  const f = fake();
+  s.apply(inputs(), f.mount);
+  s.apply(inputs({ termInput: 'free' }), f.mount);
+  assert.ok(!names(f.calls).includes('setTermInput'), 'the default changes nothing');
+  f.calls.length = 0;
+  s.apply(inputs({ termInput: 'select' }), f.mount);
+  s.apply(inputs({ termInput: 'select' }), f.mount);
+  assert.deepEqual(f.calls.filter((c) => c[0] === 'setTermInput'), [['setTermInput', 'select']]);
+  f.calls.length = 0;
+  s.apply(inputs(), f.mount);
+  assert.deepEqual(f.calls.filter((c) => c[0] === 'setTermInput'), [['setTermInput', 'free']]);
+});
+
+test('termInput: a mode the handle refuses keeps the previous one and is tried again', () => {
+  const s = new EditorSession();
+  const f = fake();
+  const error = console.error;
+  console.error = () => {};
+  try {
+    s.apply(inputs({ termInput: 'select' }), f.mount);
+    f.calls.length = 0;
+    const out = s.apply(inputs({ termInput: 'dropdown' }), f.mount);
+    assert.equal(out.validationError, undefined);
+    f.calls.length = 0;
+    s.apply(inputs({ termInput: 'dropdown' }), f.mount);
+    assert.deepEqual(f.calls.filter((c) => c[0] === 'setTermInput'), [['setTermInput', 'dropdown']]);
+    f.calls.length = 0;
+    s.apply(inputs({ termInput: 'select' }), f.mount);
+    assert.ok(!names(f.calls).includes('setTermInput'), 'select is still the mode');
+  } finally {
+    console.error = error;
+  }
 });

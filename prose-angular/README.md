@@ -116,6 +116,7 @@ emitted text. The editor reads and writes the bare keys of ODRL JSON-LD
 | `json` | input, required | the ODRL policy as JSON-LD text; unreadable text emits `jsonError` |
 | `articleClass`, `profile`, `profiles`, `strict`, `validation` | inputs | as for `ds-odrl-prose`; with validation on, the editor shows inline markers and a problems panel with fix buttons |
 | `limits` | input | how many items each list may hold, by name (`{ min?, max? }`); a given entry replaces the default for that list |
+| `termInput` | input | `'free'` (the default) or `'select'`: the term slots (action, left operand, policy type, and a unit or right operand of a left operand the profile closes) become dropdowns of the loaded profiles' terms |
 | `jsonChange` | output | the JSON-LD text after each committed edit |
 | `jsonError`, `loadFailed`, `profileLoaded`, `profileError`, `validationChange`, `validationError` | outputs | as for `ds-odrl-prose` (`jsonError`: the `json` input is not a readable policy) |
 | `report` | signal | the latest validation report, or `null` |

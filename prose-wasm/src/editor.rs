@@ -12,7 +12,7 @@ use prose_yew::prose_core::edit::{
 use prose_yew::prose_core::profile::Wording;
 use prose_yew::prose_core::validate::{Options, Report, Validator};
 use prose_yew::{
-    EditConfig, EditMode, OdrlProseView, ProseProblems, SharedWording, go_to,
+    EditConfig, EditMode, OdrlProseView, ProseProblems, SharedWording, TermInput, go_to,
     use_prose_editor_with, use_validation,
 };
 use serde_json::{Map, Value};
@@ -299,7 +299,19 @@ pub struct ProseEditorHandle {
     wording: Option<SharedWording>,
     options: Option<Options>,
     limits: Option<Value>,
+    term_input: TermInput,
     config: Rc<EditConfig>,
+}
+
+/// `TermInput` by its `setTermInput` name.
+pub(crate) fn term_input_of(name: &str) -> Result<TermInput, String> {
+    match name {
+        "free" => Ok(TermInput::Free),
+        "select" => Ok(TermInput::Select),
+        other => Err(format!(
+            "termInput must be \"free\" or \"select\", not {other:?}"
+        )),
+    }
 }
 
 impl Drop for ProseEditorHandle {
@@ -361,6 +373,7 @@ impl ProseEditorHandle {
             wording: None,
             options: None,
             limits: None,
+            term_input: TermInput::Free,
             config,
         };
         h.app = Some(yew::Renderer::<EditorHost>::with_root_and_props(root, h.props()).render());
@@ -466,6 +479,29 @@ impl ProseEditorHandle {
         Ok(())
     }
 
+    /// How the term slots take their value: `"free"` (the default) is
+    /// typed text with suggestions; `"select"` is a `<select>` of the terms
+    /// the loaded profiles (and the ODRL core vocabulary) define, filtered
+    /// by strict validation when it is on. A unit or a right operand is a
+    /// select only when the profile lists units or values for its left
+    /// operand. A stored value outside the list stays, selected and
+    /// flagged. Throws on any other name; the previous mode stays.
+    #[wasm_bindgen(js_name = setTermInput)]
+    pub fn set_term_input(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "TermInput")] mode: &str,
+    ) -> Result<(), JsError> {
+        let mode = term_input_of(mode).map_err(throw)?;
+        if mode != self.term_input {
+            self.term_input = mode;
+            let mut config = (*self.config).clone();
+            config.term_input = mode;
+            self.install(config);
+            self.render();
+        }
+        Ok(())
+    }
+
     /// The validation report for the current text, as JSON text, or `null`
     /// while validation is off.
     #[wasm_bindgen(unchecked_return_type = "string | null")]
@@ -517,7 +553,8 @@ impl ProseEditorHandle {
         }
     }
 
-    fn install(&mut self, config: EditConfig) {
+    fn install(&mut self, mut config: EditConfig) {
+        config.term_input = self.term_input;
         self.shared.borrow_mut().validator = config.validator.clone();
         self.config = Rc::new(config);
     }

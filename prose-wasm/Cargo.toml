@@ -34,7 +34,7 @@ wasm-bindgen-test = "0.3"
 gloo-timers = { version = "0.3", features = ["futures"] }
 web-sys = { version = "0.3", features = [
     "Document", "Window", "HtmlElement", "Event", "FocusEvent", "FocusEventInit", "InputEvent",
-    "InputEventInit",
+    "InputEventInit", "EventInit", "HtmlSelectElement", "DomTokenList",
 ] }
 
 [package.metadata.wasm-pack.profile.release]

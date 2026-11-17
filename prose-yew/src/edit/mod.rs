@@ -12,7 +12,7 @@
 //! `prose-reveal-hover`, `prose-policy`, `prose-heading-row`, `prose-heading`, `prose-intro`,
 //! `prose-notes`, `prose-rules`, `prose-rule` with `prose-permission` /
 //! `prose-prohibition` / `prose-obligation`, `prose-rule-sentence`,
-//! `prose-term`, `prose-slot` (`-empty`, `-invalid`, `-warning`,
+//! `prose-term`, `prose-term-select` (with `TermInput::Select`), `prose-slot` (`-empty`, `-invalid`, `-warning`,
 //! `-whitespace`), `prose-inherited`, `prose-select`, `prose-list`,
 //! `prose-item`, `prose-add`, `prose-remove`, `prose-reorder`, `prose-wrap`,
 //! `prose-toolbar`, `prose-add-bar`, `prose-label`, `prose-conditions`,
@@ -45,6 +45,7 @@ mod hook;
 mod problems;
 mod slot;
 mod suggest;
+mod term_select;
 pub(crate) mod view;
 
 use std::rc::Rc;
@@ -53,7 +54,7 @@ use yew::prelude::*;
 pub(crate) use config::usage_line;
 pub use config::{
     ButtonContent, Choice, EditConfig, EmptyTexts, FieldNames, Labels, Nouns, Placeholders,
-    ProseClasses, ProseStyles, Reveal, Suggestion, Vocabulary, fill,
+    ProseClasses, ProseStyles, Reveal, Suggestion, TermInput, Vocabulary, fill,
 };
 pub use css::BASE_CSS;
 pub use hook::{

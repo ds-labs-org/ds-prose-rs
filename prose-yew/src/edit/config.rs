@@ -527,6 +527,9 @@ pub struct Labels {
     /// Strict validation. The note under a field whose value the profile
     /// does not allow.
     pub not_in_profile: AttrValue,
+    /// `TermInput::Select` with no profile loaded: the note under a select
+    /// whose value is none of its options.
+    pub not_in_list: AttrValue,
     /// Announced when a closed field is left with text it does not take and
     /// goes back to its value: `{kept}` is that value, `{typed}` the text.
     pub kept_previous: AttrValue,
@@ -620,6 +623,7 @@ impl Default for Labels {
             .map(|(t, p)| (a(&format!("{XSD}{t}")), a(p)))
             .collect(),
             not_in_profile: a("(not in the profile)"),
+            not_in_list: a("(not in the list)"),
             kept_previous: a("Kept \"{kept}\"; \"{typed}\" is not in the profile"),
             kept_empty: a("\"{typed}\" is not in the profile; the field stays empty"),
             allowed_group: a("Allowed by the profile"),
@@ -871,6 +875,23 @@ class_fields!(
     empty
 );
 
+/// How the editor's term slots (action, left operand, policy type, unit,
+/// and a right operand whose left operand the profile gives values for)
+/// take their value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TermInput {
+    /// Typed text, with the vocabulary as suggestions; a term no profile
+    /// defines is reported by validation afterwards.
+    #[default]
+    Free,
+    /// A `<select>` of the terms: the vocabulary's (with the loaded
+    /// profiles' terms, grouped by profile), filtered by strict validation
+    /// when it is on. A unit or a right operand stays free text when the
+    /// profile lists no units or values for its left operand. A stored
+    /// value outside the list is kept, selected and flagged.
+    Select,
+}
+
 /// The whole configuration of an editing view.
 #[derive(Clone, PartialEq)]
 pub struct EditConfig {
@@ -895,6 +916,10 @@ pub struct EditConfig {
     /// the operator select offers every operator. Off: only the switches the
     /// reducer accepts as they are.
     pub host_plans_operator_switches: bool,
+    /// How the term slots take their value: typed text with suggestions
+    /// (the default), or a `<select>` of the terms the vocabulary and the
+    /// loaded profiles define. See [`TermInput`].
+    pub term_input: TermInput,
     /// The loaded profiles: their labels in the sentences, their terms in
     /// the suggestions and selects. Set it with [`EditConfig::with_wording`],
     /// which also extends `vocab`.
@@ -1047,6 +1072,7 @@ impl Default for EditConfig {
             suggestions: true,
             max_suggestions: 8,
             host_plans_operator_switches: false,
+            term_input: TermInput::Free,
             wording: Rc::new(Wording::default()),
             validator: None,
         }

@@ -16,6 +16,7 @@ use super::choice::{ChoiceSelect, RuleKindSelect};
 use super::config::{ButtonContent, EditConfig, Reveal, cls, fill, merge_styles};
 use super::css::BASE_CSS;
 use super::slot::{SlotEditor, focus_end, issue_key};
+use super::term_select::{TermSelect, takes_select};
 use super::{Decoration, DecorationAt, EditMode, Env, EnvRef, SlotFocus};
 
 #[derive(Properties, PartialEq, Clone)]
@@ -734,6 +735,16 @@ impl Rend<'_> {
             .then(|| s.display.strip_suffix(s.raw.as_str()))
             .flatten()
             .filter(|p| !p.is_empty());
+        if takes_select(&self.env, s) {
+            return html! {
+                <TermSelect
+                    slot={s.clone()}
+                    env={EnvRef(self.env.clone())}
+                    severity={self.severity(&key)}
+                    described_by={self.issue_ids(&key)}
+                />
+            };
+        }
         html! {
             <>
                 if let Some(p) = prefix { { p.to_string() } }

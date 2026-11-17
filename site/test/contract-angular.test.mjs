@@ -61,7 +61,7 @@ test('the report signal: documented with its declared type, initial value, and t
 
 test('editor inputs: the table lists exactly the input() members of the editor, with type and default', () => {
   const inputs = members('input', EDITOR);
-  assert.equal(inputs.length, 7);
+  assert.equal(inputs.length, 8);
   const rows = tableRows(sec('Editor inputs'));
   assert.deepEqual(rows.map((r) => tick(col(r, 0))).sort(), inputs.map((i) => i.name).sort());
   for (const i of inputs) {

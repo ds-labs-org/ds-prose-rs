@@ -5,4 +5,4 @@ export { ProseValidatorService } from './validator.service';
 export type { ProfileSummary } from './profile-sync';
 export { reportChanged } from './validation-sync';
 export type { ReportLike } from './validation-sync';
-export type { EditLimits, Finding, RuleId, RuleInfo, ValidateOptions, ValidationReport, Verdict } from '@ds-labs/prose-wasm';
+export type { EditLimits, Finding, RuleId, RuleInfo, TermInput, ValidateOptions, ValidationReport, Verdict } from '@ds-labs/prose-wasm';

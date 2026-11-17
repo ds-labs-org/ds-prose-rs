@@ -157,6 +157,7 @@ The whole configuration of an editing view. It is `Clone`, `PartialEq` and `Defa
 | `suggestions` | `bool` | `true` | A suggestion list while typing in a free-text slot. Off, a slot is a plain textbox. |
 | `max_suggestions` | `usize` | `8` | The cap of the suggestion list. |
 | `host_plans_operator_switches` | `bool` | `false` | The host translates an operator switch the reducer would refuse, so the select offers every operator. Off, it offers only the switches the reducer accepts. |
+| `term_input` | `TermInput` | `TermInput::Free` | How the term slots take their value. `TermInput::Select` renders them as `select.prose-select.prose-term-select`; see below. |
 | `wording` | `Rc<Wording>` | `Rc::new(Wording::default())` | The loaded profiles. Set it with `with_wording`. |
 | `validator` | `Option<Validator>` | `None` | Set it with `with_strict`. `None` validates nothing. |
 
@@ -173,6 +174,7 @@ Choices that fix a name:
 
 - `ButtonContent::Symbol`, `ButtonContent::Text` and `ButtonContent::SymbolAndText` (the default). The accessible name of a button is always the specific label, whatever it shows.
 - `Reveal::Always` (the default) and `Reveal::OnHoverOrFocus`, which adds `prose-reveal-hover` to the root.
+- `TermInput::Free` (the default): the term slots are free text with the vocabulary as suggestions. `TermInput::Select`: the action, the left operand and the policy type are a `<select>` of `vocab`. The loaded profiles' terms come under their `group_profile` heading, the core terms under `group_core`. A unit and a right operand are a select too when the profile closes the constraint's left operand (`prose:closed`) and lists units or values for it. On an open left operand those units and values stay suggestions of a free-text slot, as does any other right operand. Strict validation lists only what it takes. Deprecated terms are listed last under `labels.deprecated`, or hidden when the validator makes them an error (`deny_deprecated`). A stored value that is none of the options stays selected as an extra first option, with `data-outside="true"` and the `not_in_profile` note (`not_in_list` with no profile loaded). A select takes the error and warning classes of a slot. Picking an option sends `SetText`, or `SetIri` for a right operand that held no IRI.
 
 ## Labels
 
@@ -234,7 +236,8 @@ Keep the visible text of a button contained in its accessible name. A change of 
 | `other_operators` | `Other operators` | Profiles and glossary |
 | `profile_values` | `Profile values(not specific to this operand)` | Profiles and glossary |
 | `datatype_placeholders` | a list of six pairs: integer, decimal, boolean, date, dateTime, duration | Profiles and glossary |
-| `not_in_profile` | `(not in the profile)` | Strict validation |
+| `not_in_profile` | `(not in the profile)` | Strict validation, and a term select whose value is none of its options |
+| `not_in_list` | `(not in the list)` | A term select whose value is none of its options, with no profile loaded |
 | `kept_previous` | `Kept "{kept}";"{typed}" is not in the profile` | Strict validation |
 | `kept_empty` | `"{typed}" is not in the profile;the field stays empty` | Strict validation |
 | `allowed_group` | `Allowed by the profile` | Strict validation |

@@ -240,7 +240,7 @@ impl Reducible for Rev {
 /// the user's pick in the element when the host refuses the edit; this puts
 /// it back without replacing the element (which would lose focus).
 #[hook]
-fn use_select_in_step(node_ref: &NodeRef, selected: String) {
+pub(crate) fn use_select_in_step(node_ref: &NodeRef, selected: String) {
     let node_ref = node_ref.clone();
     use_effect(move || {
         if let Some(select) = node_ref.cast::<web_sys::HtmlSelectElement>()
