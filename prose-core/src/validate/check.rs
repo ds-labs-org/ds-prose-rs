@@ -272,9 +272,9 @@ struct Checker<'a> {
     /// imported or nested), which may bind any prefix or term: no policy's
     /// terms read as they would in JSON-LD for certain.
     context_unread: bool,
-    /// The reader skipped ODRL property keys (see `Checker::unread_keys`): a
-    /// constraint that looks bare may hold its parts under them.
-    keys_unread: bool,
+    /// The ODRL property keys the reader skipped (see `Checker::unread_keys`):
+    /// a constraint whose own object holds one may keep its parts under it.
+    unread: HashSet<String>,
     /// Per policy: on an inheritance cycle within the document. Empty when
     /// the structural tier is off.
     cycles: Vec<bool>,
@@ -588,7 +588,7 @@ impl<'a> Checker<'a> {
             cur: None,
             unsure: false,
             context_unread: false,
-            keys_unread: !doc.unread.is_empty(),
+            unread: doc.unread.iter().cloned().collect(),
             cycles: Vec::new(),
             remote: Vec::new(),
             inherited: Vec::new(),
@@ -1498,10 +1498,40 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Whether the constraint's own object held a key the reader skipped
+    /// (see `doc.unread`): only then is it unsafe to call it unfinished.
+    fn constraint_unread(&self, a: &AtomicConstraint) -> bool {
+        if self.unread.is_empty() {
+            return false;
+        }
+        let Some(origin) = &a.origin else {
+            return false;
+        };
+        let mut stack = vec![(origin.value(), 0usize)];
+        while let Some((v, depth)) = stack.pop() {
+            if depth > 16 {
+                continue;
+            }
+            match v {
+                serde_json::Value::Array(xs) => stack.extend(xs.iter().map(|x| (x, depth + 1))),
+                serde_json::Value::Object(o) => {
+                    for (k, x) in o {
+                        if self.unread.contains(k) {
+                            return true;
+                        }
+                        stack.push((x, depth + 1));
+                    }
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
     /// A constraint left unfinished: no left operand, no operator, no right
     /// operand, or a right operand that is an empty string.
     fn unfinished(&mut self, path: &NodePath, a: &AtomicConstraint) {
-        if self.keys_unread
+        if self.constraint_unread(a)
             || self
                 .options
                 .level_of(RuleId::OdrlConstraintIncomplete, false)
@@ -1715,12 +1745,22 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        let mut seen: HashSet<String> = HashSet::new();
+        // Refinements of the actions seen so far under each name, ids and
+        // origins dropped, so that equal ones compare equal.
+        let mut seen: HashMap<String, Vec<Vec<ConstraintNode>>> = HashMap::new();
         for (i, a) in actions.iter().enumerate() {
             if a.locked.is_some() || a.name.is_empty() {
                 continue;
             }
-            if seen.insert(self.expand(&a.name)) {
+            let mut plain = a.clone();
+            crate::edit::normalize_action(&mut plain);
+            let earlier = seen.entry(self.expand(&a.name)).or_default();
+            // Only a copy with the same refinements is removable unchanged: a
+            // refined action grants or forbids less than a bare one.
+            let same = earlier.contains(&plain.refinement);
+            let first = earlier.is_empty();
+            earlier.push(plain.refinement);
+            if first {
                 continue;
             }
             let msg = format!("the action \"{}\" is listed twice in this rule", a.name);
@@ -1739,7 +1779,8 @@ impl<'a> Checker<'a> {
                 Field::Name,
                 &a.name,
                 msg,
-            ) {
+            ) && same
+            {
                 f.fixes.push(Fix {
                     label: "Remove the duplicate".into(),
                     safe: true,
@@ -2031,11 +2072,13 @@ impl<'a> Checker<'a> {
                 && matches!(l, Literal::Iri(_))
                 && self.options.mode() == Mode::Strict
                 && !host
+                && !h.values_exact
                 && self.incomplete()
             {
                 // A profile that is not loaded may add an IRI narrower than
                 // an allowed one: not a violation until it is read. It
-                // cannot add a literal, so a literal stays an error.
+                // cannot add a literal, so a literal stays an error, nor
+                // widen an exact list (an overlay's, a shape's `sh:in`).
                 continue;
             }
             let msg = format!(
@@ -2069,7 +2112,7 @@ impl<'a> Checker<'a> {
         let pattern = h
             .pattern
             .as_deref()
-            .and_then(|p| Pattern::new(p, &h.pattern_flags).ok());
+            .and_then(|p| Pattern::cached(p, &h.pattern_flags).ok());
         let source = h.sources.lexical;
         for (k, l) in values.iter().enumerate() {
             if matches!(l, Literal::Iri(_)) {
@@ -2179,8 +2222,8 @@ impl<'a> Checker<'a> {
                 let got = self.expand(datatype);
                 if got != want {
                     let msg = format!(
-                        "\"{value}\" is typed <{got}>, but {} gives \"{}\" the datatype <{want}>",
-                        h.sources.datatype.noun(),
+                        "\"{value}\" is typed <{got}>, but {} \"{}\" the datatype <{want}>",
+                        the(h.sources.datatype, "gives"),
                         a.left
                     );
                     if let Some(f) = self.emit(
@@ -2203,8 +2246,8 @@ impl<'a> Checker<'a> {
             let got = self.expand(own);
             if got != want {
                 let msg = format!(
-                    "the constraint's dataType is <{got}>, but {} gives \"{}\" the datatype <{want}>",
-                    h.sources.datatype.noun(),
+                    "the constraint's dataType is <{got}>, but {} \"{}\" the datatype <{want}>",
+                    the(h.sources.datatype, "gives"),
                     a.left
                 );
                 if let Some(f) = self.emit(

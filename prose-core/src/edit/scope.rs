@@ -78,23 +78,16 @@ struct Walk<'r> {
 }
 
 impl Walk<'_> {
-    /// The ODRL property a key stands for, as its bare name.
+    /// The ODRL property a key stands for, as its bare local name: the key
+    /// is expanded through the document's `@context` (an alias, a rebound
+    /// `odrl` prefix, a bare ODRL term) and only the ODRL namespace counts.
     fn term(&self, key: &str) -> Option<String> {
         if key.starts_with('@') {
             return None;
         }
-        if !key.contains(':') {
-            return Some(key.to_string()).filter(|_| {
-                // A term the context maps elsewhere is not ODRL's.
-                let e = self.prefixes.expand(key);
-                e == key || e.starts_with(ODRL_NS)
-            });
-        }
-        let full = match key.strip_prefix("odrl:") {
-            Some(rest) => format!("{ODRL_NS}{rest}"),
-            None => self.prefixes.expand(key),
-        };
-        full.strip_prefix(ODRL_NS)
+        self.prefixes
+            .expand(key)
+            .strip_prefix(ODRL_NS)
             .filter(|l| !l.is_empty())
             .map(String::from)
     }
@@ -192,7 +185,7 @@ impl Walk<'_> {
                     self.each(v, &at, |w, x, p| w.entity(x, p));
                 }
                 (_, "action") => self.each(v, &at, |w, x, p| w.action(x, p)),
-                (Owner::Rule, "constraint") => self.each(v, &at, |w, x, p| w.constraint(x, p)),
+                (_, "constraint") => self.each(v, &at, |w, x, p| w.constraint(x, p)),
                 _ => {}
             }
         }
@@ -252,17 +245,35 @@ impl Walk<'_> {
         let keys: Vec<String> = o.keys().cloned().collect();
         let mut drop = Vec::new();
         for key in keys {
-            let logical = self
-                .term(&key)
-                .is_some_and(|t| super::LOGICAL_KEYS.contains(&t.as_str()));
-            if !logical {
+            let Some(term) = self.term(&key) else {
+                continue;
+            };
+            if term == "rightOperand" {
+                if none(self.rules.right_operand_values) {
+                    self.hits.push(OutOfScope {
+                        path: join(path, &key),
+                        key: key.clone(),
+                        limit: "rightOperandValues",
+                    });
+                    drop.push(key);
+                }
                 continue;
             }
-            if none(self.rules.logical_children) {
+            if !super::LOGICAL_KEYS.contains(&term.as_str()) {
+                continue;
+            }
+            let banned = if none(self.rules.logical_children) {
+                Some("logicalChildren")
+            } else if none(self.rules.logical_depth) {
+                Some("logicalDepth")
+            } else {
+                None
+            };
+            if let Some(limit) = banned {
                 self.hits.push(OutOfScope {
                     path: join(path, &key),
                     key: key.clone(),
-                    limit: "logicalChildren",
+                    limit,
                 });
                 drop.push(key);
             } else if let Some(c) = o.get_mut(&key) {

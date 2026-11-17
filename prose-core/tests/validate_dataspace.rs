@@ -419,3 +419,67 @@ fn a_constraint_under_keys_the_reader_skipped_is_not_called_unfinished() {
     );
     assert_eq!(r.verdict, Verdict::Incomplete);
 }
+
+// --- audit: per-constraint unread gate, duplicate actions with refinements --------
+
+fn strict_incomplete() -> Options {
+    Options::strict()
+}
+
+#[test]
+fn an_unread_key_elsewhere_does_not_hide_an_incomplete_constraint() {
+    let text = json!({
+        "@context": "http://www.w3.org/ns/odrl.jsonld", "@type": "Set", "uid": "urn:p",
+        "odrl:profile": "urn:x",
+        "permission": [{"target": "urn:a", "action": "use", "constraint": [{}]}]
+    })
+    .to_string();
+    let r = run(&text, &strict_incomplete());
+    assert!(
+        r.findings
+            .iter()
+            .any(|f| f.rule == RuleId::OdrlConstraintIncomplete),
+        "{:?}",
+        r.findings
+    );
+}
+
+#[test]
+fn an_unread_key_inside_the_constraint_still_hides_it() {
+    let text = constraint(json!({"odrl:leftOperand": "count", "operator": "lt"}));
+    let r = run(&text, &strict_incomplete());
+    assert!(
+        !r.findings
+            .iter()
+            .any(|f| f.rule == RuleId::OdrlConstraintIncomplete),
+        "{:?}",
+        r.findings
+    );
+}
+
+#[test]
+fn a_duplicate_action_with_different_refinements_has_no_fix() {
+    let text = rule_with_actions(json!([
+        "use",
+        {"rdf:value": {"@id": "odrl:use"}, "refinement": [
+            {"leftOperand": "count", "operator": "lt", "rightOperand": 5}]}
+    ]));
+    let r = run(&text, &warn(RuleId::HeuristicDuplicateAction));
+    let dup: Vec<_> = r
+        .findings
+        .iter()
+        .filter(|f| f.rule == RuleId::HeuristicDuplicateAction)
+        .collect();
+    assert_eq!(dup.len(), 1, "{:?}", r.findings);
+    assert!(dup[0].fixes.iter().all(|f| !f.safe), "{:?}", dup[0].fixes);
+}
+
+#[test]
+fn a_duplicate_action_with_equal_refinements_keeps_the_safe_fix() {
+    let a = json!({"rdf:value": {"@id": "odrl:use"}, "refinement": [
+        {"leftOperand": "count", "operator": "lt", "rightOperand": 5}]});
+    let text = rule_with_actions(json!([a.clone(), a]));
+    let r = run(&text, &warn(RuleId::HeuristicDuplicateAction));
+    let f = finding(&r, RuleId::HeuristicDuplicateAction);
+    assert!(f.fixes.iter().any(|f| f.safe), "{:?}", f.fixes);
+}

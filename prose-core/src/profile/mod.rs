@@ -518,6 +518,11 @@ pub struct OperandHints {
     /// base's operators, units and datatype stay and stay suggestions
     /// (see [`OperandHints::binds_other_facets`]).
     pub values_only: bool,
+    /// `values` is the whole list its source gave (an overlay's, a shape's
+    /// `sh:in`, a host's), not something a profile that is not loaded could
+    /// extend: a profile's own `prose:rightOperand` and an `sh:class` stand
+    /// for their narrower values too, and are not exact.
+    pub values_exact: bool,
     /// Where each facet came from.
     pub sources: HintSources,
 }

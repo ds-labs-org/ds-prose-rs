@@ -354,3 +354,93 @@ async fn only_the_role_the_host_closed_is_a_select() {
     assert!(!element(&html, ASSIGNER).starts_with("<select"));
     assert!(!element(&html, TARGET).starts_with("<select"));
 }
+
+/// Shapes closing `dx:purpose` to research and marketing, with an open host
+/// source that labels research and lists a value the shapes do not.
+fn open_over_closed(strict: bool) -> EditConfig {
+    let shapes = prose_core::shapes::ShapesGraph::parse(
+        r#"{
+  "@context": {"sh": "http://www.w3.org/ns/shacl#", "odrl": "http://www.w3.org/ns/odrl/2/",
+               "dx": "https://example.org/dataspace/"},
+  "@graph": [{"@id": "dx:S", "@type": "sh:NodeShape", "sh:property": [
+    {"sh:path": {"@id": "odrl:leftOperand"}, "sh:hasValue": {"@id": "dx:purpose"}},
+    {"sh:path": {"@id": "odrl:rightOperand"},
+     "sh:in": {"@list": [{"@id": "dx:research"}, {"@id": "dx:marketing"}]}}]}]
+}"#,
+    )
+    .unwrap();
+    let mut s = ValueSources::new();
+    s.set_operand(
+        &format!("{DX}purpose"),
+        ValueSource::new(
+            vec![
+                SourceValue::new(&format!("{DX}research"))
+                    .with_label("Research (registry)")
+                    .with_group("Core"),
+                SourceValue::new(&format!("{DX}elsewhere")).with_label("Elsewhere"),
+            ],
+            false,
+        ),
+    );
+    let w = Wording::clone(&wording()).with_shapes(shapes);
+    let c = EditConfig {
+        term_input: TermInput::Select,
+        ..EditConfig::default().with_wording(Rc::new(w))
+    }
+    .with_value_sources(s);
+    match strict {
+        true => c.with_strict(Options::strict()),
+        false => c,
+    }
+}
+
+#[tokio::test]
+async fn an_open_host_source_over_closed_shapes_keeps_its_labels_for_the_listed_values() {
+    let text = policy(r#"{"@id": "https://example.org/dataspace/research"}"#)
+        .replace("dx:participantType", "dx:purpose");
+    let doc = Rc::new(read_model(&text).unwrap());
+    let html = ssr(doc, open_over_closed(false)).await;
+    let right = element(&html, RIGHT);
+    assert!(right.starts_with("<select"), "{right}");
+    assert!(right.contains("Research (registry)"), "{right}");
+    assert!(right.contains("<optgroup label=\"Core\">"), "{right}");
+    // The shapes' list is the one offered: the unlisted value is not.
+    assert!(!right.contains("Elsewhere"), "{right}");
+    assert!(right.contains("Marketing"), "{right}");
+}
+
+/// A closed host source that lists profile terms, one without a label.
+#[tokio::test]
+async fn a_host_value_without_a_label_takes_the_profile_label() {
+    let mut s = ValueSources::new();
+    s.set_operand(
+        &format!("{DX}purpose"),
+        ValueSource::new(
+            vec![
+                SourceValue::new(&format!("{DX}research")),
+                SourceValue::new(&format!("{DX}marketing")).with_label("Marketing (registry)"),
+                SourceValue::new("urn:unknown:value"),
+            ],
+            true,
+        ),
+    );
+    let c = EditConfig {
+        term_input: TermInput::Select,
+        ..EditConfig::default().with_wording(wording())
+    }
+    .with_value_sources(s);
+    let text = policy(r#"{"@id": "https://example.org/dataspace/research"}"#)
+        .replace("dx:participantType", "dx:purpose");
+    let html = ssr(Rc::new(read_model(&text).unwrap()), c).await;
+    let right = element(&html, RIGHT);
+    assert!(right.starts_with("<select"), "{right}");
+    assert!(right.contains(">Research<"), "the profile's label: {right}");
+    assert!(
+        right.contains("Marketing (registry)"),
+        "the host's label wins: {right}"
+    );
+    assert!(
+        right.contains(">urn:unknown:value<"),
+        "no label anywhere: {right}"
+    );
+}

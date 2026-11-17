@@ -12,6 +12,7 @@ mod check;
 mod issue;
 mod jsonld_read;
 pub(crate) use jsonld_read::LOGICAL_KEYS;
+pub(crate) use model::normalize_action;
 mod jsonld_write;
 mod model;
 mod path;

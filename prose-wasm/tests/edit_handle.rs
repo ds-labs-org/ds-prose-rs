@@ -553,6 +553,39 @@ async fn out_of_scope_reject_refuses_limits_the_document_on_screen_breaks() {
 }
 
 #[wasm_bindgen_test]
+async fn out_of_scope_reject_on_a_document_out_of_scope_throws_and_changes_nothing() {
+    let (c, mut h, _calls) = mount(PARTIES).await;
+    // Under 'show' the limits only hide the add buttons: the parties stay.
+    h.set_limits(js(NO_PARTIES)).expect("show keeps them");
+    settle().await;
+    let before = c.inner_html();
+    let err = h
+        .set_out_of_scope("reject")
+        .expect_err("the document on screen is out of scope");
+    assert_eq!(error_paths(&err).len(), 5, "{err:?}");
+    assert_eq!(
+        js_sys::Reflect::get(&err, &"name".into())
+            .unwrap()
+            .as_string()
+            .unwrap(),
+        "OutOfScopeError"
+    );
+    settle().await;
+    assert_eq!(c.inner_html(), before, "the document stays");
+    assert_eq!(h.json(), PARTIES);
+    assert_eq!(h.removed(), "[]");
+    // The mode is still 'show': an out-of-scope document is loaded, not refused.
+    h.update(PARTIES, None).expect("still show");
+    h.update(ONE, None).unwrap();
+    h.update(PARTIES, None)
+        .expect("still show, after another document");
+    // Dropping the limits lets 'reject' take hold.
+    h.set_limits(JsValue::NULL).unwrap();
+    h.set_out_of_scope("reject")
+        .expect("nothing is out of scope now");
+}
+
+#[wasm_bindgen_test]
 async fn out_of_scope_other_limits_at_zero_are_covered() {
     let (c, mut h, _calls) = mount(ONE).await;
     h.set_out_of_scope("strip").unwrap();
@@ -1119,4 +1152,15 @@ async fn picking_a_listed_value_writes_it_to_the_document() {
         "{}",
         recorded[0].0
     );
+}
+
+#[wasm_bindgen_test]
+async fn out_of_scope_strip_follows_a_context_alias() {
+    let doc = r#"{"@context":["http://www.w3.org/ns/odrl.jsonld",{"giver":"odrl:assigner"}],"@type":"Set","uid":"urn:policy:9","giver":"urn:a","permission":[{"target":"urn:asset:1","action":"use","giver":"urn:a"}]}"#;
+    let (_c, mut h, _calls) = mount(doc).await;
+    h.set_out_of_scope("strip").expect("mode");
+    h.set_limits(js(NO_PARTIES)).expect("limits");
+    settle().await;
+    assert_eq!(removed_paths(&h), ["giver", "permission[0].giver"]);
+    assert!(!h.json().contains("\"urn:a\""), "{}", h.json());
 }

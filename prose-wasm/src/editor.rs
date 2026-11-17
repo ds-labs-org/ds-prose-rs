@@ -798,8 +798,10 @@ impl ProseEditorHandle {
     /// change, and `removed()` lists what went; `"reject"` refuses the
     /// document (an `OutOfScopeError` with the offending `paths`). The
     /// document on screen is checked at once. Throws on any other name, or
-    /// when `"reject"` refuses the document on screen; the previous mode
-    /// stays.
+    /// when `"reject"` refuses the document on screen (limits of `max: 0`
+    /// that the `"show"` mode left in it); the call then changes nothing:
+    /// the previous mode stays, the document and `removed()` are as they
+    /// were. Switch to `"strip"` instead, or `update` the document first.
     #[wasm_bindgen(js_name = setOutOfScope)]
     pub fn set_out_of_scope(
         &mut self,

@@ -129,6 +129,9 @@ pub struct ShapesGraph {
     actions: Option<Vec<String>>,
     left_operands: Option<Vec<String>>,
     warnings: Vec<String>,
+    /// The limits the shapes were read with: `sh:class` members are cut by
+    /// the same `max_terms` and `max_depth`.
+    limits: ProfileLimits,
 }
 
 impl PartialEq for ShapesGraph {
@@ -151,6 +154,15 @@ impl PartialEq for ShapesGraph {
     }
 }
 
+/// The limits the triples are read with: one more value per key than the
+/// reader keeps, so a list of exactly `max_values_per_key` is read whole and
+/// one past it is seen to be cut.
+fn wide(limits: &ProfileLimits) -> ProfileLimits {
+    let mut wide = limits.clone();
+    wide.max_values_per_key = limits.max_values_per_key.saturating_add(1);
+    wide
+}
+
 impl ShapesGraph {
     /// Reads shapes written as JSON-LD (or, with the `turtle` feature, as
     /// Turtle), with the default limits. The syntax is told from the first
@@ -162,14 +174,19 @@ impl ShapesGraph {
     /// As [`ShapesGraph::parse`], with explicit limits.
     pub fn parse_with(text: &str, limits: &ProfileLimits) -> Result<ShapesGraph, ShapesError> {
         read::interpret(
-            crate::profile::ProfileVocab::read_triples(text, None, limits)?,
+            crate::profile::ProfileVocab::read_triples(text, None, &wide(limits))?,
             limits,
         )
     }
 
     /// As [`ShapesGraph::parse`], for a value that is already parsed.
     pub fn from_value(v: &Value, limits: &ProfileLimits) -> Result<ShapesGraph, ShapesError> {
-        read::interpret(crate::profile::jsonld_triples(v, limits)?, limits)
+        read::interpret(crate::profile::jsonld_triples(v, &wide(limits))?, limits)
+    }
+
+    /// The limits these shapes were read with.
+    pub(crate) fn limits(&self) -> &ProfileLimits {
+        &self.limits
     }
 
     /// The left operands some shape selects, with what it says about each,

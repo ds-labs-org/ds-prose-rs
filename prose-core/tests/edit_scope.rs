@@ -265,3 +265,64 @@ fn a_policys_at_id_is_its_uid_since_odrls_context_maps_uid_to_it() {
     let g = json!({"@id": "urn:graph", "@graph": [{"@type": "Set", "@id": "urn:p:2"}]});
     assert_eq!(paths(&g, &r), ["@graph[0].@id"]);
 }
+
+#[test]
+fn an_alias_of_an_odrl_term_is_found() {
+    let v = json!({
+        "@context": ["http://www.w3.org/ns/odrl.jsonld", { "giver": "odrl:assigner" }],
+        "@type": "Set",
+        "giver": "urn:a",
+        "permission": [{ "action": "use", "giver": "urn:a" }]
+    });
+    let r = no_parties();
+    assert_eq!(paths(&v, &r), ["giver", "permission[0].giver"]);
+    assert_eq!(stripped(v, &r)["permission"], json!([{ "action": "use" }]));
+}
+
+#[test]
+fn a_rebound_odrl_prefix_is_not_odrls() {
+    let v = json!({
+        "@context": { "odrl": "https://example.org/other/", "o": "http://www.w3.org/ns/odrl/2/" },
+        "@type": "Set",
+        "odrl:assigner": "urn:a",
+        "o:assignee": "urn:b"
+    });
+    assert_eq!(paths(&v, &no_parties()), ["o:assignee"]);
+}
+
+#[test]
+fn logical_depth_and_right_operand_values_at_zero_are_a_scope() {
+    let v = json!({
+        "@type": "Set",
+        "permission": [{ "action": "use", "constraint": [
+            { "leftOperand": "count", "operator": "lt", "rightOperand": 5 },
+            { "and": [{ "leftOperand": "a", "operator": "eq", "rightOperand": "x" }] }
+        ]}]
+    });
+    let r = rules(|r| r.logical_depth = Limit::NONE);
+    assert_eq!(paths(&v, &r), ["permission[0].constraint[1].and"]);
+    let r = rules(|r| r.right_operand_values = Limit::NONE);
+    assert_eq!(
+        paths(&v, &r),
+        [
+            "permission[0].constraint[0].rightOperand",
+            "permission[0].constraint[1].and[0].rightOperand"
+        ]
+    );
+    // Any other value is not a scope.
+    let r = rules(|r| {
+        r.logical_depth = Limit::at_most(1);
+        r.right_operand_values = Limit::at_most(1);
+    });
+    assert!(paths(&v, &r).is_empty());
+}
+
+#[test]
+fn a_policy_level_constraint_is_walked() {
+    let v = json!({
+        "@type": "Set",
+        "constraint": [{ "and": [{ "leftOperand": "a", "operator": "eq", "rightOperand": "x" }] }]
+    });
+    let r = rules(|r| r.logical_children = Limit::NONE);
+    assert_eq!(paths(&v, &r), ["constraint[0].and"]);
+}

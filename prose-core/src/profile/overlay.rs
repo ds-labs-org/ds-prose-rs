@@ -190,6 +190,7 @@ fn interpret(parsed: Parsed, limits: &ProfileLimits) -> Result<Overlay, OverlayE
     for h in out.terms.iter_mut().map(|(_, h)| h) {
         // An overlay lists exactly its values, like `sh:in`.
         h.value_tree = h.values.iter().map(|v| (v.clone(), 0)).collect();
+        h.values_exact = !h.values.is_empty();
     }
     for msg in unread {
         if !out.warnings.contains(&msg) {

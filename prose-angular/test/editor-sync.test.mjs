@@ -632,3 +632,77 @@ test('valueSources: a failed first mount keeps them unspent for the retry', () =
   s.apply(inputs({ json: B, valueSources: SOURCES }), f.mount);
   assert.deepEqual(f.calls.filter((c) => c[0] === 'setValueSources'), [['setValueSources', SOURCES]]);
 });
+
+/** A handle that holds a document and enforces the scope as the wasm one does: under 'reject', a document with an assigner and a cap on the assigner refuse each other. */
+function scoped() {
+  const state = { text: '', mode: 'show', capped: false, calls: [] };
+  const refuses = (text, capped, mode) => mode === 'reject' && capped && text.includes('assigner');
+  const handle = {
+    update: (j) => {
+      state.calls.push('update');
+      if (refuses(j, state.capped, state.mode)) throw outOfScope(['assigner']);
+      state.text = j;
+    },
+    setOutOfScope: (m) => {
+      state.calls.push('setOutOfScope');
+      if (refuses(state.text, state.capped, m)) throw outOfScope(['assigner']);
+      state.mode = m;
+    },
+    setLimits: (l) => {
+      state.calls.push('setLimits');
+      const capped = !!l?.policyAssigner && l.policyAssigner.max === 0;
+      if (refuses(state.text, capped, state.mode)) throw outOfScope(['assigner']);
+      state.capped = capped;
+      if (state.mode === 'strip' && capped) state.text = state.text.replace(',"assigner":"x"', '');
+    },
+    removed: () => {
+      const r = state.removed ?? [];
+      state.removed = [];
+      return JSON.stringify(r);
+    },
+    json: () => state.text,
+    setProfile: () => 'null', setProfiles: () => '[]', setOverlays: () => '[]', overlaySummaries: () => '[]',
+    setValueSources: () => '{}', valueSourceSummaries: () => '{}', setShapes: () => 'null',
+    setValidation() {}, setTermInput() {}, setRefuseTerms() {}, report: () => null, destroy() {}, free() {},
+  };
+  const mount = (json) => {
+    state.text = json;
+    return handle;
+  };
+  return { state, mount };
+}
+
+test('outOfScope: strip reports the document the handle holds after it, for the host to bind back', () => {
+  const s = new EditorSession();
+  const f = scoped();
+  const withAssigner = '{"uid":"a","assigner":"x"}';
+  f.state.removed = [{ path: 'assigner', key: 'assigner', limit: 'policyAssigner' }];
+  const out = s.apply(inputs({ json: withAssigner, outOfScope: 'strip', limits: { policyAssigner: { max: 0 } } }), f.mount);
+  assert.equal(out.removed.length, 1);
+  assert.equal(out.strippedJson, '{"uid":"a"}');
+  // Nothing stripped, nothing to bind back.
+  const again = s.apply(inputs({ json: '{"uid":"a"}', outOfScope: 'strip', limits: { policyAssigner: { max: 0 } } }), f.mount);
+  assert.equal(again.strippedJson, undefined);
+});
+
+test('outOfScope: reject, a new document and the limits that refuse it never leave the refused document on screen', () => {
+  const s = new EditorSession();
+  const f = scoped();
+  const base = { outOfScope: 'reject' };
+  s.apply(inputs({ ...base, json: '{"uid":"a"}' }), f.mount);
+  const out = s.apply(inputs({ ...base, json: '{"uid":"b","assigner":"x"}', limits: { policyAssigner: { max: 0 } } }), f.mount);
+  assert.equal(out.jsonError.name, 'OutOfScopeError');
+  assert.equal(f.state.text, '{"uid":"a"}', 'the refused document is not on screen');
+  assert.equal(s.lastJson, '{"uid":"a"}');
+});
+
+test('outOfScope: reject, a new document that fixes what the new limits refuse in the old one is shown', () => {
+  const s = new EditorSession();
+  const f = scoped();
+  const base = { outOfScope: 'reject' };
+  s.apply(inputs({ ...base, json: '{"uid":"a","assigner":"x"}' }), f.mount);
+  const out = s.apply(inputs({ ...base, json: '{"uid":"b"}', limits: { policyAssigner: { max: 0 } } }), f.mount);
+  assert.equal(out.jsonError, undefined);
+  assert.equal(f.state.text, '{"uid":"b"}');
+  assert.equal(f.state.capped, true, 'the limits are in force once the new document is');
+});

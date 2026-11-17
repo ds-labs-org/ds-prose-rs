@@ -49,6 +49,8 @@ export interface EditorHandleLike {
   setOutOfScope(mode: OutOfScopeMode): void;
   /** What the last load took out, as JSON text. */
   removed(): string;
+  /** The text the handle holds: the last set or emitted, stripped when a scope is in effect. */
+  json(): string;
   report(): string | null;
   destroy(): void;
   free(): void;
@@ -108,6 +110,8 @@ export interface EditorOutcome {
   report?: string | null;
   /** What the scope took out of the document in this `apply` (`outOfScope: 'strip'`); absent when nothing. */
   removed?: RemovedSection[];
+  /** The document the handle holds after a strip, for the component to emit as `jsonChange` so a bound `json` drops the stripped sections; present only with `removed`. */
+  strippedJson?: string;
 }
 
 /**
@@ -181,16 +185,23 @@ export class EditorSession<H extends EditorHandleLike = EditorHandleLike> {
         return out;
       }
     } else if (inputs.json !== this.lastJson || inputs.cls !== this.lastClass) {
+      // The scope goes first: a document is loaded under the mode and the
+      // limits that come with it, so one they refuse never reaches the screen.
+      let refused = this.scope(handle, inputs, out);
+      let loaded = false;
       try {
         handle.update(inputs.json, inputs.cls);
         this.lastJson = inputs.json;
         this.lastClass = inputs.cls;
         this.collect(handle, out);
+        loaded = true;
       } catch (error) {
         // The document on screen stays.
         out.jsonError = error;
       }
-      const refused = this.scope(handle, inputs, out);
+      // The old document may be what refused the new scope: try it again
+      // against the new one.
+      if (refused && loaded) refused = this.scope(handle, inputs, out);
       if (refused) out.jsonError ??= refused.error;
     } else {
       const refused = this.scope(handle, inputs, out);
@@ -292,6 +303,14 @@ export class EditorSession<H extends EditorHandleLike = EditorHandleLike> {
       out.report = handle.report();
     } catch (error) {
       out.validationError ??= error;
+    }
+    if (out.removed) {
+      // What the handle holds is no longer what the host bound: hand it back.
+      try {
+        out.strippedJson = handle.json();
+      } catch (error) {
+        console.error('ds-odrl-prose-editor: the stripped document could not be read', error);
+      }
     }
     return out;
   }

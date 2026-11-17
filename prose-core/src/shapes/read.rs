@@ -4,7 +4,9 @@ use super::{ConstraintShape, Pattern, ShapesError, ShapesGraph};
 use crate::profile::ProfileLimits;
 use crate::profile::ns;
 use crate::profile::triples::{Notes, Object, Parsed, Triple};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 const RDF_FIRST: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#first";
 const RDF_REST: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#rest";
@@ -31,6 +33,9 @@ struct Graph<'t> {
     by_subject: HashMap<&'t str, Vec<&'t Triple>>,
     /// The nodes some `sh:property` names: property shapes in a node shape.
     property_shapes: HashSet<&'t str>,
+    /// Lists already walked, by head: a list shared by many shapes is read
+    /// once.
+    walked: RefCell<HashMap<&'t str, Rc<Items>>>,
 }
 
 impl<'t> Graph<'t> {
@@ -40,6 +45,7 @@ impl<'t> Graph<'t> {
             order: Vec::new(),
             by_subject: HashMap::new(),
             property_shapes: HashSet::new(),
+            walked: RefCell::new(HashMap::new()),
         };
         for t in triples {
             if t.p == property
@@ -69,9 +75,10 @@ impl<'t> Graph<'t> {
     /// The IRI (or blank node) objects of `s p ?o`, in order, each once.
     fn iris(&self, s: &str, p: &str) -> Vec<&'t str> {
         let mut out: Vec<&str> = Vec::new();
+        let mut seen: HashSet<&str> = HashSet::new();
         for o in self.objects(s, p) {
             if let Object::Iri(i) = o
-                && !out.contains(&i.as_str())
+                && seen.insert(i.as_str())
             {
                 out.push(i);
             }
@@ -107,8 +114,9 @@ impl<'t> Graph<'t> {
     }
 
     /// `s` and what it leads to through SHACL properties and list links.
-    fn reachable(&self, start: &'t str) -> HashSet<&'t str> {
-        let mut seen: HashSet<&str> = HashSet::new();
+    /// Adds to `seen`, so that a node reached from many starts is walked
+    /// once.
+    fn reachable_into(&self, start: &'t str, seen: &mut HashSet<&'t str>) {
         let mut stack = vec![start];
         while let Some(n) = stack.pop() {
             if !seen.insert(n) {
@@ -122,11 +130,11 @@ impl<'t> Graph<'t> {
                 }
             }
         }
-        seen
     }
 }
 
 /// The items of every `sh:in` of a shape.
+#[derive(Default)]
 struct Items {
     iris: Vec<String>,
     literals: Vec<String>,
@@ -135,38 +143,75 @@ struct Items {
     cut: bool,
 }
 
+/// Collects distinct values in order.
+#[derive(Default)]
+struct Collect {
+    items: Items,
+    iris: HashSet<String>,
+    literals: HashSet<String>,
+}
+
+impl Collect {
+    fn push(&mut self, o: &Object) {
+        match o {
+            Object::Iri(i) if !i.starts_with("_:") => {
+                if self.iris.insert(i.clone()) {
+                    self.items.iris.push(i.clone());
+                }
+            }
+            Object::Iri(_) => {}
+            Object::Literal { value, .. } => {
+                if self.literals.insert(value.clone()) {
+                    self.items.literals.push(value.clone());
+                }
+            }
+        }
+    }
+}
+
+/// The values of the list headed `head`, walked once per graph.
+fn walk<'t>(g: &Graph<'t>, head: &'t str, limits: &ProfileLimits) -> Rc<Items> {
+    if let Some(hit) = g.walked.borrow().get(head) {
+        return hit.clone();
+    }
+    let mut c = Collect::default();
+    let mut node = head;
+    let mut seen: HashSet<&str> = HashSet::new();
+    let mut steps = 0;
+    while node != RDF_NIL && seen.insert(node) {
+        steps += 1;
+        if steps > limits.max_terms {
+            c.items.cut = true;
+            break;
+        }
+        for first in g.objects(node, RDF_FIRST) {
+            c.push(first);
+        }
+        match g.iris(node, RDF_REST).first() {
+            Some(next) => node = next,
+            None => break,
+        }
+    }
+    let done = Rc::new(c.items);
+    g.walked.borrow_mut().insert(head, done.clone());
+    done
+}
+
 fn items(g: &Graph<'_>, shape: &str, limits: &ProfileLimits) -> Option<Items> {
     let objects = g.objects(shape, &sh("in"));
     if objects.is_empty() {
         return None;
     }
-    let mut out = Items {
-        iris: Vec::new(),
-        literals: Vec::new(),
-        cut: false,
-    };
+    let mut c = Collect::default();
     // A JSON-LD `@list` is read as several values of the property, a Turtle
     // list as a chain of nodes: the chain is walked, a bare IRI is an item.
     // Many values on one node were cut by the reader's per-key cap.
-    if objects.len() >= limits.max_values_per_key {
-        out.cut = true;
+    if objects.len() > limits.max_values_per_key {
+        c.items.cut = true;
     }
-    let push = |o: &Object, out: &mut Items| match o {
-        Object::Iri(i) if !i.starts_with("_:") => {
-            if !out.iris.contains(i) {
-                out.iris.push(i.clone());
-            }
-        }
-        Object::Iri(_) => {}
-        Object::Literal { value, .. } => {
-            if !out.literals.contains(value) {
-                out.literals.push(value.clone());
-            }
-        }
-    };
     for o in objects {
         let Object::Iri(head) = o else {
-            push(o, &mut out);
+            c.push(o);
             continue;
         };
         if head == RDF_NIL {
@@ -176,36 +221,42 @@ fn items(g: &Graph<'_>, shape: &str, limits: &ProfileLimits) -> Option<Items> {
             .get(head.as_str())
             .is_some_and(|ts| ts.iter().any(|t| t.p == RDF_FIRST))
         {
-            let mut node = head.as_str();
-            let mut seen: HashSet<&str> = HashSet::new();
-            let mut steps = 0;
-            while node != RDF_NIL && seen.insert(node) {
-                steps += 1;
-                if steps > limits.max_terms {
-                    out.cut = true;
-                    break;
+            let walked = walk(g, head, limits);
+            c.items.cut |= walked.cut;
+            for i in &walked.iris {
+                if c.iris.insert(i.clone()) {
+                    c.items.iris.push(i.clone());
                 }
-                for first in g.objects(node, RDF_FIRST) {
-                    push(first, &mut out);
-                }
-                match g.iris(node, RDF_REST).first() {
-                    Some(next) => node = next,
-                    None => break,
+            }
+            for l in &walked.literals {
+                if c.literals.insert(l.clone()) {
+                    c.items.literals.push(l.clone());
                 }
             }
         } else {
-            push(o, &mut out);
+            c.push(o);
         }
     }
-    Some(out)
+    Some(c.items)
 }
 
-fn union(into: &mut Vec<String>, add: Vec<String>) {
+/// Adds the values of `add` that `into` lacks, keeping at most `cap` in
+/// all; says whether any were left out for the cap.
+fn union(into: &mut Vec<String>, add: Vec<String>, cap: usize) -> bool {
+    let mut have: HashSet<String> = into.iter().cloned().collect();
+    let mut cut = false;
     for a in add {
-        if !into.contains(&a) {
-            into.push(a);
+        if have.contains(&a) {
+            continue;
         }
+        if into.len() >= cap {
+            cut = true;
+            break;
+        }
+        have.insert(a.clone());
+        into.push(a);
     }
+    cut
 }
 
 struct Reader<'t> {
@@ -244,7 +295,10 @@ pub(crate) fn interpret(
         g: Graph::new(&triples),
         limits,
         notes,
-        out: ShapesGraph::default(),
+        out: ShapesGraph {
+            limits: limits.clone(),
+            ..ShapesGraph::default()
+        },
     };
     r.read();
     r.out.warnings = std::mem::take(&mut r.notes.list);
@@ -275,7 +329,7 @@ impl<'t> Reader<'t> {
     /// allowed or that one alternative holds: reading their lists as allowed
     /// would invert or widen them.
     fn negated(&mut self) -> HashSet<&'t str> {
-        let mut skip = HashSet::new();
+        let mut skip: HashSet<&'t str> = HashSet::new();
         let order: Vec<&'t str> = self.g.order.clone();
         for s in order {
             for name in ["not", "xone"] {
@@ -283,7 +337,7 @@ impl<'t> Reader<'t> {
                     self.notes.warn(format!(
                         "ignored sh:{name}: the shapes under it are not read"
                     ));
-                    skip.extend(self.g.reachable(n));
+                    self.g.reachable_into(n, &mut skip);
                 }
             }
         }
@@ -295,14 +349,13 @@ impl<'t> Reader<'t> {
         let mut lefts: Vec<String> = Vec::new();
         for p in props {
             if self.path_of(p).as_deref() == Some(&format!("{}leftOperand", ns::ODRL)) {
-                union(
-                    &mut lefts,
-                    self.g
-                        .iris(p, &sh("hasValue"))
-                        .into_iter()
-                        .map(String::from)
-                        .collect(),
-                );
+                let has: Vec<String> = self
+                    .g
+                    .iris(p, &sh("hasValue"))
+                    .into_iter()
+                    .map(String::from)
+                    .collect();
+                union(&mut lefts, has, usize::MAX);
             }
         }
         let left = match lefts.as_slice() {
@@ -339,6 +392,14 @@ impl<'t> Reader<'t> {
         ) {
             self.notes.warn(format!("ignored sh:{local} on a shape"));
         }
+    }
+
+    /// Values were left out: more than the reader keeps for one list.
+    fn cut_warning(&mut self, here: &str, for_left: &str) {
+        self.notes.warn(format!(
+            "kept only the first {} values of {here}{for_left}: it holds more values than the reader keeps",
+            self.limits.max_terms
+        ));
     }
 
     fn path_of(&self, p: &str) -> Option<String> {
@@ -412,22 +473,30 @@ impl<'t> Reader<'t> {
                     "rightOperand" => self.right_operand(p, left, &here),
                     _ => {
                         if let Some(list) = self.closed_list(p, &format!("{here}{for_left}")) {
+                            let cap = self.limits.max_terms;
                             let c = self.constraint(left);
-                            union(
+                            let cut = union(
                                 if local == "operator" {
                                     &mut c.operators
                                 } else {
                                     &mut c.units
                                 },
                                 list,
+                                cap,
                             );
+                            if cut {
+                                self.cut_warning(&here, &for_left);
+                            }
                         }
                     }
                 }
             }
             "action" => {
                 if let Some(list) = self.closed_list(p, &here) {
-                    union(self.out.actions.get_or_insert_with(Vec::new), list);
+                    let cap = self.limits.max_terms;
+                    if union(self.out.actions.get_or_insert_with(Vec::new), list, cap) {
+                        self.cut_warning(&here, "");
+                    }
                 }
             }
             _ => {
@@ -436,7 +505,14 @@ impl<'t> Reader<'t> {
                     return;
                 }
                 if let Some(list) = self.closed_list(p, &here) {
-                    union(self.out.left_operands.get_or_insert_with(Vec::new), list);
+                    let cap = self.limits.max_terms;
+                    if union(
+                        self.out.left_operands.get_or_insert_with(Vec::new),
+                        list,
+                        cap,
+                    ) {
+                        self.cut_warning(&here, "");
+                    }
                 } else if self.g.objects(p, &sh("in")).is_empty() {
                     self.notes.warn(format!(
                         "ignored {here}: it has neither sh:hasValue nor sh:in"
@@ -506,14 +582,13 @@ impl<'t> Reader<'t> {
         let list = self.list(p, here, true);
         let mut classes: Vec<String> = Vec::new();
         for name in ["class", "node"] {
-            union(
-                &mut classes,
-                self.g
-                    .iris(p, &sh(name))
-                    .into_iter()
-                    .map(String::from)
-                    .collect(),
-            );
+            let found: Vec<String> = self
+                .g
+                .iris(p, &sh(name))
+                .into_iter()
+                .map(String::from)
+                .collect();
+            union(&mut classes, found, usize::MAX);
         }
         if list.is_some() && !classes.is_empty() {
             self.notes.warn(format!(
@@ -542,12 +617,24 @@ impl<'t> Reader<'t> {
         let min = self.g.literal(p, &sh("minInclusive")).map(str::to_string);
         let max = self.g.literal(p, &sh("maxInclusive")).map(str::to_string);
         let mut conflicts: Vec<&str> = Vec::new();
+        let cap = self.limits.max_terms;
+        let mut cut = false;
+        if list.is_none()
+            && classes.is_empty()
+            && datatype.is_none()
+            && pattern.is_none()
+            && min.is_none()
+            && max.is_none()
+        {
+            // Nothing was read (an ignored or empty list): no constraint.
+            return;
+        }
         let c = self.constraint(left);
         if let Some(list) = list {
-            union(&mut c.values, list.iris);
-            union(&mut c.literals, list.literals);
+            cut |= union(&mut c.values, list.iris, cap);
+            cut |= union(&mut c.literals, list.literals, cap);
         }
-        union(&mut c.classes, classes);
+        union(&mut c.classes, classes, usize::MAX);
         // Alternatives that disagree on a single value cannot both be read:
         // the first stands.
         for (name, have, new) in [
@@ -567,6 +654,10 @@ impl<'t> Reader<'t> {
                 Some(a) if *a != new => conflicts.push("sh:pattern"),
                 _ => {}
             }
+        }
+        if cut {
+            let for_left = format!(" for {}", short(left));
+            self.cut_warning(here, &for_left);
         }
         for name in conflicts {
             self.notes.warn(format!(

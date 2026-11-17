@@ -69,7 +69,10 @@ assigner of a policy definition, in the bare, prefixed or full-IRI spelling of
 its key) is dropped when a document is loaded or the limits change, and
 `removed()` returns what went as JSON text (`[{ path, key, limit }]`); with
 `'reject'`, `update` and `setLimits` throw an `OutOfScopeError` whose `paths`
-name the sections. `'show'`, the default, keeps them.
+name the sections. `'show'`, the default, keeps them. `setOutOfScope('reject')` on a
+mounted document that already holds such a section (kept under `'show'`) throws the
+same error and changes nothing: the mode stays `'show'` and the document, and
+`removed()`, are as they were.
 `setRefuseTerms(true)` makes the editor refuse, under validation, an edit that
 writes a term the loaded profiles do not define into a vocabulary slot, rather
 than commit and flag it. `setLimits({ logicalDepth: { max: 2 } })` caps how

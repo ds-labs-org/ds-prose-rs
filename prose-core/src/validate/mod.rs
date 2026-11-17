@@ -322,8 +322,9 @@ pub struct Expected {
     pub datatype: Option<String>,
     /// The left operand is closed by its profile or its shapes.
     pub closed: bool,
-    /// What gave the hint the finding is about: the loaded profile, or the
-    /// companion shapes. `None` when the finding is not about a hint.
+    /// What gave the hint the finding is about: the loaded profile, an
+    /// operator overlay, the companion shapes, or a value source the host
+    /// passed at run time. `None` when the finding is not about a hint.
     pub source: Option<crate::profile::HintSource>,
     /// `sh:pattern`, when the finding is about a value that does not match.
     pub pattern: Option<String>,

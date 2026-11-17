@@ -969,10 +969,10 @@ fn a_shape_that_closes_makes_only_its_own_facets_binding() {
     );
     let h = w.operand_hints(t);
     assert!(h.closed);
-    assert!(
-        h.operators.is_empty(),
-        "a suggestion does not become binding: {h:?}"
-    );
+    // The shape closed the values alone: the profile's suggested operators
+    // stay, and stay suggestions.
+    assert_eq!(h.operators, t.hints.operators);
+    assert!(h.values_only && !h.binds_other_facets(), "{h:?}");
     assert_eq!(h.values, [format!("{ex}academic")]);
 }
 

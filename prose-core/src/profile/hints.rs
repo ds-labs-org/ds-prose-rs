@@ -1,7 +1,8 @@
 //! Layering hints. A left operand's [`OperandHints`] start as what the
 //! loaded profile's `prose:` triples say; each further source (the operator
 //! overlay, then the companion shapes; then a host's runtime value source)
-//! adds a patch over them, so the precedence is profile < overlay < shapes < host. A patch holds only the facets its source
+//! adds a patch over them, so the precedence is profile < overlay < shapes <
+//! host. A patch holds only the facets its source
 //! gives (an empty list or `None` is "not given"), and carries its
 //! provenance, so a finding can name the source that closed the slot.
 use super::{HintSource, OperandHints};
@@ -19,27 +20,59 @@ pub(crate) fn gives_any(patch: &OperandHints) -> bool {
         || patch.max_inclusive.is_some()
 }
 
+/// Whether `patch` gives values and nothing else.
+fn values_alone(patch: &OperandHints) -> bool {
+    let values = !patch.values.is_empty()
+        || !patch.value_tree.is_empty()
+        || !patch.literal_values.is_empty();
+    values
+        && patch.operators.is_empty()
+        && patch.units.is_empty()
+        && patch.datatype.is_none()
+        && patch.pattern.is_none()
+        && patch.min_inclusive.is_none()
+        && patch.max_inclusive.is_none()
+}
+
 /// `base` with the facets `patch` gives laid over it, recorded as coming
 /// from `source`. A facet a patch gives replaces the base's for that facet
 /// alone; a patch never touches what a term is called.
 ///
 /// A patch that gives anything closes the left operand: what its source
-/// says is binding. Facets the base only suggested (the base was not closed)
-/// and the patch does not give are dropped, so the patch makes binding
-/// nothing but what it says; the facets of a base that was already closed
-/// stay, with the source that gave them.
+/// says is binding. A patch from the shapes or a host that gives values and
+/// nothing else binds the values alone ([`OperandHints::values_only`]): the base's operators, units
+/// and datatype stay, and stay what they were (suggestions, when the base
+/// only suggested them; binding, when it was closed). A patch that gives any
+/// other facet makes binding nothing but what it says: the facets the base
+/// only suggested (the base was not closed, or closed its values alone) and
+/// the patch does not give are dropped; the facets of a base that was
+/// already closed stay, with the source that gave them.
 pub(crate) fn layer(base: &OperandHints, patch: &OperandHints, source: HintSource) -> OperandHints {
     if !gives_any(patch) {
         return base.clone();
     }
     let mut out = base.clone();
-    if !base.closed {
-        out.operators.clear();
-        out.values.clear();
-        out.value_tree.clear();
-        out.literal_values.clear();
-        out.units.clear();
-        out.datatype = None;
+    // An overlay that says `prose:closed` closes the whole operand on purpose.
+    if source != HintSource::Overlay && values_alone(patch) {
+        // Only when there are suggestions to keep: with none, closing the
+        // values is closing the operand.
+        if !base.closed
+            && (!base.operators.is_empty() || !base.units.is_empty() || base.datatype.is_some())
+        {
+            out.values_only = true;
+        }
+    } else {
+        if !base.binds_other_facets() {
+            out.operators.clear();
+            out.units.clear();
+            out.datatype = None;
+            if !base.closed {
+                out.values.clear();
+                out.value_tree.clear();
+                out.literal_values.clear();
+            }
+        }
+        out.values_only = false;
     }
     if !patch.operators.is_empty() {
         out.operators = patch.operators.clone();
@@ -50,6 +83,7 @@ pub(crate) fn layer(base: &OperandHints, patch: &OperandHints, source: HintSourc
         out.values = patch.values.clone();
         out.value_tree = patch.value_tree.clone();
         out.literal_values = patch.literal_values.clone();
+        out.values_exact = patch.values_exact;
         out.sources.values = source;
     }
     if !patch.units.is_empty() {
@@ -92,6 +126,7 @@ pub(crate) fn layer_overlay(base: &OperandHints, patch: &OperandHints) -> Operan
         if !patch.values.is_empty() || !patch.value_tree.is_empty() {
             out.values = patch.values.clone();
             out.value_tree = patch.value_tree.clone();
+            out.values_exact = patch.values_exact;
             out.sources.values = HintSource::Overlay;
         }
         if !patch.units.is_empty() {
@@ -134,6 +169,7 @@ pub(crate) fn layer_host(base: &OperandHints, patch: &OperandHints) -> OperandHi
         out.values = patch.values.clone();
         out.value_tree = patch.value_tree.clone();
         out.literal_values.clear();
+        out.values_exact = true;
         out.sources.values = HintSource::Host;
         out.closed = true;
         out.values_only = true;
@@ -141,12 +177,28 @@ pub(crate) fn layer_host(base: &OperandHints, patch: &OperandHints) -> OperandHi
     } else if patch.closed {
         layer(base, patch, HintSource::Host)
     } else if base.closed {
-        return base.clone();
+        // The base's list stays: the host only gives the labels and groups
+        // of the values both list.
+        let mut out = base.clone();
+        let listed: std::collections::HashSet<&str> = base
+            .value_tree
+            .iter()
+            .map(|(v, _)| v.as_str())
+            .chain(base.literal_values.iter().map(String::as_str))
+            .collect();
+        out.source_values = patch
+            .source_values
+            .iter()
+            .filter(|v| listed.contains(v.value()))
+            .cloned()
+            .collect();
+        return out;
     } else {
         let mut out = base.clone();
         out.values = patch.values.clone();
         out.value_tree = patch.value_tree.clone();
         out.literal_values.clear();
+        out.values_exact = true;
         out.sources.values = HintSource::Host;
         out
     };

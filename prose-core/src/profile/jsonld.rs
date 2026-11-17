@@ -318,6 +318,15 @@ impl Walker<'_> {
                     if let Some(inner) = m.get("@value") {
                         self.value_object(ctx, s, p, m, inner);
                     } else if let Some(inner) = m.get("@list").or_else(|| m.get("@set")) {
+                        // An empty `@list` is `rdf:nil`, as Turtle's `()`. Only
+                        // shapes read it (a SHACL list says something even
+                        // when empty); a profile has no use for the node.
+                        if p.starts_with(ns::SH)
+                            && m.contains_key("@list")
+                            && matches!(inner, Value::Array(a) if a.is_empty())
+                        {
+                            self.sink.push(s, p, Object::Iri(ns::RDF_NIL.to_string()));
+                        }
                         todo.push((inner, depth + 1));
                     } else {
                         let local = self.local(ctx, m);

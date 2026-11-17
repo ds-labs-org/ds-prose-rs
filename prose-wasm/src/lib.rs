@@ -487,9 +487,13 @@ impl ProseHandle {
 pub fn validate(
     json: &str,
     #[wasm_bindgen(unchecked_param_type = "string | string[] | null")] profiles: JsValue,
-    options: Option<ValidateOptionsArg>,
-    shapes: Option<String>,
-    overlays: Option<Vec<String>>,
+    #[wasm_bindgen(unchecked_optional_param_type = "ValidateOptions | null")] options: Option<
+        ValidateOptionsArg,
+    >,
+    #[wasm_bindgen(unchecked_optional_param_type = "string | null")] shapes: Option<String>,
+    #[wasm_bindgen(unchecked_optional_param_type = "string[] | null")] overlays: Option<
+        Vec<String>,
+    >,
     #[wasm_bindgen(unchecked_optional_param_type = "ValueSources | null")] value_sources: Option<
         JsValue,
     >,

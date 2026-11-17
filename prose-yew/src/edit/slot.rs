@@ -16,7 +16,7 @@ use prose_core::edit::{
     ConstraintNode, EditDoc, EditEvent, Field, IssueTarget, Literal, NodeRef, RightOperand,
     Severity, Slot, SlotKind, SlotPath, Step, left_operand_at,
 };
-use prose_core::profile::{HintSource, OperandHints, Term, TermKind};
+use prose_core::profile::{HintSource, OperandHints, SourceValue, Term, TermKind};
 use prose_core::validate::{Level, Mode, RuleId, Validator};
 use prose_core::wording;
 
@@ -394,6 +394,21 @@ pub(crate) fn closed_role_source(env: &Env, slot: &Slot) -> bool {
     role_source(env, slot).is_some_and(|s| s.is_closed())
 }
 
+/// The label of a host's value: the one the host gave, else the label a
+/// loaded profile gives the term the value names, else the value itself.
+fn host_label(env: &Env, v: &SourceValue) -> AttrValue {
+    if let Some(label) = v.label() {
+        return label.to_string().into();
+    }
+    let w = &env.cfg.wording;
+    if !w.is_empty()
+        && let Some((term, _)) = w.lookup_written(&env.prefixes, v.value())
+    {
+        return term.display_label(w.languages()).into();
+    }
+    v.value().to_string().into()
+}
+
 /// The suggestions the host's value source for the slot's party role gives,
 /// when it gave one: its values with their labels and groups.
 fn role_source_list(env: &Env, slot: &Slot) -> Option<Vec<Suggestion>> {
@@ -404,7 +419,7 @@ fn role_source_list(env: &Env, slot: &Slot) -> Option<Vec<Suggestion>> {
             .iter()
             .map(|v| Suggestion {
                 value: v.value().to_string().into(),
-                label: v.label().unwrap_or(v.value()).to_string().into(),
+                label: host_label(env, v),
                 hint: None,
                 group: v.group().map(|g| g.to_string().into()),
             })
@@ -500,7 +515,7 @@ fn profile_values(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<AttrValue
             .iter()
             .map(|v| Suggestion {
                 value: v.value().to_string().into(),
-                label: v.label().unwrap_or(v.value()).to_string().into(),
+                label: host_label(env, v),
                 hint: None,
                 group: v.group().map(|g| g.to_string().into()),
             })
@@ -511,11 +526,23 @@ fn profile_values(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<AttrValue
         && (!h.value_tree.is_empty() || !h.literal_values.is_empty())
     {
         let mut depth = HashMap::new();
+        // A host's open source over a closed list: its labels and groups for
+        // the values both list.
+        let named: HashMap<&str, &SourceValue> =
+            h.source_values.iter().map(|v| (v.value(), v)).collect();
         let mut list: Vec<Suggestion> = h
             .value_tree
             .iter()
             .map(|(iri, d)| {
-                let s = profile_suggestion(env, iri, None);
+                let mut s = profile_suggestion(env, iri, None);
+                if let Some(v) = named.get(iri.as_str()) {
+                    if let Some(label) = v.label() {
+                        s.label = label.to_string().into();
+                    }
+                    if let Some(group) = v.group() {
+                        s.group = Some(group.to_string().into());
+                    }
+                }
                 if *d > 0 {
                     depth.insert(s.value.clone(), *d);
                 }

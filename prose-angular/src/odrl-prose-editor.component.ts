@@ -62,11 +62,13 @@ import { PROSE_WASM_MODULE, PROSE_WASM_URL, type ProseWasmModule, loadWasm } fro
  * capped at 0 is not shown, and `{ policyUid: { max: 0 } }` hides the policy
  * identifier). When
  * validation is on (`validation`, or `strict`) the editor marks issues inline
- * and shows a problems panel with fix buttons; edits are flagged, never
- * refused. `outOfScope` turns a limit of `max: 0` into the scope of the
+ * and shows a problems panel with fix buttons; edits are flagged, and refused
+ * only with `refuseTerms` (or `preset="dataspace"`), for a term the validation
+ * does not allow. `outOfScope` turns a limit of `max: 0` into the scope of the
  * incoming document: `'strip'` drops those sections from `json` (parties
  * of a policy definition, say) in any spelling of the key, and
- * `outOfScopeRemoved` emits what went; `jsonChange` never holds them.
+ * `outOfScopeRemoved` emits what went, and `jsonChange` emits the stripped
+ * document, so a `[(json)]` binding drops them too.
  * `'reject'` refuses a document that holds one: `jsonError` emits, with the
  * offending `paths`. `'show'` (the default) keeps them.
  * `preset="dataspace"` turns on what a dataspace asks of its members in one
@@ -251,6 +253,8 @@ export class OdrlProseEditorComponent implements OnChanges, OnDestroy {
     if (!outcome) return;
     if (outcome.jsonError !== undefined) this.jsonError.emit(outcome.jsonError);
     if (outcome.removed) this.outOfScopeRemoved.emit(outcome.removed);
+    // The document on screen lost sections the host's `json` still holds.
+    if (outcome.strippedJson !== undefined) this.jsonChange.emit(outcome.strippedJson);
     if (outcome.profileError !== undefined) this.profileError.emit(outcome.profileError);
     for (const summary of outcome.summaries ?? []) this.profileLoaded.emit(summary);
     if (outcome.overlaysError !== undefined) this.overlaysError.emit(outcome.overlaysError);
