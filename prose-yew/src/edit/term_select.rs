@@ -7,7 +7,7 @@
 //! Deprecated terms are hidden when the validator makes them an error, and
 //! otherwise listed last under `Labels::deprecated`. A stored value that is
 //! none of the options is kept as an extra first option, selected, with the
-//! `not_in_profile` note under the select: it is never dropped, and the
+//! `not_in_profile` note (`not_in_list` without a profile) under the select: it is never dropped, and the
 //! validation report keeps reporting it.
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -18,7 +18,7 @@ use prose_core::profile::TermKind;
 use prose_core::validate::{Level, RuleId};
 
 use super::choice::use_select_in_step;
-use super::config::{Suggestion, TermInput, cls, fill};
+use super::config::{Suggestion, TermInput, cls, merge_styles};
 use super::slot::{
     Closure, allowed_options, holds_iri, left_operand_term, options_for, placeholder,
     profile_suggestion, set_text, strict,
@@ -27,18 +27,22 @@ use super::{Env, EnvRef, FocusKind, SlotFocus};
 
 /// Whether `slot` is rendered as a [`TermSelect`]: the configuration asks
 /// for selects, and the slot holds a term. A unit and a right operand only
-/// when the profile lists units, or values, for the constraint's left
-/// operand; any other right operand is a literal (a date, a number, an
-/// identifier) and stays free text.
+/// when the profile closes the constraint's left operand (`prose:closed`)
+/// and lists units, or values, for it: an open left operand's units and
+/// values are suggestions, so the slot stays free text with them. Any other
+/// right operand is a literal (a date, a number, an identifier) and stays
+/// free text.
 pub(crate) fn takes_select(env: &Env, slot: &Slot) -> bool {
     if env.cfg.term_input != TermInput::Select {
         return false;
     }
     match slot.kind {
         SlotKind::Action | SlotKind::LeftOperand | SlotKind::PolicyKind => true,
-        SlotKind::Unit => left_operand_term(env, slot).is_some_and(|t| !t.hints.units.is_empty()),
+        SlotKind::Unit => left_operand_term(env, slot)
+            .is_some_and(|t| t.hints.closed && !t.hints.units.is_empty()),
         SlotKind::Literal if matches!(slot.path.field, Field::RightOperand(_)) => {
-            left_operand_term(env, slot).is_some_and(|t| !t.hints.value_tree.is_empty())
+            left_operand_term(env, slot)
+                .is_some_and(|t| t.hints.closed && !t.hints.value_tree.is_empty())
         }
         _ => false,
     }
@@ -73,7 +77,7 @@ struct Listing {
 
 fn listing(env: &Env, slot: &Slot) -> Listing {
     let w = &env.cfg.wording;
-    let (mut list, depths) = options_for(env, slot);
+    let (mut list, tree) = options_for(env, slot);
     // A unit or a value may itself be deprecated in its profile.
     let is_deprecated = |value: &str| {
         !w.is_empty()
@@ -81,10 +85,23 @@ fn listing(env: &Env, slot: &Slot) -> Listing {
                 .is_some_and(|(t, _)| t.deprecated)
     };
     let mut deprecated: Vec<Suggestion> = vec![];
+    // A value nested under one that moves to the deprecated group is
+    // indented by its listed ancestors only, so none hangs under a parent
+    // that is not shown above it.
+    let mut depths = HashMap::new();
+    let mut ancestors: Vec<(usize, bool)> = vec![];
     list.retain(|s| {
         let dep = is_deprecated(&s.value);
+        let d = tree.get(&s.value).copied().unwrap_or(0);
+        while ancestors.last().is_some_and(|(a, _)| *a >= d) {
+            ancestors.pop();
+        }
+        let shown = ancestors.iter().filter(|(_, kept)| *kept).count();
+        ancestors.push((d, !dep));
         if dep {
             deprecated.push(s.clone());
+        } else if shown > 0 {
+            depths.insert(s.value.clone(), shown);
         }
         !dep
     });
@@ -105,10 +122,18 @@ fn listing(env: &Env, slot: &Slot) -> Listing {
     if hide_deprecated {
         deprecated.clear();
     }
-    if is_term(slot.kind) {
-        // Under strict validation, only what the validator takes.
-        list = allowed_options(env, slot, Closure::Terms, &list);
-        deprecated = allowed_options(env, slot, Closure::Terms, &deprecated);
+    // Under strict validation, only what the validator takes: one ask for
+    // both lists, which reads the document once, and within the render's
+    // checks. Past them the list is left unfiltered; what a pick sends is
+    // still checked.
+    if is_term(slot.kind) && strict(env).is_some() && env.spend() {
+        let both: Vec<Suggestion> = list.iter().chain(&deprecated).cloned().collect();
+        let taken: HashSet<AttrValue> = allowed_options(env, slot, Closure::Terms, &both)
+            .into_iter()
+            .map(|s| s.value)
+            .collect();
+        list.retain(|s| taken.contains(&s.value));
+        deprecated.retain(|s| taken.contains(&s.value));
     }
     Listing {
         current: list,
@@ -182,7 +207,8 @@ pub(crate) fn term_select(props: &TermSelectProps) -> Html {
         let label = if slot.raw.is_empty() {
             placeholder(&env, slot).to_string()
         } else {
-            fill(&cfg.labels.unknown_option, &[("raw", &slot.raw)])
+            // The note under the select says why; the option is the value.
+            slot.raw.to_string()
         };
         (selected.clone(), label)
     });
@@ -194,6 +220,8 @@ pub(crate) fn term_select(props: &TermSelectProps) -> Html {
         && matches!(slot.path.field, Field::RightOperand(_))
         && !holds_iri(&env.doc, &slot.path);
 
+    // Every value an option offers, for what a change may send.
+    let listed: HashSet<AttrValue> = all.iter().map(|o| o.value.clone()).collect();
     let onchange = {
         let onedit = env.onedit.clone();
         let rev = rev.dispatcher();
@@ -206,11 +234,14 @@ pub(crate) fn term_select(props: &TermSelectProps) -> Html {
                 .and_then(|t| t.dyn_into::<web_sys::HtmlSelectElement>().ok())
                 .map(|s| s.value());
             // Only what is listed can be picked, but a script can set any
-            // value: the validator's check, before anything is sent.
+            // value: it must be an option, and one the validator takes,
+            // before anything is sent.
             let refused = |v: &str| {
-                is_term(slot.kind)
-                    && strict(&env)
-                        .is_some_and(|val| val.admissible(&env.doc, &set_text(&slot, v)).is_err())
+                !listed.contains(v)
+                    || (is_term(slot.kind)
+                        && strict(&env).is_some_and(|val| {
+                            val.admissible(&env.doc, &set_text(&slot, v)).is_err()
+                        }))
             };
             if let Some(value) = value
                 && value != slot.raw
@@ -259,6 +290,27 @@ pub(crate) fn term_select(props: &TermSelectProps) -> Html {
         (!ids.is_empty()).then(|| AttrValue::from(ids.join(" ")))
     };
     let invalid = matches!(props.severity, Some(Severity::Error)).then_some("true");
+    // The state classes and styles of a slot, so an error and a warning
+    // show on a select as they do on free text.
+    let mut class = cls!(cfg, select, "prose-select", "prose-term-select");
+    let mut styles = vec![&cfg.styles.select];
+    match props.severity {
+        Some(Severity::Error) => {
+            class.extend(cls!(cfg, slot_invalid, "prose-slot-invalid"));
+            styles.push(&cfg.styles.slot_invalid);
+        }
+        Some(Severity::Warning) => {
+            class.extend(cls!(cfg, slot_warning, "prose-slot-warning"));
+            styles.push(&cfg.styles.slot_warning);
+        }
+        _ => {}
+    }
+    let style = merge_styles(&styles);
+    let note = if cfg.wording.is_empty() {
+        cfg.labels.not_in_list.clone()
+    } else {
+        cfg.labels.not_in_profile.clone()
+    };
 
     let option = |s: &Suggestion| {
         // A value narrower than a listed one is indented under it.
@@ -292,8 +344,8 @@ pub(crate) fn term_select(props: &TermSelectProps) -> Html {
             <select
                 key={format!("{}:{:?}", slot.owner.0, slot.path.field)}
                 ref={node_ref}
-                class={cls!(cfg, select, "prose-select", "prose-term-select")}
-                style={cfg.styles.select.clone()}
+                class={class}
+                style={style}
                 data-slot={slot.path.to_string()}
                 data-outside={outside.then_some("true")}
                 aria-label={cfg.labels.slot_name(&slot.path)}
@@ -323,7 +375,7 @@ pub(crate) fn term_select(props: &TermSelectProps) -> Html {
                 }
             </select>
             if outside {
-                <small id={note_id} class="prose-slot-note">{ cfg.labels.not_in_profile.clone() }</small>
+                <small id={note_id} class="prose-slot-note">{ note }</small>
             }
         </span>
     }

@@ -386,11 +386,15 @@ async fn term_input_select_turns_the_term_slots_into_dropdowns() {
     assert_eq!(recorded.len(), 1, "{recorded:?}");
     assert!(recorded[0].0.contains("\"ex:train\""), "{}", recorded[0].0);
 
-    // Back to free text; an unknown mode throws and keeps the select.
+    // An unknown mode throws and keeps the select.
+    assert!(h.set_term_input("dropdown").is_err());
+    settle().await;
+    assert_eq!(select(&c, ACTION).unwrap().tag_name(), "SELECT");
+
+    // Back to free text.
     h.set_term_input("free").expect("free");
     settle().await;
     assert_eq!(select(&c, ACTION).unwrap().tag_name(), "SPAN");
-    assert!(h.set_term_input("dropdown").is_err());
 }
 
 #[wasm_bindgen_test]

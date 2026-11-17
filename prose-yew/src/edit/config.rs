@@ -527,6 +527,9 @@ pub struct Labels {
     /// Strict validation. The note under a field whose value the profile
     /// does not allow.
     pub not_in_profile: AttrValue,
+    /// `TermInput::Select` with no profile loaded: the note under a select
+    /// whose value is none of its options.
+    pub not_in_list: AttrValue,
     /// Announced when a closed field is left with text it does not take and
     /// goes back to its value: `{kept}` is that value, `{typed}` the text.
     pub kept_previous: AttrValue,
@@ -620,6 +623,7 @@ impl Default for Labels {
             .map(|(t, p)| (a(&format!("{XSD}{t}")), a(p)))
             .collect(),
             not_in_profile: a("(not in the profile)"),
+            not_in_list: a("(not in the list)"),
             kept_previous: a("Kept \"{kept}\"; \"{typed}\" is not in the profile"),
             kept_empty: a("\"{typed}\" is not in the profile; the field stays empty"),
             allowed_group: a("Allowed by the profile"),

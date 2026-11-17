@@ -669,6 +669,15 @@ The profile types can grow too: `ProfileVocab`, `Wording`, `Prefixes` and
 fields, and start from `ProfileLimits::default()` to change a limit. So is
 `edit::ChoiceSlot`: build one with `ChoiceSlot::new` and set its fields.
 
+Unreleased: the editor can show its term slots as dropdowns of the loaded
+profiles' terms instead of free text: `EditConfig::term_input =
+TermInput::Select` in Yew, `setTermInput('select')` on `ProseEditorHandle`,
+`[termInput]="'select'"` on `<ds-odrl-prose-editor>`. The action, left
+operand and policy type are dropdowns; a unit or right operand is one only
+when the profile closes its left operand (`prose:closed`). The default,
+`free`, renders as before. `@ds-labs/prose-angular` needs a
+`@ds-labs/prose-wasm` that has `setTermInput` for `'select'`.
+
 Changed in 0.7.0: the npm packages have an edit mode. `@ds-labs/prose-wasm`
 adds `ProseEditorHandle` and `@ds-labs/prose-angular` adds
 `<ds-odrl-prose-editor>`, both over `OdrlProseView` in Edit mode. A host can

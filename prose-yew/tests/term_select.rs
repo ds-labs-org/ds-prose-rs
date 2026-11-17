@@ -126,9 +126,7 @@ async fn a_stored_term_outside_the_list_is_kept_selected_and_flagged() {
     let el = element(&html, FOREIGN);
     assert!(el.contains("data-outside=\"true\""), "{el}");
     assert!(
-        el.contains(
-            "<option value=\"foo:bar\" selected=\"selected\">foo:bar (not in the list)</option>"
-        ),
+        el.contains("<option value=\"foo:bar\" selected=\"selected\">foo:bar</option>"),
         "{el}"
     );
     let note = format!("prose-note-{FOREIGN}");
@@ -253,4 +251,112 @@ async fn read_mode_is_unchanged() {
         }
     };
     assert_eq!(read(TermInput::Free).await, read(TermInput::Select).await);
+}
+
+#[tokio::test]
+async fn an_open_left_operand_keeps_its_listed_values_as_suggestions() {
+    // research.jsonld lists the purposes without closing the operand.
+    let open = wording_of(&file("profiles", "research.jsonld"));
+    let cfg = selects(EditConfig::default().with_wording(open));
+    let html = ssr(doc(&file("strict", "violating.json")), cfg).await;
+    let purpose = element(&html, PURPOSE_RIGHT);
+    assert!(purpose.starts_with("<span"), "{purpose}");
+    assert!(purpose.contains("contenteditable"), "{purpose}");
+    // The term slots are selects all the same.
+    assert!(
+        element(&html, PURPOSE_LEFT).starts_with("<select"),
+        "{html}"
+    );
+}
+
+#[tokio::test]
+async fn without_a_profile_the_note_says_not_in_the_list() {
+    let html = ssr(
+        doc(&file("strict", "violating.json")),
+        selects(EditConfig::default()),
+    )
+    .await;
+    let note = format!("id=\"prose-note-{FOREIGN}\"");
+    let at = html.find(&note).unwrap_or_else(|| panic!("{html}"));
+    let rest = &html[at..];
+    let text = &rest[rest.find('>').unwrap() + 1..rest.find("</small>").unwrap()];
+    assert_eq!(text, "(not in the list)");
+    assert!(!html.contains("(not in the profile)"), "{html}");
+}
+
+#[tokio::test]
+async fn a_select_takes_the_error_and_warning_classes_of_a_slot() {
+    use prose_core::edit::{Issue, IssueTarget, Severity};
+    let issue = |slot: &str, severity| Issue {
+        target: IssueTarget::Slot(slot.parse().unwrap()),
+        severity,
+        message: "x".into(),
+    };
+    let issues = Rc::new(vec![
+        issue(FOREIGN, Severity::Error),
+        issue(DISTIL, Severity::Warning),
+    ]);
+    let config = Rc::new(selects(EditConfig::default().with_wording(closed())));
+    let doc = doc(&file("strict", "violating.json"));
+    let local = tokio::task::LocalSet::new();
+    let html = local
+        .run_until(
+            yew::LocalServerRenderer::<OdrlProseView>::with_props(yew::props!(
+                prose_yew::OdrlProseViewProps {
+                    doc,
+                    mode: EditMode::Edit,
+                    config,
+                    issues,
+                }
+            ))
+            .render(),
+        )
+        .await;
+    let error = element(&html, FOREIGN);
+    assert!(error.contains("prose-slot-invalid"), "{error}");
+    assert!(error.contains("aria-invalid=\"true\""), "{error}");
+    let warning = element(&html, DISTIL);
+    assert!(warning.contains("prose-slot-warning"), "{warning}");
+    assert!(!warning.contains("aria-invalid"), "{warning}");
+}
+
+#[tokio::test]
+async fn a_value_under_a_deprecated_one_is_not_left_indented() {
+    let ex = "https://example.org/tree/";
+    let profile = wording_of(&format!(
+        r#"{{
+            "@context": {{"odrl": "http://www.w3.org/ns/odrl/2/", "ex": "{ex}",
+                         "owl": "http://www.w3.org/2002/07/owl#",
+                         "skos": "http://www.w3.org/2004/02/skos/core#",
+                         "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+                         "prose": "https://ds-labs-org.github.io/ds-prose-rs/profile#"}},
+            "@id": "{ex}profile",
+            "@graph": [
+                {{"@id": "ex:lo", "@type": "odrl:LeftOperand", "rdfs:label": "Lo",
+                  "prose:rightOperand": [{{"@id": "ex:old"}}, {{"@id": "ex:other"}}],
+                  "prose:closed": true}},
+                {{"@id": "ex:old", "@type": "odrl:RightOperand", "rdfs:label": "Old",
+                  "owl:deprecated": true}},
+                {{"@id": "ex:child", "@type": "odrl:RightOperand", "rdfs:label": "Child",
+                  "skos:broader": {{"@id": "ex:old"}}}},
+                {{"@id": "ex:other", "@type": "odrl:RightOperand", "rdfs:label": "Other"}}
+            ]
+        }}"#
+    ));
+    let policy = format!(
+        r#"{{"@context":["http://www.w3.org/ns/odrl.jsonld",{{"ex":"{ex}"}}],"@type":"Set","uid":"urn:p","permission":[{{"target":"urn:a","action":"use","constraint":[{{"leftOperand":"ex:lo","operator":"eq","rightOperand":{{"@id":"ex:other"}}}}]}}]}}"#
+    );
+    let html = ssr(
+        doc(&policy),
+        selects(EditConfig::default().with_wording(profile)),
+    )
+    .await;
+    let el = element(&html, PURPOSE_RIGHT);
+    assert!(el.starts_with("<select"), "{el}");
+    assert!(el.contains(">Child</option>"), "{el}");
+    assert!(!el.contains("\u{a0}Child"), "{el}");
+    assert!(
+        el.contains("<optgroup label=\"Deprecated in the profile\""),
+        "{el}"
+    );
 }
