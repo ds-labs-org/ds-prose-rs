@@ -103,10 +103,11 @@ export interface Finding {
     /**
      * What gave the hint, when it was not the loaded profile: `"overlay"` for
      * an operator overlay (`setOverlays`), `"shapes"` for the companion SHACL
-     * shapes (`setShapes`). Absent when the profile did. Precedence: profile
-     * < overlay < shapes.
+     * shapes (`setShapes`), `"host"` for a runtime value source the host
+     * passed (`setValueSource`). Absent when the profile did. Precedence:
+     * profile < overlay < shapes < host.
      */
-    source?: "overlay" | "shapes";
+    source?: "overlay" | "shapes" | "host";
     /** The `sh:pattern` a value did not match. */
     pattern?: string;
     /** The `sh:minInclusive` a value was below. */
@@ -262,5 +263,39 @@ export interface OverlaySummary {
   /** How many terms the overlay names. */
   terms: number;
   /** What was not read, or cannot be used: a term no loaded profile declares as a left operand is ignored. */
+  warnings: string[];
+}
+
+/**
+ * One value of a runtime value source: a string (what is written into the
+ * policy, shown as it is), or an object with a `label` and a `group` the
+ * editor shows it under (an `<optgroup>` heading in a select).
+ */
+export type ValueSourceValue = string | { value: string; label?: string; group?: string };
+
+/**
+ * Runtime value sources (`setValueSource`, `setValueSources`): values the
+ * host takes from the dataspace's registry or catalog (participant DIDs,
+ * credential types, asset ids, purposes), passed per left operand (the key is
+ * its IRI) or per party role (`"assigner"`, `"assignee"`, `"target"`; the
+ * target is the asset). An entry is a list, which only suggests, or
+ * `{ values, closed }`. The editor never fetches: the host does, and caches.
+ *
+ * Precedence: profile < overlay < shapes < host, for the values alone. A
+ * closed source binds in strict validation, and a finding names `"host"` as
+ * its source. A value the source no longer lists stays in the document and is
+ * flagged; it is never dropped. An empty list is no source.
+ */
+export type ValueSources = Record<
+  string,
+  ValueSourceValue[] | { values: ValueSourceValue[]; closed?: boolean }
+>;
+
+/** What `setValueSource` returns as JSON text (and `setValueSources`, one per key, in an object). */
+export interface ValueSourceSummary {
+  /** How many values the source lists. */
+  values: number;
+  closed: boolean;
+  /** What cannot be used: a left operand no loaded profile declares is ignored. */
   warnings: string[];
 }

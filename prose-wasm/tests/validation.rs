@@ -512,3 +512,135 @@ fn dts_declares_the_overlay_api() {
         assert!(TYPES_D_TS.contains(name), "{name}");
     }
 }
+
+// --- runtime value sources -------------------------------------------------------
+
+const DX: &str = "https://example.org/dataspace/";
+
+fn purposes(closed: bool) -> Value {
+    json!({
+        format!("{DX}purpose"): {
+            "values": [
+                {"value": format!("{DX}research"), "label": "Research", "group": "Purposes"},
+                format!("{DX}marketing"),
+            ],
+            "closed": closed
+        }
+    })
+}
+
+fn sourced_report(sources: &Value) -> Value {
+    let texts = vec![DX_PROFILE.to_string()];
+    let sources = value_sources(sources).expect("reads");
+    let v = validator_with_sources(&texts, None, &[], &sources, opts(json!({}))).expect("builds");
+    serde_json::from_str(&validate_text(DX_POLICY, &v)).expect("the report is JSON")
+}
+
+#[test]
+fn a_closed_value_source_names_the_host_in_its_findings() {
+    assert_eq!(sourced_report(&json!({}))["verdict"], "conforms");
+    let r = sourced_report(&purposes(true));
+    assert_eq!(r["verdict"], "violations", "{r}");
+    let f = &r["findings"][0];
+    assert_eq!(f["rule"], "prose.value-not-allowed");
+    assert_eq!(f["expected"]["source"], "host");
+    assert!(f["message"].as_str().unwrap().contains("the host allows"));
+}
+
+#[test]
+fn a_suggest_only_value_source_flags_nothing_as_an_error() {
+    let r = sourced_report(&purposes(false));
+    assert_ne!(r["verdict"], "violations", "{r}");
+}
+
+#[test]
+fn a_value_source_takes_text_or_labelled_values_and_a_closed_flag() {
+    let s = value_sources(&purposes(true)).expect("reads");
+    let src = s.operand(&format!("{DX}purpose")).expect("the source");
+    assert!(src.is_closed());
+    assert_eq!(src.values().len(), 2);
+    assert_eq!(src.values()[0].label(), Some("Research"));
+    assert_eq!(src.values()[0].group(), Some("Purposes"));
+    assert_eq!(src.values()[1].value(), format!("{DX}marketing"));
+    assert_eq!(src.values()[1].label(), None);
+    // A bare list is suggest-only.
+    let s = value_sources(&json!({ format!("{DX}purpose"): ["a", "b"] })).unwrap();
+    assert!(!s.operand(&format!("{DX}purpose")).unwrap().is_closed());
+}
+
+#[test]
+fn a_value_source_is_addressed_by_left_operand_or_party_role() {
+    use prose_core::edit::EntityRole;
+    let s = value_sources(&json!({
+        "assignee": ["did:web:a"],
+        "target": {"values": ["urn:asset:1"], "closed": true},
+        "http://www.w3.org/ns/odrl/2/assigner": ["did:web:b"],
+        format!("{DX}purpose"): ["x"],
+    }))
+    .expect("reads");
+    assert!(s.role(EntityRole::Assignee).is_some());
+    assert!(s.role(EntityRole::Target).unwrap().is_closed());
+    assert!(s.role(EntityRole::Assigner).is_some());
+    assert_eq!(s.operands().count(), 1);
+}
+
+#[test]
+fn setting_a_source_to_null_clears_it() {
+    let mut s = value_sources(&purposes(true)).unwrap();
+    set_value_source(&mut s, &format!("{DX}purpose"), &Value::Null, false).expect("clears");
+    assert!(s.is_empty());
+    let mut s = value_sources(&json!({"assignee": ["did:web:a"]})).unwrap();
+    set_value_source(&mut s, "assignee", &Value::Null, false).unwrap();
+    assert!(s.is_empty());
+}
+
+#[test]
+fn unreadable_value_sources_say_what_is_wrong() {
+    for bad in [
+        json!("x"),
+        json!([1]),
+        json!({"": ["a"]}),
+        json!({"k": "not a list"}),
+        json!({"k": [1]}),
+        json!({"k": [{"label": "no value"}]}),
+        json!({"k": [{"value": "v", "labell": "typo"}]}),
+        json!({"k": {"values": [], "closd": true}}),
+        json!({"k": {"values": [], "closed": "yes"}}),
+    ] {
+        let e = value_sources(&bad).unwrap_err();
+        assert!(e.starts_with("valueSources: "), "{bad}: {e}");
+    }
+}
+
+#[test]
+fn value_source_summaries_say_what_was_read_and_what_was_ignored() {
+    let mut json = purposes(true);
+    json[format!("{DX}ghost")] = json!(["a"]);
+    json["assignee"] = json!(["did:web:a", "did:web:b"]);
+    let s = value_sources(&json).unwrap();
+    let w = with_value_sources(wording(&[DX_PROFILE.to_string()]).unwrap(), &s);
+    let v: Value = serde_json::from_str(&value_source_summaries_json(&w, &s)).unwrap();
+    assert_eq!(v[format!("{DX}purpose")]["values"], 2, "{v}");
+    assert_eq!(v[format!("{DX}purpose")]["closed"], true);
+    assert_eq!(v[format!("{DX}purpose")]["warnings"], json!([]));
+    assert_eq!(v["assignee"]["values"], 2);
+    assert!(
+        v[format!("{DX}ghost")]["warnings"][0]
+            .as_str()
+            .unwrap()
+            .contains("ghost"),
+        "{v}"
+    );
+}
+
+#[test]
+fn dts_declares_the_value_source_api() {
+    for name in [
+        "ValueSourceValue",
+        "ValueSources",
+        "ValueSourceSummary",
+        "\"host\"",
+    ] {
+        assert!(TYPES_D_TS.contains(name), "{name}");
+    }
+}

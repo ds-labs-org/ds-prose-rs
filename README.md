@@ -698,6 +698,12 @@ validator does not allow. `preset="dataspace"` on `<ds-odrl-prose-editor>`
 turns on strict and structural validation, `termInput="select"`, refusing
 terms, `logicalDepth` 2 and the two lints in one input, each still overridable.
 
+Added with the runtime value sources: `HintSource::Host`, `OperandHints::source_values`,
+`profile::{SourceValue, ValueSource, ValueSources}`, `Wording::{with_value_sources,
+value_sources, role_source, value_source_warnings}` and `EditConfig::{value_sources,
+with_value_sources}`; `Labels` gained `not_in_source` and `EditConfig` gained `value_sources`, so a
+struct literal of either needs them (use `..Default::default()`).
+
 Added with the operator overlay: `HintSource::Overlay`, `profile::{Overlay, OverlayError}` and
 `Wording::{with_overlay, overlays, overlay_warnings}`; both are `#[non_exhaustive]`.
 
@@ -928,6 +934,51 @@ components, with `overlaysLoaded` and `overlaysError`. An overlay's `warnings` n
 terms no loaded profile declares, so they depend on the profiles: `overlaySummaries()` on
 `ProseHandle` and `ProseEditorHandle` recomputes them, and the Angular components emit
 `overlaysLoaded` again when only the profiles change.
+
+### Runtime value sources
+
+Some values come from the dataspace's registry or catalog and change daily: participant
+DIDs, membership or credential types, asset ids, purposes. The host fetches and caches
+them, and passes them to the editor; the editor never fetches. `ValueSources` holds them
+per left operand (by IRI) and per party role (`EntityRole::Assigner`, `Assignee`,
+`Target`); each is a `ValueSource`, a list of `SourceValue`s (a value, with an optional
+label and group) that is closed or only suggests. `Wording::with_value_sources` lays them on
+top of the hints (profile < overlay < shapes < host), for the values facet alone, and
+`EditConfig::with_value_sources` does it for the Yew editor.
+
+```rust
+let mut sources = ValueSources::new();
+sources.set_operand(
+    "https://example.org/dataspace/participantType",
+    ValueSource::new(
+        vec![
+            SourceValue::new("did:web:alpha.example").with_label("Alpha Corp").with_group("Members"),
+            SourceValue::new("did:web:gamma.example").with_group("Observers"),
+        ],
+        true, // closed: binding in strict validation
+    ),
+);
+let wording = Wording::new().with_profile(profile).with_value_sources(sources);
+```
+
+A closed source makes the right operand a select with `TermInput::Select`, its values
+under `<optgroup>` headings for their groups and with their labels as the text; any other
+value is `prose.value-not-allowed`, with `expected.source: "host"` and "the host allows" in
+the message. A source that only suggests leaves the slot free text with those suggestions,
+flags nothing as an error, and never loosens an operand a profile, an overlay or shapes
+closed. A policy may write a listed value as an IRI or as a string; either is that value.
+An empty source is no source, so a registry fetch that failed does not flag every value.
+
+A value the source no longer lists is never dropped: it stays in the document, the select
+shows it as an extra first option with the `not_in_source` note, and a closed source
+flags it. A source for a party role (`Wording::role_source`) feeds the suggestions of the
+assigner, assignee and target slots, and a closed one flags a party or asset it does not
+list. A source for a left operand no loaded profile declares is ignored
+(`Wording::value_source_warnings`). On npm: `setValueSource(key, values, { closed })` and
+`setValueSources(map)` on the wasm handles, `validate(..., shapes, overlays,
+valueSources)`, and `[valueSources]` on the Angular components, with `valueSourcesLoaded` and
+`valueSourcesError`. See the site's "Running in a dataspace" page for which source to use
+when.
 
 Changed in the shapes and overlay release: `Labels` gained `allowed_group_overlay`,
 `not_allowed_group_overlay`, `allowed_group_shapes`, `not_allowed_group_shapes` and

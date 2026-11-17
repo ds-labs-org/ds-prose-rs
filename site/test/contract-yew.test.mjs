@@ -103,7 +103,7 @@ test('EditConfig: fields, types and defaults equal the struct and its Default im
 
 test('EditConfig builders are named with their signatures', () => {
   const s = sec('EditConfig');
-  for (const sig of ['pub fn with_wording(mut self, w: Rc<Wording>) -> EditConfig', 'pub fn with_strict(mut self, options: Options) -> EditConfig']) {
+  for (const sig of ['pub fn with_value_sources(mut self, sources: ValueSources) -> EditConfig', 'pub fn with_wording(mut self, w: Rc<Wording>) -> EditConfig', 'pub fn with_strict(mut self, options: Options) -> EditConfig']) {
     assert.ok(CONFIG.includes(sig.replace('(mut self', '(mut self')), `${sig} is not in config.rs`);
     assert.ok(squash(s).includes(squash(sig.replace('mut self', 'self'))), `docs lack ${sig}`);
   }

@@ -10,7 +10,7 @@ import {
   output,
   signal,
 } from '@angular/core';
-import type { EditLimits, OutOfScopeMode, OverlaySummary, ProseEditorHandle, RemovedSection, ShapesSummary, TermInput, ValidateOptions, ValidationReport } from '@ds-labs/prose-wasm';
+import type { EditLimits, OutOfScopeMode, OverlaySummary, ProseEditorHandle, RemovedSection, ShapesSummary, TermInput, ValidateOptions, ValidationReport, ValueSourceSummary, ValueSources } from '@ds-labs/prose-wasm';
 import { type EditorInputs, EditorSession, resolvePreset } from './editor-sync';
 import type { ProfileSummary } from './profile-sync';
 import { parseReport, profileTexts, reportChanged } from './validation-sync';
@@ -48,7 +48,16 @@ import { PROSE_WASM_MODULE, PROSE_WASM_URL, type ProseWasmModule, loadWasm } fro
  * dropdown (with `termInput="select"`) and any other value is an error that
  * names the shapes; `sh:in` on `odrl:action` or `odrl:leftOperand` closes
  * those lists for the whole policy. Only a subset of SHACL is read:
- * `shapesLoaded` emits what was, with the `warnings` for what was not. `limits` sets how many items each list may hold
+ * `shapesLoaded` emits what was, with the `warnings` for what was not.
+ * `valueSources` takes the values the host took from the dataspace's registry
+ * or catalog (participant DIDs, credential types, asset ids, purposes), by
+ * left operand IRI or party role (`assigner`, `assignee`, `target`): a list
+ * of strings or `{ value, label, group }` (which only suggests), or
+ * `{ values, closed: true }`, which makes a right operand a dropdown of
+ * exactly those values, grouped under their `group`. The editor never
+ * fetches: the host does, and caches. A value the source no longer lists
+ * stays in the document and is flagged; it is never dropped.
+ * `valueSourcesLoaded` emits one summary per key. `limits` sets how many items each list may hold
  * (`{ policyAssigner: { max: 0 } }` removes the assigner button; a list
  * capped at 0 is not shown, and `{ policyUid: { max: 0 } }` hides the policy
  * identifier). When
@@ -93,6 +102,14 @@ export class OdrlProseEditorComponent implements OnChanges, OnDestroy {
    * loaded profiles declare and never relabel a term; the shapes win over them.
    */
   readonly overlays = input<string[] | null>(null);
+  /**
+   * Values the host took from its registry or catalog, keyed by left operand
+   * IRI or by party role (`assigner`, `assignee`, `target`); each is a list of
+   * values (suggestions) or `{ values, closed }`. They sit on top of the
+   * profiles, overlays and shapes. A value a closed source does not list is
+   * kept and flagged.
+   */
+  readonly valueSources = input<ValueSources | null>(null);
   /**
    * The text of the dataspace's companion SHACL shapes, JSON-LD (or Turtle,
    * with the Turtle build); blank is none. They narrow what the loaded
@@ -145,6 +162,10 @@ export class OdrlProseEditorComponent implements OnChanges, OnDestroy {
   readonly overlaysLoaded = output<OverlaySummary[]>();
   /** Emits when an `overlays` text is not a readable overlay; the previous overlays stay. */
   readonly overlaysError = output<unknown>();
+  /** Emits one summary per key of the `valueSources` input, each time it changes (or the profiles do) to sources that were read; `warnings` lists what was not used. */
+  readonly valueSourcesLoaded = output<Record<string, ValueSourceSummary>>();
+  /** Emits when the `valueSources` input cannot be read; the previous sources stay. */
+  readonly valueSourcesError = output<unknown>();
   /** Emits what the `shapes` input holds, each time it changes to shapes that were read; `warnings` lists what was not read. */
   readonly shapesLoaded = output<ShapesSummary>();
   /** Emits when the `shapes` input is not readable shapes; the previous shapes stay. */
@@ -212,6 +233,7 @@ export class OdrlProseEditorComponent implements OnChanges, OnDestroy {
       texts: profileTexts(this.profile(), this.profiles()),
       overlays: this.overlays(),
       shapes: this.shapes(),
+      valueSources: this.valueSources(),
       options: resolved.options,
       limits: resolved.limits,
       termInput: resolved.termInput,
@@ -235,6 +257,8 @@ export class OdrlProseEditorComponent implements OnChanges, OnDestroy {
     if (outcome.overlaysSummary) this.overlaysLoaded.emit(outcome.overlaysSummary);
     if (outcome.shapesError !== undefined) this.shapesError.emit(outcome.shapesError);
     if (outcome.shapesSummary) this.shapesLoaded.emit(outcome.shapesSummary);
+    if (outcome.valueSourcesError !== undefined) this.valueSourcesError.emit(outcome.valueSourcesError);
+    if (outcome.valueSourcesSummary) this.valueSourcesLoaded.emit(outcome.valueSourcesSummary);
     if (outcome.validationError !== undefined) this.validationError.emit(outcome.validationError);
     if (outcome.report !== undefined) this.publish(parseReport<ValidationReport>(outcome.report));
   }

@@ -68,11 +68,11 @@ fn has(c: &Element, selector: &str) -> bool {
 
 #[wasm_bindgen_test]
 fn validate_takes_a_string_a_list_or_null() {
-    let one = validate(CLEAN, JsValue::from_str(RESEARCH), None, None, None).unwrap();
-    let many = validate(CLEAN, list(&[RESEARCH]), None, None, None).unwrap();
+    let one = validate(CLEAN, JsValue::from_str(RESEARCH), None, None, None, None).unwrap();
+    let many = validate(CLEAN, list(&[RESEARCH]), None, None, None, None).unwrap();
     assert_eq!(one, many);
     assert_eq!(parsed(&one)["verdict"], "conforms");
-    let none = parsed(&validate(NOT_LOADED, JsValue::NULL, None, None, None).unwrap());
+    let none = parsed(&validate(NOT_LOADED, JsValue::NULL, None, None, None, None).unwrap());
     assert_eq!(none["verdict"], "incomplete");
     assert_eq!(none["gaps"][0]["rule"], "profile.not-loaded");
 }
@@ -80,19 +80,39 @@ fn validate_takes_a_string_a_list_or_null() {
 #[wasm_bindgen_test]
 fn validate_reads_options() {
     let o = opts(r#"{"strict": false}"#);
-    let r = parsed(&validate(CLEAN, JsValue::from_str(RESEARCH), Some(o), None, None).unwrap());
+    let r = parsed(
+        &validate(
+            CLEAN,
+            JsValue::from_str(RESEARCH),
+            Some(o),
+            None,
+            None,
+            None,
+        )
+        .unwrap(),
+    );
     assert_eq!(r["mode"], "advisory");
     let o = opts(r#"{"structural": true, "rules": {"odrl.no-rule": "off"}}"#);
-    let r = parsed(&validate(CLEAN, JsValue::from_str(RESEARCH), Some(o), None, None).unwrap());
+    let r = parsed(
+        &validate(
+            CLEAN,
+            JsValue::from_str(RESEARCH),
+            Some(o),
+            None,
+            None,
+            None,
+        )
+        .unwrap(),
+    );
     assert_eq!(r["mode"], "strict");
     assert!(r["tiers"].as_array().unwrap().iter().any(|t| t == "odrl"));
 }
 
 #[wasm_bindgen_test]
 fn two_profiles_conform_when_both_are_loaded() {
-    let r = parsed(&validate(MIXED, list(&[RESEARCH, OTHER]), None, None, None).unwrap());
+    let r = parsed(&validate(MIXED, list(&[RESEARCH, OTHER]), None, None, None, None).unwrap());
     assert_eq!(r["verdict"], "conforms", "{r}");
-    let r = parsed(&validate(MIXED, list(&[RESEARCH]), None, None, None).unwrap());
+    let r = parsed(&validate(MIXED, list(&[RESEARCH]), None, None, None, None).unwrap());
     assert_ne!(r["verdict"], "conforms");
 }
 
@@ -104,16 +124,18 @@ fn bad_input_throws_and_a_bad_policy_does_not() {
             JsValue::from_str("<!doctype html><p>hi"),
             None,
             None,
+            None,
             None
         )
         .is_err()
     );
-    assert!(validate(CLEAN, JsValue::from_f64(3.0), None, None, None).is_err());
+    assert!(validate(CLEAN, JsValue::from_f64(3.0), None, None, None, None).is_err());
     assert!(
         validate(
             CLEAN,
             JsValue::NULL,
             Some(opts(r#"{"strictt": 1}"#)),
+            None,
             None,
             None
         )
@@ -125,11 +147,12 @@ fn bad_input_throws_and_a_bad_policy_does_not() {
             JsValue::NULL,
             Some(JsValue::from_str("strict").unchecked_into()),
             None,
+            None,
             None
         )
         .is_err()
     );
-    let r = parsed(&validate("not json at all", JsValue::NULL, None, None, None).unwrap());
+    let r = parsed(&validate("not json at all", JsValue::NULL, None, None, None, None).unwrap());
     assert_eq!(r["findings"][0]["rule"], "input.unreadable");
     // Undefined and null options are the defaults.
     assert!(
@@ -137,6 +160,7 @@ fn bad_input_throws_and_a_bad_policy_does_not() {
             CLEAN,
             JsValue::NULL,
             Some(JsValue::UNDEFINED.unchecked_into()),
+            None,
             None,
             None
         )
@@ -147,6 +171,7 @@ fn bad_input_throws_and_a_bad_policy_does_not() {
             CLEAN,
             JsValue::NULL,
             Some(JsValue::NULL.unchecked_into()),
+            None,
             None,
             None
         )
@@ -351,7 +376,7 @@ async fn the_rendering_handle_validates_with_shapes_too() {
 fn validate_takes_shapes_as_its_last_argument() {
     let report = |shapes: Option<String>| -> Value {
         serde_json::from_str(
-            &validate(DX_POLICY, list(&[DX_PROFILE]), None, shapes, None).expect("validates"),
+            &validate(DX_POLICY, list(&[DX_PROFILE]), None, shapes, None, None).expect("validates"),
         )
         .unwrap()
     };
@@ -365,6 +390,7 @@ fn validate_takes_shapes_as_its_last_argument() {
             list(&[DX_PROFILE]),
             None,
             Some("{".to_string()),
+            None,
             None
         )
         .is_err()
@@ -428,7 +454,7 @@ async fn the_rendering_handle_validates_with_overlays_too() {
 #[wasm_bindgen_test]
 fn validate_takes_overlays_as_its_last_argument() {
     let report = |o: Option<Vec<String>>| -> Value {
-        parsed(&validate(DX_POLICY, list(&[DX_PROFILE]), None, None, o).expect("validates"))
+        parsed(&validate(DX_POLICY, list(&[DX_PROFILE]), None, None, o, None).expect("validates"))
     };
     assert_eq!(report(None)["verdict"], "conforms");
     let with = report(Some(overlays(&[DX_OVERLAY])));
@@ -440,7 +466,8 @@ fn validate_takes_overlays_as_its_last_argument() {
             list(&[DX_PROFILE]),
             None,
             None,
-            Some(overlays(&["{"]))
+            Some(overlays(&["{"])),
+            None
         )
         .is_err()
     );
@@ -467,4 +494,114 @@ async fn overlay_summaries_are_recomputed_when_the_profiles_change() {
     // And back.
     h.set_profiles(list(&[])).unwrap();
     assert_eq!(warnings(&h), at_load[0]["warnings"]);
+}
+
+// --- runtime value sources (setValueSource, setValueSources) ---------------------------
+
+const DX_PURPOSE: &str = "https://example.org/dataspace/purpose";
+const DX_VALUES: &str = r#"[{"value":"https://example.org/dataspace/research","label":"Research","group":"Purposes"},"https://example.org/dataspace/marketing"]"#;
+const DX_SOURCES: &str = r#"{"https://example.org/dataspace/purpose":{"values":[{"value":"https://example.org/dataspace/research","label":"Research","group":"Purposes"},"https://example.org/dataspace/marketing"],"closed":true}}"#;
+
+#[wasm_bindgen_test]
+fn a_validator_takes_one_value_source_and_drops_it() {
+    let mut v = ProseValidator::new(list(&[DX_PROFILE]), None).unwrap();
+    assert_eq!(parsed(&v.validate(DX_POLICY))["verdict"], "conforms");
+    let summary = parsed(
+        &v.set_value_source(DX_PURPOSE, js(DX_VALUES), Some(js(r#"{"closed":true}"#)))
+            .unwrap(),
+    );
+    assert_eq!(summary["values"], 2, "{summary}");
+    assert_eq!(summary["closed"], true);
+    let report = parsed(&v.validate(DX_POLICY));
+    assert_eq!(report["verdict"], "violations");
+    assert_eq!(report["findings"][0]["expected"]["source"], "host");
+    // Suggest-only (no options) flags no error.
+    v.set_value_source(DX_PURPOSE, js(DX_VALUES), None).unwrap();
+    assert_ne!(parsed(&v.validate(DX_POLICY))["verdict"], "violations");
+    // Unreadable values throw and keep the previous source.
+    v.set_value_source(DX_PURPOSE, js(DX_VALUES), Some(js(r#"{"closed":true}"#)))
+        .unwrap();
+    assert!(v.set_value_source(DX_PURPOSE, js("[1]"), None).is_err());
+    assert!(
+        v.set_value_source(DX_PURPOSE, js(DX_VALUES), Some(js(r#"{"closd":true}"#)))
+            .is_err()
+    );
+    assert_eq!(parsed(&v.validate(DX_POLICY))["verdict"], "violations");
+    // null clears it.
+    assert_eq!(
+        v.set_value_source(DX_PURPOSE, JsValue::NULL, None).unwrap(),
+        "null"
+    );
+    assert_eq!(parsed(&v.validate(DX_POLICY))["verdict"], "conforms");
+}
+
+#[wasm_bindgen_test]
+fn a_validator_takes_all_value_sources_at_once_and_keeps_the_shapes_and_overlays() {
+    let mut v = ProseValidator::new(list(&[DX_PROFILE]), None).unwrap();
+    let summary = parsed(&v.set_value_sources(js(DX_SOURCES)).unwrap());
+    assert_eq!(summary[DX_PURPOSE]["values"], 2, "{summary}");
+    assert_eq!(parsed(&v.validate(DX_POLICY))["verdict"], "violations");
+    // The shapes are laid under the host: the host still names itself.
+    v.set_shapes(Some(DX_SHAPES.to_string())).unwrap();
+    assert_eq!(
+        parsed(&v.validate(DX_POLICY))["findings"][0]["expected"]["source"],
+        "host"
+    );
+    assert!(v.set_value_sources(js(r#"{"k": 3}"#)).is_err());
+    assert_eq!(
+        parsed(&v.validate(DX_POLICY))["findings"][0]["expected"]["source"],
+        "host",
+        "an unreadable map keeps the previous sources"
+    );
+    assert_eq!(v.set_value_sources(JsValue::NULL).unwrap(), "{}");
+    assert_eq!(
+        parsed(&v.validate(DX_POLICY))["findings"][0]["expected"]["source"],
+        "shapes"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn the_rendering_handle_validates_with_value_sources_too() {
+    let (c, mut h) = mount(DX_POLICY).await;
+    h.set_profiles(list(&[DX_PROFILE])).unwrap();
+    h.set_validation(js("{}")).unwrap();
+    settle().await;
+    assert_eq!(parsed(&report_of(&h).unwrap())["verdict"], "conforms");
+    h.set_value_sources(js(DX_SOURCES)).unwrap();
+    settle().await;
+    let report = parsed(&report_of(&h).unwrap());
+    assert_eq!(report["verdict"], "violations", "{}", c.inner_html());
+    assert_eq!(report["findings"][0]["expected"]["source"], "host");
+    // New profiles keep the sources.
+    h.set_profiles(list(&[DX_PROFILE])).unwrap();
+    assert_eq!(parsed(&report_of(&h).unwrap())["verdict"], "violations");
+    // The summaries follow the profiles loaded now.
+    let summaries = parsed(&h.value_source_summaries());
+    assert_eq!(summaries[DX_PURPOSE]["warnings"], serde_json::json!([]));
+    h.set_value_source(DX_PURPOSE, JsValue::NULL, None).unwrap();
+    assert_eq!(parsed(&report_of(&h).unwrap())["verdict"], "conforms");
+    assert!(h.set_value_source(DX_PURPOSE, js("[1]"), None).is_err());
+}
+
+#[wasm_bindgen_test]
+fn validate_takes_value_sources_as_its_last_argument() {
+    let report = |s: Option<JsValue>| -> Value {
+        parsed(&validate(DX_POLICY, list(&[DX_PROFILE]), None, None, None, s).expect("validates"))
+    };
+    assert_eq!(report(None)["verdict"], "conforms");
+    assert_eq!(report(Some(JsValue::NULL))["verdict"], "conforms");
+    let with = report(Some(js(DX_SOURCES)));
+    assert_eq!(with["verdict"], "violations");
+    assert_eq!(with["findings"][0]["expected"]["source"], "host");
+    assert!(
+        validate(
+            DX_POLICY,
+            list(&[DX_PROFILE]),
+            None,
+            None,
+            None,
+            Some(js(r#"{"k": 3}"#))
+        )
+        .is_err()
+    );
 }

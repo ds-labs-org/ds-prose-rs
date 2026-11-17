@@ -5,7 +5,10 @@
 //! `lib.rs` exposes these through wasm-bindgen as `validate`, `rules`,
 //! `ProseValidator` and the `ProseHandle` methods; everything here is plain
 //! Rust and tested on the host.
-use prose_core::profile::{OdrlVocab, Overlay, ProfileError, ProfileVocab, Wording};
+use prose_core::edit::EntityRole;
+use prose_core::profile::{
+    OdrlVocab, Overlay, ProfileError, ProfileVocab, SourceValue, ValueSource, ValueSources, Wording,
+};
 use prose_core::shapes::ShapesGraph;
 use prose_core::validate::{
     Basis, Level, Options, RULES, RULESET, RuleId, RuleInfo, Tier, Validator,
@@ -274,6 +277,224 @@ pub fn validator_with(
     let overlays = overlays(overlay_texts)?;
     let w = with_shapes(with_overlays(wording(texts)?, &overlays), shapes.as_ref());
     Ok(Validator::new(Arc::new(w), options))
+}
+
+/// Where a host's value source applies: the IRI of a left operand, or the
+/// parties (the assets, for the target) of a role.
+enum SourceKey {
+    Operand(String),
+    Role(EntityRole),
+}
+
+/// A key a host passes: a party role by its bare name (`"assigner"`,
+/// `"assignee"`, `"target"`) or by ODRL's IRI for it; anything else is the
+/// IRI of a left operand.
+fn source_key(key: &str) -> Result<SourceKey, String> {
+    const ODRL: &str = "http://www.w3.org/ns/odrl/2/";
+    if key.trim().is_empty() {
+        return Err("valueSources: a key is empty; use a left operand's IRI, or \"assigner\", \"assignee\" or \"target\"".into());
+    }
+    let bare = key.strip_prefix(ODRL).unwrap_or(key);
+    Ok(match EntityRole::parse(bare) {
+        Some(role) => SourceKey::Role(role),
+        None => SourceKey::Operand(key.to_string()),
+    })
+}
+
+/// One value of a source: a string, or `{value, label?, group?}`.
+fn source_value(key: &str, v: &Value) -> Result<SourceValue, String> {
+    match v {
+        Value::String(s) if !s.is_empty() => Ok(SourceValue::new(s)),
+        Value::Object(o) => {
+            if let Some(bad) = o
+                .keys()
+                .find(|k| !["value", "label", "group"].contains(&k.as_str()))
+            {
+                return Err(format!(
+                    "valueSources: \"{key}\": a value has no key \"{bad}\" (use value, label, group)"
+                ));
+            }
+            let text = |k: &str| match o.get(k) {
+                None | Some(Value::Null) => Ok(None),
+                Some(Value::String(s)) => Ok(Some(s.as_str())),
+                Some(_) => Err(format!(
+                    "valueSources: \"{key}\": \"{k}\" of a value must be a string"
+                )),
+            };
+            let Some(value) = text("value")?.filter(|v| !v.is_empty()) else {
+                return Err(format!(
+                    "valueSources: \"{key}\": a value needs a \"value\" string"
+                ));
+            };
+            let mut out = SourceValue::new(value);
+            if let Some(l) = text("label")?.filter(|l| !l.is_empty()) {
+                out = out.with_label(l);
+            }
+            if let Some(g) = text("group")?.filter(|g| !g.is_empty()) {
+                out = out.with_group(g);
+            }
+            Ok(out)
+        }
+        _ => Err(format!(
+            "valueSources: \"{key}\": a value is a string or {{value, label, group}}"
+        )),
+    }
+}
+
+/// Sets, or with `null` clears, the source `values` for `key` in `sources`.
+/// `closed` says whether the values are the only ones strict validation
+/// takes (`false`: suggestions). The error starts with `valueSources: `.
+pub fn set_value_source(
+    sources: &mut ValueSources,
+    key: &str,
+    values: &Value,
+    closed: bool,
+) -> Result<(), String> {
+    let target = source_key(key)?;
+    let source = match values {
+        Value::Null => None,
+        Value::Array(items) => {
+            let list = items
+                .iter()
+                .map(|v| source_value(key, v))
+                .collect::<Result<Vec<_>, _>>()?;
+            Some(ValueSource::new(list, closed))
+        }
+        _ => {
+            return Err(format!(
+                "valueSources: \"{key}\": the values are a list (or null to clear)"
+            ));
+        }
+    };
+    match (target, source) {
+        (SourceKey::Operand(iri), Some(s)) => sources.set_operand(&iri, s),
+        (SourceKey::Operand(iri), None) => {
+            sources.remove_operand(&iri);
+        }
+        (SourceKey::Role(r), Some(s)) => sources.set_role(r, s),
+        (SourceKey::Role(r), None) => {
+            sources.remove_role(r);
+        }
+    }
+    Ok(())
+}
+
+fn closed_flag(v: Option<&Value>) -> Result<bool, String> {
+    match v {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Bool(b)) => Ok(*b),
+        Some(_) => Err("valueSources: \"closed\" must be true or false".into()),
+    }
+}
+
+/// The `closed` of the options a host passes to `setValueSource`
+/// (`{closed?: boolean}`; absent is suggest-only).
+pub fn source_closed(options: Option<&Value>) -> Result<bool, String> {
+    match options {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Object(o)) => {
+            if let Some(bad) = o.keys().find(|k| k.as_str() != "closed") {
+                return Err(format!(
+                    "valueSources: options have no key \"{bad}\" (use closed)"
+                ));
+            }
+            closed_flag(o.get("closed"))
+        }
+        Some(_) => Err("valueSources: the options are an object, {closed?: boolean}".into()),
+    }
+}
+
+/// Reads the map a host passes to `setValueSources`: key (a left operand's
+/// IRI, or a party role) to a list of values, or to `{values, closed?}`.
+pub fn value_sources(v: &Value) -> Result<ValueSources, String> {
+    let Value::Object(map) = v else {
+        return Err(
+            "valueSources: expected an object keyed by left operand IRI or party role".into(),
+        );
+    };
+    let mut out = ValueSources::new();
+    for (key, entry) in map {
+        match entry {
+            Value::Object(o) => {
+                if let Some(bad) = o
+                    .keys()
+                    .find(|k| !["values", "closed"].contains(&k.as_str()))
+                {
+                    return Err(format!(
+                        "valueSources: \"{key}\": no key \"{bad}\" (use values, closed)"
+                    ));
+                }
+                let closed = closed_flag(o.get("closed"))?;
+                let values = o.get("values").cloned().unwrap_or(Value::Null);
+                if values.is_null() {
+                    return Err(format!("valueSources: \"{key}\": missing \"values\""));
+                }
+                set_value_source(&mut out, key, &values, closed)?;
+            }
+            other => set_value_source(&mut out, key, other, false)?,
+        }
+    }
+    Ok(out)
+}
+
+/// `base` with the host's `sources` laid over it.
+pub fn with_value_sources(base: Wording, sources: &ValueSources) -> Wording {
+    if sources.is_empty() {
+        return base;
+    }
+    base.with_value_sources(sources.clone())
+}
+
+/// What `setValueSources` returns, as the JSON text of an object with one
+/// entry per source, by its key: `values` (how many), `closed` and
+/// `warnings` (a left operand no loaded profile declares is ignored).
+pub fn value_source_summaries_json(wording: &Wording, sources: &ValueSources) -> String {
+    let mut out = Map::new();
+    for (iri, s) in sources.operands() {
+        let warnings: Vec<String> = wording.value_source_warning(iri).into_iter().collect();
+        out.insert(
+            iri.to_string(),
+            json!({"values": s.values().len(), "closed": s.is_closed(), "warnings": warnings}),
+        );
+    }
+    for role in EntityRole::ALL {
+        if let Some(s) = sources.role(role) {
+            out.insert(
+                role.as_str().to_string(),
+                json!({"values": s.values().len(), "closed": s.is_closed(), "warnings": []}),
+            );
+        }
+    }
+    Value::Object(out).to_string()
+}
+
+/// The summary of the source for `key` (see [`value_source_summaries_json`]),
+/// as JSON text; `"null"` when there is none.
+pub fn value_source_summary_json(wording: &Wording, sources: &ValueSources, key: &str) -> String {
+    let name = match source_key(key) {
+        Ok(SourceKey::Role(r)) => r.as_str().to_string(),
+        _ => key.to_string(),
+    };
+    let all: Value =
+        serde_json::from_str(&value_source_summaries_json(wording, sources)).unwrap_or(Value::Null);
+    all.get(&name).cloned().unwrap_or(Value::Null).to_string()
+}
+
+/// [`validator_with`], with the host's value sources.
+pub fn validator_with_sources(
+    texts: &[String],
+    shapes_text: Option<&str>,
+    overlay_texts: &[String],
+    sources: &ValueSources,
+    options: Options,
+) -> Result<Validator, String> {
+    let shapes = shapes_text.map(shapes).transpose()?;
+    let overlays = overlays(overlay_texts)?;
+    let w = with_shapes(with_overlays(wording(texts)?, &overlays), shapes.as_ref());
+    Ok(Validator::new(
+        Arc::new(with_value_sources(w, sources)),
+        options,
+    ))
 }
 
 /// [`validator`], with the companion shapes in `shapes` (none when `None`).

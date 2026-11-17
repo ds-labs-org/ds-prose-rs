@@ -9,7 +9,7 @@ order: 6
 
 A dataspace operator wants its members to write only policies the dataspace can evaluate. This page is about what `ds-odrl-prose-editor` does for that today, using the EONA-X profile as the example.
 
-The editor reads the labels of a real profile, but it does not read the `skos:note` prose that says which values suit which left operand. A profile such as EONA-X (or DSP, or EDC) carries no `prose:operator`, `prose:rightOperand`, `prose:unit` or `prose:closed` data. So what it can narrow is the vocabulary (which actions and left operands exist) and the structure (what a constraint, a group and a rule may look like). The values of a right operand stay free text. Values can come from the dataspace's companion SHACL shapes (see [Companion shapes](#companion-shapes)) or, when it publishes none, from an operator overlay (see [Operator overlay](#operator-overlay)). A value list the host supplies is planned and is not part of the editor yet.
+The editor reads the labels of a real profile, but it does not read the `skos:note` prose that says which values suit which left operand. A profile such as EONA-X (or DSP, or EDC) carries no `prose:operator`, `prose:rightOperand`, `prose:unit` or `prose:closed` data. So what it can narrow is the vocabulary (which actions and left operands exist) and the structure (what a constraint, a group and a rule may look like). The values of a right operand stay free text. Values can come from the dataspace's companion SHACL shapes (see [Companion shapes](#companion-shapes)) or, when it publishes none, from an operator overlay (see [Operator overlay](#operator-overlay)). Values that change daily, such as participants and assets, come from the host (see [Runtime value sources](#runtime-value-sources)).
 
 ## One switch
 
@@ -118,9 +118,41 @@ An overlay lists exactly the values it means, as `sh:in` does: values narrower t
 
 An overlay and a shape that say the same thing give the same hints, so a dataspace can start with an overlay and move to shapes later. An overlay cannot say what shapes add: `sh:class`, patterns, bounds, and the closed lists of actions and left operands.
 
+## Runtime value sources
+
+Some values are not in a profile, shapes or an overlay because they change daily: participant DIDs, membership or credential types, asset ids, purposes taken from the registry or the catalog. The host passes them in `valueSources`. The editor never fetches: the host does, and caches.
+
+The map is keyed by the IRI of a left operand, or by `"assigner"`, `"assignee"` or `"target"` for the parties (the assets, for the target). Each entry is a list of values, which only suggests, or `{ values, closed: true }`, which is binding. A value is a string, or `{ value, label, group }`:
+
+```html
+<ds-odrl-prose-editor
+  [json]="policy" (jsonChange)="policy = $event"
+  [profile]="eonaXProfileText"
+  [valueSources]="{
+    'https://example.org/dataspace/participantType': {
+      closed: true,
+      values: [
+        { value: 'did:web:alpha.example', label: 'Alpha Corp', group: 'Members' },
+        { value: 'did:web:gamma.example', label: 'Gamma', group: 'Observers' }
+      ]
+    },
+    assignee: [{ value: 'did:web:alpha.example', label: 'Alpha Corp' }]
+  }"
+  termInput="select"
+  preset="dataspace"
+  (valueSourcesLoaded)="onSources($event)" />
+```
+
+The same `[valueSources]` input exists on `ds-odrl-prose` and on `ProseValidatorService.validate`, and `setValueSource(key, values, { closed })` and `setValueSources(map)` on the wasm handles (`null` clears one source, or all of them). A source for a left operand no loaded profile declares is ignored, with a line in the `warnings` of `valueSourcesLoaded`. An empty list is no source, so a registry fetch that came back empty does not flag every value.
+
+- **Closed.** With `termInput="select"` the right operand is a dropdown of exactly the listed values, under an `<optgroup>` for each `group` and with the `label` as the text. Any other value is `prose.value-not-allowed`, and the finding has `expected.source` set to `"host"` and says "the host allows". A policy may write a listed value as an IRI (`{"@id": "did:web:alpha.example"}`) or as a string; either is that value.
+- **Suggest-only.** The values and their labels and groups are suggestions of the free-text slot, and nothing is an error. A suggestion-only list never loosens an operand a profile, an overlay or the shapes closed.
+- **Removed later.** When the registry drops a value, the policy that holds it is not changed. The value stays in the document, selected in the dropdown as an extra first option with the note "(not in the host's list)", and a closed source flags it. The editor never drops it: removing it is the author's choice.
+- **Parties and assets.** A list for `assignee`, `assigner` or `target` feeds the suggestions of those slots, with labels and groups. When closed, a party or asset it does not list is flagged in the same way.
+
 ## Which source to use when
 
-Sources are layered, and each facet (operators, values, units, datatype) is taken from the last source that gives it: profile, then overlay, then shapes. A source never relabels a term, and each finding names the source that closed the slot (`profile`, `overlay` or `shapes`; the profile's findings carry no `source`).
+Sources are layered, and each facet (operators, values, units, datatype) is taken from the last source that gives it: profile, then overlay, then shapes, then the host. A source never relabels a term, and each finding names the source that closed the slot (`profile`, `overlay`, `shapes` or `host`; the profile's findings carry no `source`).
 
 | You have | Use |
 |---|---|
@@ -128,5 +160,4 @@ Sources are layered, and each facet (operators, values, units, datatype) is take
 | A profile, and SHACL the connector already checks | `[shapes]`. One source of truth: what the editor offers is what the connector checks. Shapes also close the action and left-operand lists, and give classes, patterns and bounds. |
 | A profile, and no SHACL | `[overlays]`, published by the governance next to the profile. Lists of values, operators and units per left operand. |
 | Both | Both. The shapes win for each facet they give; the overlay fills the rest. |
-
-A value list the shapes and the overlay cannot say (one fetched at run time, such as participants) is not read yet.
+| Values from the registry or the catalog that change daily (participants, credential types, asset ids, purposes) | `[valueSources]`, fetched and cached by the host. They win over the other sources for the values, can carry a label and a group for each value, and cover the parties and assets too. Closed for a registry the dataspace enforces, suggest-only for a convenience list. |

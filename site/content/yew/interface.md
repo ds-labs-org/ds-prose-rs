@@ -160,14 +160,18 @@ The whole configuration of an editing view. It is `Clone`, `PartialEq` and `Defa
 | `term_input` | `TermInput` | `TermInput::Free` | How the term slots take their value. `TermInput::Select` renders them as `select.prose-select.prose-term-select`; see below. |
 | `strict_edit` | `StrictEdit` | `StrictEdit::Flag` | What the editor does with an edit that writes a term the validator (see `with_strict`) does not allow: `Flag` commits it and the report marks it, `RefuseTerms` refuses it. Does nothing without a validator. |
 | `wording` | `Rc<Wording>` | `Rc::new(Wording::default())` | The loaded profiles. Set it with `with_wording`. |
+| `value_sources` | `ValueSources` | `ValueSources::default()` | The values the host took from its registry or catalog (participant DIDs, credential types, asset ids, purposes), per left operand and per party role. Set it with `with_value_sources`. The editor never fetches them. |
 | `validator` | `Option<Validator>` | `None` | Set it with `with_strict`. `None` validates nothing. |
 
-Two builders consume the config and return it:
+Three builders consume the config and return it:
 
 ```rust
 pub fn with_wording(self, w: Rc<Wording>) -> EditConfig
+pub fn with_value_sources(self, sources: ValueSources) -> EditConfig
 pub fn with_strict(self, options: Options) -> EditConfig
 ```
+
+`with_value_sources` lays the host's runtime value sources over the hints of `wording` (profile < overlay < shapes < host), before or after `with_wording`, and rebuilds a validator that is already set. A right operand a closed source lists is a select of those values (with `TermInput::Select`), listed with their `label` under an `<optgroup>` for their `group`; a source that only suggests leaves the slot free text, with the same suggestions. A value the source no longer lists stays selected as an extra first option, with `data-outside="true"` and the `not_in_source` note, and the validator flags it with `expected.source` `host`; it is never dropped. A list for a party role (`assigner`, `assignee`, `target`) feeds the suggestions of those slots. Build the sources with `ValueSources::set_operand(iri, ValueSource::new(values, closed))` and `set_role(EntityRole, ...)`; a `SourceValue` has a value, and optionally `with_label` and `with_group`.
 
 `with_wording` uses the profiles and adds their terms to `vocab` under `labels.group_profile`, so set the labels first. `with_strict` validates against `wording` with `options`, usually `Options::strict()`, and rewrites `rules.defaults` (left operand, operator, action, policy type) so that what an add button creates is admissible. Call it after `with_wording`.
 
@@ -239,6 +243,7 @@ Keep the visible text of a button contained in its accessible name. A change of 
 | `profile_values` | `Profile values(not specific to this operand)` | Profiles and glossary |
 | `datatype_placeholders` | a list of six pairs: integer, decimal, boolean, date, dateTime, duration | Profiles and glossary |
 | `not_in_profile` | `(not in the profile)` | Strict validation, and a term select whose value is none of its options |
+| `not_in_source` | `(not in the host's list)` | A term select, or a closed field, whose value the host's value source no longer lists |
 | `not_in_list` | `(not in the list)` | A term select whose value is none of its options, with no profile loaded |
 | `kept_previous` | `Kept "{kept}";"{typed}" is not in the profile` | Strict validation |
 | `kept_empty` | `"{typed}" is not in the profile;the field stays empty` | Strict validation |

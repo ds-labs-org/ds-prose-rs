@@ -30,7 +30,9 @@ const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
 /// is the singular form, as the profile takes it.
 fn the(source: HintSource, verb: &str) -> String {
     match source {
-        HintSource::Profile | HintSource::Overlay => format!("{} {verb}", source.noun()),
+        HintSource::Profile | HintSource::Overlay | HintSource::Host => {
+            format!("{} {verb}", source.noun())
+        }
         _ => {
             let (first, rest) = verb.split_once(' ').unwrap_or((verb, ""));
             let plural = first.strip_suffix('s').unwrap_or(first);
@@ -1613,7 +1615,10 @@ impl<'a> Checker<'a> {
             for (i, e) in list.iter().enumerate() {
                 let path = owner.child(Step::Entity(role, i));
                 match &e.locked {
-                    None => self.constraints(&path, Step::Refinement, &e.refinement),
+                    None => {
+                        self.host_party(&path, e, role);
+                        self.constraints(&path, Step::Refinement, &e.refinement);
+                    }
                     Some(reason) => {
                         let noun = match role {
                             EntityRole::Target => "asset",
@@ -1624,6 +1629,65 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+        }
+    }
+
+    /// A party or an asset, against the host's closed source for its role. A
+    /// value the source no longer lists is flagged and kept; a source that
+    /// only suggests flags nothing.
+    fn host_party(&mut self, path: &NodePath, e: &Entity, role: EntityRole) {
+        let Some(source) = self.w.role_source(role).filter(|s| s.is_closed()) else {
+            return;
+        };
+        let Some(iri) = e.iri.as_deref().filter(|i| !i.is_empty()) else {
+            return;
+        };
+        let here = self.expand(iri);
+        if source
+            .values()
+            .iter()
+            .any(|v| v.value() == iri || self.expand(v.value()) == here)
+        {
+            return;
+        }
+        let noun = match role {
+            EntityRole::Target => "an asset",
+            _ => "a party",
+        };
+        let msg = format!(
+            "\"{iri}\" is not {noun} {} as the {}",
+            the(HintSource::Host, "allows"),
+            role.as_str()
+        );
+        let total = source.values().len();
+        let expected = Expected {
+            values: source
+                .values()
+                .iter()
+                .take(MAX_EXPECTED_VALUES)
+                .map(|v| v.value().to_string())
+                .collect(),
+            values_total: if total > MAX_EXPECTED_VALUES {
+                total
+            } else {
+                0
+            },
+            closed: true,
+            source: Some(HintSource::Host),
+            ..Expected::default()
+        };
+        if let Some(f) = self.emit(
+            RuleId::ProseValueNotAllowed,
+            true,
+            slot(path, Field::Iri),
+            msg,
+        ) {
+            f.node = Some(e.id);
+            f.term = Some(TermRef {
+                written: iri.to_string(),
+                iri: here,
+            });
+            f.expected = Some(expected);
         }
     }
 
@@ -1917,9 +1981,17 @@ impl<'a> Checker<'a> {
             }
             RightOperand::Missing => return,
         };
+        // A host lists values as text (DIDs, asset ids): a policy may write a
+        // listed value as an IRI or as a string, and either is the value.
+        let host = h.sources.values == HintSource::Host;
         for (k, l) in values.iter().enumerate() {
             let raw = l.raw();
             let field = Field::RightOperand(k);
+            if host
+                && (allowed.contains(raw.as_str()) || allowed.contains(self.expand(&raw).as_str()))
+            {
+                continue;
+            }
             if let Literal::Iri(_) = l {
                 if allowed.contains(self.expand(&raw).as_str()) {
                     continue;
@@ -1958,6 +2030,7 @@ impl<'a> Checker<'a> {
             if h.closed
                 && matches!(l, Literal::Iri(_))
                 && self.options.mode() == Mode::Strict
+                && !host
                 && self.incomplete()
             {
                 // A profile that is not loaded may add an IRI narrower than

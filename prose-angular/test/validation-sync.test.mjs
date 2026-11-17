@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  StandaloneReporter, createChangeTracker, parseReport, overlayTexts, profileTexts, reportChanged, shapesText, validationOptions,
+  StandaloneReporter, createChangeTracker, parseReport, overlayTexts, profileTexts, reportChanged, shapesText, validationOptions, valueSourcesOf,
 } from '../src/validation-sync.ts';
 
 const finding = (rule, fingerprint, severity = 'error') => ({ rule, fingerprint, severity, message: `${rule} said so` });
@@ -205,5 +205,29 @@ test('a standalone validator is built with the overlays, and rebuilt when they c
   r.report(['p'], {}, 'B', null, ['O', 'P']);
   assert.equal(built.length, 2, 'rebuilt for other overlays');
   assert.deepEqual(JSON.parse(r.report(['p'], {}, 'B').report), { json: 'B', overlays: [] }, 'no overlays is an empty list');
+  assert.equal(built.length, 3);
+});
+
+test('valueSources: none, empty and undefined are null; a map is kept as given', () => {
+  assert.equal(valueSourcesOf(null), null);
+  assert.equal(valueSourcesOf(undefined), null);
+  assert.equal(valueSourcesOf({}), null);
+  const m = { assignee: ['did:web:a'] };
+  assert.deepEqual(valueSourcesOf(m), m);
+});
+
+test('a standalone validator is built with the value sources, and rebuilt when they change', () => {
+  const built = [];
+  const r = new StandaloneReporter((profiles, options, shapes, overlays, sources) => {
+    built.push([profiles, options, shapes, overlays, sources]);
+    return { validate: (json) => JSON.stringify({ json, sources }), free: () => {} };
+  });
+  const a = { assignee: ['did:web:a'] };
+  assert.deepEqual(JSON.parse(r.report(['p'], {}, 'A', null, [], a).report), { json: 'A', sources: a });
+  r.report(['p'], {}, 'B', null, [], { assignee: ['did:web:a'] });
+  assert.equal(built.length, 1, 'reused while nothing changed');
+  r.report(['p'], {}, 'B', null, [], { assignee: ['did:web:b'] });
+  assert.equal(built.length, 2, 'rebuilt for other sources');
+  assert.deepEqual(JSON.parse(r.report(['p'], {}, 'B').report), { json: 'B', sources: null }, 'no sources is null');
   assert.equal(built.length, 3);
 });

@@ -407,6 +407,7 @@
 //!         HintSource::Profile => 0,
 //!         HintSource::Overlay => 0,
 //!         HintSource::Shapes => 0,
+//!         HintSource::Host => 0,
 //!         _ => 1,
 //!     }
 //! }

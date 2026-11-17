@@ -14,9 +14,9 @@ use std::collections::{HashMap, HashSet};
 
 use prose_core::edit::{
     ConstraintNode, EditDoc, EditEvent, Field, IssueTarget, Literal, NodeRef, RightOperand,
-    Severity, Slot, SlotKind, SlotPath, left_operand_at,
+    Severity, Slot, SlotKind, SlotPath, Step, left_operand_at,
 };
-use prose_core::profile::{OperandHints, Term, TermKind};
+use prose_core::profile::{HintSource, OperandHints, Term, TermKind};
 use prose_core::validate::{Level, Mode, RuleId, Validator};
 use prose_core::wording;
 
@@ -341,8 +341,11 @@ pub(crate) fn options_for(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<A
         SlotKind::Action => flat(written(&v.actions)),
         SlotKind::LeftOperand => flat(written(&v.left_operands)),
         SlotKind::PolicyKind => flat(written(&v.policy_kinds)),
-        SlotKind::Party => flat(v.parties.clone()),
-        SlotKind::Asset => flat(v.assets.clone()),
+        SlotKind::Party | SlotKind::Asset => flat(match role_source_list(env, slot) {
+            Some(list) => list,
+            None if slot.kind == SlotKind::Party => v.parties.clone(),
+            None => v.assets.clone(),
+        }),
         SlotKind::PolicyRef => flat(
             env.policy_uids
                 .iter()
@@ -370,6 +373,50 @@ pub(crate) fn options_for(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<A
         ),
         _ => flat(vec![]),
     }
+}
+
+/// The suggestions the host's value source for the slot's party role gives,
+/// when it gave one: its values with their labels and groups.
+fn role_source_list(env: &Env, slot: &Slot) -> Option<Vec<Suggestion>> {
+    let Some(Step::Entity(role, _)) = slot.path.node.steps.last() else {
+        return None;
+    };
+    let source = env.cfg.wording.role_source(*role)?;
+    Some(
+        source
+            .values()
+            .iter()
+            .map(|v| Suggestion {
+                value: v.value().to_string().into(),
+                label: v.label().unwrap_or(v.value()).to_string().into(),
+                hint: None,
+                group: v.group().map(|g| g.to_string().into()),
+            })
+            .collect(),
+    )
+}
+
+/// Whether the right operand's values come from the host's value source,
+/// which lists them as text: a DID, an asset id.
+pub(crate) fn host_values(env: &Env, slot: &Slot) -> bool {
+    left_operand_hints(env, slot).is_some_and(|h| h.sources.values == HintSource::Host)
+}
+
+/// Whether a value a pick writes is an IRI. A right operand's profile
+/// values are IRIs; a host's are text, an IRI only when it looks like one
+/// (`scheme:rest`), as a DID does.
+pub(crate) fn picks_iri(host: bool, value: &str) -> bool {
+    !host
+        || value.split_once(':').is_some_and(|(scheme, rest)| {
+            !rest.is_empty()
+                && scheme
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphabetic())
+                && scheme
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c))
+        })
 }
 
 /// The loaded term the slot's constraint names as its left operand.
@@ -418,6 +465,24 @@ fn profile_values(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<AttrValue
         return (vec![], HashMap::new());
     }
     let left = left_operand_hints(env, slot);
+    // The host's own list: its values as it wrote them, with the labels and
+    // the groups it gave.
+    if let Some(h) = left
+        && h.sources.values == HintSource::Host
+        && !h.source_values.is_empty()
+    {
+        let list = h
+            .source_values
+            .iter()
+            .map(|v| Suggestion {
+                value: v.value().to_string().into(),
+                label: v.label().unwrap_or(v.value()).to_string().into(),
+                hint: None,
+                group: v.group().map(|g| g.to_string().into()),
+            })
+            .collect();
+        return (list, HashMap::new());
+    }
     if let Some(h) = left
         && !h.value_tree.is_empty()
     {
@@ -609,6 +674,7 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
     let pick_as_iri = slot.kind == SlotKind::Literal
         && matches!(slot.path.field, Field::RightOperand(_))
         && !holds_iri(&env.doc, &slot.path);
+    let host = host_values(&env, slot);
 
     let commit: Callback<How> = {
         let node_ref = node_ref.clone();
@@ -656,8 +722,8 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                 let allowed = allowed_options(&env, &slot, closure, options);
                 match resolve(&env, &slot, closure, &allowed, &value, how == How::Enter) {
                     Some(v) => {
+                        as_iri = closure == Closure::Values && pick_as_iri && picks_iri(host, &v);
                         value = v;
-                        as_iri = closure == Closure::Values && pick_as_iri;
                     }
                     None if how == How::Blur => {
                         // Given up: back to the value, and say so.
@@ -733,7 +799,7 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
             }
             *refocus.borrow_mut() = true;
             open.set(false);
-            if pick_as_iri {
+            if pick_as_iri && picks_iri(host, &value) {
                 *dirty.borrow_mut() = false;
                 onedit.emit(EditEvent::SetIri {
                     slot: path.clone(),
@@ -1134,7 +1200,9 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                 </span>
             </span>
             if not_in_profile {
-                <small id={note_id} class="prose-slot-note">{ cfg.labels.not_in_profile.clone() }</small>
+                <small id={note_id} class="prose-slot-note">{
+                    if host { cfg.labels.not_in_source.clone() } else { cfg.labels.not_in_profile.clone() }
+                }</small>
             }
             if let Some(message) = &*invalid {
                 <span

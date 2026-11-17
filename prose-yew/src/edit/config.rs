@@ -5,7 +5,7 @@
 use prose_core::edit::{
     EditRules, EmptyText, Field, ListKind, ListPath, NodePath, RuleList, Step, StrictEdit,
 };
-use prose_core::profile::{Prefixes, ProfileVocab, Term, TermKind, Wording};
+use prose_core::profile::{Prefixes, ProfileVocab, Term, TermKind, ValueSources, Wording};
 use prose_core::validate::{Options, Validator};
 use prose_core::wording;
 use std::collections::{HashMap, HashSet};
@@ -534,6 +534,9 @@ pub struct Labels {
     /// `TermInput::Select` with no profile loaded: the note under a select
     /// whose value is none of its options.
     pub not_in_list: AttrValue,
+    /// The note under a select, or a closed field, whose value the host's
+    /// value source no longer lists.
+    pub not_in_source: AttrValue,
     /// Announced when a closed field is left with text it does not take and
     /// goes back to its value: `{kept}` is that value, `{typed}` the text.
     pub kept_previous: AttrValue,
@@ -637,6 +640,7 @@ impl Default for Labels {
             .collect(),
             not_in_profile: a("(not in the profile)"),
             not_in_list: a("(not in the list)"),
+            not_in_source: a("(not in the host's list)"),
             kept_previous: a("Kept \"{kept}\"; \"{typed}\" is not in the profile"),
             kept_empty: a("\"{typed}\" is not in the profile; the field stays empty"),
             allowed_group: a("Allowed by the profile"),
@@ -946,6 +950,12 @@ pub struct EditConfig {
     /// the suggestions and selects. Set it with [`EditConfig::with_wording`],
     /// which also extends `vocab`.
     pub wording: Rc<Wording>,
+    /// The values the host took from its registry or catalog (participant
+    /// DIDs, credential types, asset ids, purposes), per left operand and
+    /// per party role. Set it with [`EditConfig::with_value_sources`]; it
+    /// survives a later [`EditConfig::with_wording`]. The editor never
+    /// fetches: the host does, and caches.
+    pub value_sources: ValueSources,
     /// Validation of the document against `wording`, when the host asks
     /// for it. Set it with [`EditConfig::with_strict`]; `None` (the
     /// default) validates nothing.
@@ -959,7 +969,28 @@ impl EditConfig {
     /// set before are not taken out.
     pub fn with_wording(mut self, w: Rc<Wording>) -> EditConfig {
         self.vocab = self.vocab.with_profiles_in(&w, &self.labels.group_profile);
-        self.wording = w;
+        self.wording = match self.value_sources.is_empty() {
+            true => w,
+            false => Rc::new((*w).clone().with_value_sources(self.value_sources.clone())),
+        };
+        match self.validator.take() {
+            Some(v) => self.with_strict(v.options().clone()),
+            None => self,
+        }
+    }
+
+    /// Uses the host's runtime value sources (see [`ValueSources`]), replacing
+    /// those set before; an empty set clears them. They are laid over the
+    /// hints of `wording` (profile < overlay < shapes < host), so a right
+    /// operand a closed source lists is a select of those values (with
+    /// [`TermInput::Select`]), listed with their labels under their groups;
+    /// a value the source no longer lists stays, selected and flagged;
+    /// a party role's source feeds the suggestions of those slots. Works
+    /// before or after [`EditConfig::with_wording`]; a validator already
+    /// set is rebuilt over the new hints.
+    pub fn with_value_sources(mut self, sources: ValueSources) -> EditConfig {
+        self.wording = Rc::new((*self.wording).clone().with_value_sources(sources.clone()));
+        self.value_sources = sources;
         match self.validator.take() {
             Some(v) => self.with_strict(v.options().clone()),
             None => self,
@@ -1097,6 +1128,7 @@ impl Default for EditConfig {
             term_input: TermInput::Free,
             strict_edit: StrictEdit::Flag,
             wording: Rc::new(Wording::default()),
+            value_sources: ValueSources::default(),
             validator: None,
         }
     }

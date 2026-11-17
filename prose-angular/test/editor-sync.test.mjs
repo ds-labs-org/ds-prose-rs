@@ -46,6 +46,12 @@ function fake(bad = new Set(), scope = {}) {
         return JSON.stringify(t.map(() => ({ terms: 3, warnings: ['ignored <x>'] })));
       },
       overlaySummaries: () => (calls.push(['overlaySummaries']), JSON.stringify([{ terms: 3, warnings: ['recomputed'] }])),
+      setValueSources: (v) => {
+        calls.push(['setValueSources', v]);
+        if (v != null && 'bad' in v) throw new Error('not value sources');
+        return JSON.stringify(Object.fromEntries(Object.keys(v ?? {}).map((k) => [k, { values: 2, closed: true, warnings: [] }])));
+      },
+      valueSourceSummaries: () => (calls.push(['valueSourceSummaries']), JSON.stringify({ k: { values: 2, closed: true, warnings: ['recomputed'] } })),
       setRefuseTerms: (on) => calls.push(['setRefuseTerms', on]),
       setTermInput: (m) => {
         calls.push(['setTermInput', m]);
@@ -553,4 +559,76 @@ test('overlays: a failed first mount keeps them unspent for the retry', () => {
   assert.ok(!names(f.calls).includes('setOverlays'), 'nothing else was handed over');
   s.apply(inputs({ json: B, overlays: ['O'] }), f.mount);
   assert.deepEqual(f.calls.filter((c) => c[0] === 'setOverlays'), [['setOverlays', ['O']]]);
+});
+
+const SOURCES = { 'https://example.org/dataspace/purpose': { values: ['a', { value: 'b', label: 'B', group: 'G' }], closed: true }, assignee: ['did:web:x'] };
+
+test('valueSources: handed over once, after the overlays and the shapes and before the validation, and reported', () => {
+  const s = new EditorSession();
+  const f = fake();
+  const out = s.apply(inputs({ texts: ['p'], overlays: ['O'], shapes: 'S', valueSources: SOURCES, options: { strict: true } }), f.mount);
+  assert.deepEqual(names(f.calls), ['new', 'setProfile', 'setOverlays', 'setShapes', 'setValueSources', 'setValidation', 'report']);
+  assert.deepEqual(f.calls.find((c) => c[0] === 'setValueSources'), ['setValueSources', SOURCES]);
+  assert.deepEqual(Object.keys(out.valueSourcesSummary), Object.keys(SOURCES));
+  assert.equal(out.valueSourcesError, undefined);
+  // The same sources again (even as another object): nothing is handed over twice.
+  f.calls.length = 0;
+  const again = s.apply(inputs({ texts: ['p'], overlays: ['O'], shapes: 'S', valueSources: structuredClone(SOURCES), options: { strict: true } }), f.mount);
+  assert.deepEqual(names(f.calls), ['report']);
+  assert.equal(again.valueSourcesSummary, undefined);
+});
+
+test('valueSources: none (null, undefined, {}) on a fresh mount needs no call; going back to none clears them', () => {
+  const s = new EditorSession();
+  const f = fake();
+  s.apply(inputs(), f.mount);
+  s.apply(inputs({ valueSources: null }), f.mount);
+  s.apply(inputs({ valueSources: {} }), f.mount);
+  assert.ok(!names(f.calls).includes('setValueSources'));
+  s.apply(inputs({ valueSources: SOURCES }), f.mount);
+  f.calls.length = 0;
+  const out = s.apply(inputs({ valueSources: {} }), f.mount);
+  assert.deepEqual(f.calls.filter((c) => c[0] === 'setValueSources'), [['setValueSources', null]]);
+  assert.equal(out.valueSourcesSummary, undefined, 'clearing reports no summary');
+  assert.equal(out.valueSourcesError, undefined);
+});
+
+test('valueSources: sources the handle refuses are reported once, not retried until they change', () => {
+  const s = new EditorSession();
+  const f = fake();
+  const out = s.apply(inputs({ valueSources: { bad: [] } }), f.mount);
+  assert.match(String(out.valueSourcesError), /not value sources/);
+  assert.equal(out.valueSourcesSummary, undefined);
+  f.calls.length = 0;
+  const again = s.apply(inputs({ valueSources: { bad: [] } }), f.mount);
+  assert.deepEqual(names(f.calls), ['report']);
+  assert.equal(again.valueSourcesError, undefined);
+  const fixed = s.apply(inputs({ valueSources: SOURCES }), f.mount);
+  assert.equal(fixed.valueSourcesError, undefined);
+  assert.ok(fixed.valueSourcesSummary.assignee);
+});
+
+test('valueSources: new profiles recompute the summaries, since their warnings name terms the profiles do not declare', () => {
+  const s = new EditorSession();
+  const f = fake();
+  s.apply(inputs({ texts: ['p'], valueSources: SOURCES }), f.mount);
+  f.calls.length = 0;
+  const out = s.apply(inputs({ texts: ['q'], valueSources: SOURCES }), f.mount);
+  assert.ok(!names(f.calls).includes('setValueSources'));
+  assert.ok(names(f.calls).includes('valueSourceSummaries'));
+  assert.deepEqual(out.valueSourcesSummary, { k: { values: 2, closed: true, warnings: ['recomputed'] } });
+  const s2 = new EditorSession();
+  const f2 = fake();
+  s2.apply(inputs({ texts: ['p'] }), f2.mount);
+  s2.apply(inputs({ texts: ['q'] }), f2.mount);
+  assert.ok(!names(f2.calls).includes('valueSourceSummaries'));
+});
+
+test('valueSources: a failed first mount keeps them unspent for the retry', () => {
+  const s = new EditorSession();
+  const f = fake(new Set([A]));
+  s.apply(inputs({ valueSources: SOURCES }), f.mount);
+  assert.ok(!names(f.calls).includes('setValueSources'), 'nothing else was handed over');
+  s.apply(inputs({ json: B, valueSources: SOURCES }), f.mount);
+  assert.deepEqual(f.calls.filter((c) => c[0] === 'setValueSources'), [['setValueSources', SOURCES]]);
 });

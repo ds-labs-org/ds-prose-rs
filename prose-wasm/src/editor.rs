@@ -10,7 +10,7 @@ use prose_yew::prose_core::edit::{
     EditDoc, EditRules, IssueTarget, Limit, OutOfScope, StrictEdit, check_profile, out_of_scope,
     read_model, strip_out_of_scope, write_jsonld,
 };
-use prose_yew::prose_core::profile::{Overlay, Wording};
+use prose_yew::prose_core::profile::{Overlay, ValueSources, Wording};
 use prose_yew::prose_core::shapes::ShapesGraph;
 use prose_yew::prose_core::validate::{Options, Report, Validator};
 use prose_yew::{
@@ -419,6 +419,8 @@ pub struct ProseEditorHandle {
     shapes: Option<ShapesGraph>,
     /// What `setOverlays` loaded, laid over `wording` under the shapes.
     overlays: Vec<Overlay>,
+    /// What `setValueSource(s)` gave, laid over everything else.
+    sources: ValueSources,
     options: Option<Options>,
     limits: Option<Value>,
     term_input: TermInput,
@@ -501,6 +503,7 @@ impl ProseEditorHandle {
             wording: None,
             shapes: None,
             overlays: Vec::new(),
+            sources: ValueSources::new(),
             options: None,
             limits: None,
             term_input: TermInput::Free,
@@ -602,7 +605,13 @@ impl ProseEditorHandle {
             .as_ref()
             .map_or_else(|| "null".to_string(), validation::shapes_summary_json);
         let config = make(
-            crate::shaped(self.wording.as_ref(), shapes.as_ref(), &self.overlays).as_ref(),
+            crate::shaped(
+                self.wording.as_ref(),
+                shapes.as_ref(),
+                &self.overlays,
+                &self.sources,
+            )
+            .as_ref(),
             self.options.as_ref(),
             self.limits.as_ref(),
         )?;
@@ -627,7 +636,13 @@ impl ProseEditorHandle {
     pub fn set_overlays(&mut self, texts: Vec<String>) -> Result<String, JsError> {
         let overlays = validation::overlays(&texts).map_err(throw)?;
         let config = make(
-            crate::shaped(self.wording.as_ref(), self.shapes.as_ref(), &overlays).as_ref(),
+            crate::shaped(
+                self.wording.as_ref(),
+                self.shapes.as_ref(),
+                &overlays,
+                &self.sources,
+            )
+            .as_ref(),
             self.options.as_ref(),
             self.limits.as_ref(),
         )?;
@@ -661,6 +676,58 @@ impl ProseEditorHandle {
         )
     }
 
+    /// Gives the values the host took from its registry or catalog for one
+    /// left operand (`key` is its IRI) or one party role (`"assigner"`,
+    /// `"assignee"`, `"target"`): a list of strings or
+    /// `{value, label?, group?}`. With `options.closed` a right operand
+    /// becomes a select of exactly those values (with `setTermInput("select")`),
+    /// listed with their labels under their groups, and any other value is an
+    /// error naming `"host"` as its source; without it the list only
+    /// suggests. A party role's list feeds the suggestions of those slots.
+    /// `null` clears the source; an empty list is no source. The host's values
+    /// sit on top of the profile, the overlays and the shapes, for the values
+    /// alone. A value the source no longer lists stays in the document,
+    /// selected and flagged (with validation on); it is never dropped, and
+    /// loading a source is not an edit. Returns the summary as JSON text
+    /// (`ValueSourceSummary`, `"null"` after clearing). Throws when the values
+    /// or options cannot be read; the previous source then stays. A later
+    /// `setProfile` keeps the sources.
+    #[wasm_bindgen(js_name = setValueSource)]
+    pub fn set_value_source(
+        &mut self,
+        key: &str,
+        #[wasm_bindgen(unchecked_param_type = "ValueSourceValue[] | null")] values: JsValue,
+        #[wasm_bindgen(unchecked_optional_param_type = "{ closed?: boolean }")] options: Option<
+            JsValue,
+        >,
+    ) -> Result<String, JsError> {
+        let next =
+            crate::next_sources(&self.sources, key, &values, options.as_ref()).map_err(throw)?;
+        self.apply_sources(next, Some(key))
+    }
+
+    /// Replaces every value source at once: an object keyed by left operand
+    /// IRI or party role, each a list (suggestions) or `{values, closed?}`;
+    /// `null` or `{}` clears them. Returns one summary per key as the JSON
+    /// text of an object. Throws when it cannot be read; the previous sources
+    /// then stay.
+    #[wasm_bindgen(js_name = setValueSources)]
+    pub fn set_value_sources(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "ValueSources | null")] sources: JsValue,
+    ) -> Result<String, JsError> {
+        let next = crate::all_sources(&sources).map_err(throw)?;
+        self.apply_sources(next, None)
+    }
+
+    /// The summaries of the value sources, as `setValueSources` returns
+    /// them, recomputed against the profiles loaded now: a source for a left
+    /// operand no loaded profile declares is ignored, with a warning.
+    #[wasm_bindgen(js_name = valueSourceSummaries)]
+    pub fn value_source_summaries(&self) -> String {
+        validation::value_source_summaries_json(&self.base_wording(), &self.sources)
+    }
+
     /// Validation on with `options` (see `ValidateOptions`; `{}` is strict
     /// mode), or off with `null`. While on, the editor shows inline issue
     /// markers and a problems panel with fix buttons, and `onChange`
@@ -676,7 +743,13 @@ impl ProseEditorHandle {
             Some(v) => Some(validation::options_from_value(Some(&v)).map_err(throw)?),
         };
         let config = make(
-            crate::shaped(self.wording.as_ref(), self.shapes.as_ref(), &self.overlays).as_ref(),
+            crate::shaped(
+                self.wording.as_ref(),
+                self.shapes.as_ref(),
+                &self.overlays,
+                &self.sources,
+            )
+            .as_ref(),
             options.as_ref(),
             self.limits.as_ref(),
         )?;
@@ -701,7 +774,13 @@ impl ProseEditorHandle {
             .map_err(throw)?
             .filter(|v| !v.is_null());
         let config = make(
-            crate::shaped(self.wording.as_ref(), self.shapes.as_ref(), &self.overlays).as_ref(),
+            crate::shaped(
+                self.wording.as_ref(),
+                self.shapes.as_ref(),
+                &self.overlays,
+                &self.sources,
+            )
+            .as_ref(),
             self.options.as_ref(),
             limits.as_ref(),
         )?;
@@ -865,9 +944,51 @@ impl ProseEditorHandle {
         self.config = Rc::new(config);
     }
 
+    /// The loaded profiles as one wording.
+    fn base_wording(&self) -> Wording {
+        self.wording
+            .as_ref()
+            .map_or_else(Wording::new, |w| (*w.0).clone())
+    }
+
+    /// Installs `sources` and renders. The summary is the one for `key`, or
+    /// all of them.
+    fn apply_sources(
+        &mut self,
+        sources: ValueSources,
+        key: Option<&str>,
+    ) -> Result<String, JsError> {
+        let config = make(
+            crate::shaped(
+                self.wording.as_ref(),
+                self.shapes.as_ref(),
+                &self.overlays,
+                &sources,
+            )
+            .as_ref(),
+            self.options.as_ref(),
+            self.limits.as_ref(),
+        )?;
+        let base = self.base_wording();
+        let summary = match key {
+            Some(k) => validation::value_source_summary_json(&base, &sources, k),
+            None => validation::value_source_summaries_json(&base, &sources),
+        };
+        self.install(config);
+        self.sources = sources;
+        self.render();
+        Ok(summary)
+    }
+
     fn set_wording(&mut self, wording: Option<SharedWording>) -> Result<(), JsError> {
         let config = make(
-            crate::shaped(wording.as_ref(), self.shapes.as_ref(), &self.overlays).as_ref(),
+            crate::shaped(
+                wording.as_ref(),
+                self.shapes.as_ref(),
+                &self.overlays,
+                &self.sources,
+            )
+            .as_ref(),
             self.options.as_ref(),
             self.limits.as_ref(),
         )?;

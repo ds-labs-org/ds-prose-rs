@@ -51,17 +51,19 @@ mod jsonld;
 pub(crate) mod ns;
 mod odrl_terms;
 mod overlay;
+mod source;
 mod text;
 pub(crate) mod triples;
 #[cfg(feature = "turtle")]
 mod turtle;
 mod wording;
 
-pub(crate) use hints::{layer, layer_overlay};
+pub(crate) use hints::{layer, layer_host, layer_overlay};
 pub(crate) use ns::is_odrl_context;
 pub(crate) use odrl_terms::odrl_spelling;
 pub use odrl_terms::{OdrlTerm, OdrlVocab, odrl_term, odrl_terms};
 pub use overlay::{Overlay, OverlayError};
+pub use source::{SourceValue, ValueSource, ValueSources};
 pub use text::LangText;
 pub(crate) use wording::Budget;
 pub use wording::{Prefixes, Wording};
@@ -410,7 +412,7 @@ impl Term {
 /// Where a hint came from. Hints are layered: each source only adds to the
 /// terms the loaded profiles declare and never relabels one, and a finding
 /// names the source that closed the slot. A later source's facet replaces an
-/// earlier one's for that facet alone (profile < overlay < shapes); see
+/// earlier one's for that facet alone (profile < overlay < shapes < host); see
 /// [`OperandHints`].
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -422,15 +424,18 @@ pub enum HintSource {
     Overlay,
     /// The companion SHACL shapes ([`crate::shapes`]).
     Shapes,
+    /// A value source the host passed at run time ([`ValueSources`]).
+    Host,
 }
 
 impl HintSource {
-    /// The name a report gives the source (`"profile"`, `"overlay"`, `"shapes"`).
+    /// The name a report gives the source (`"profile"`, `"overlay"`, `"shapes"`, `"host"`).
     pub fn as_str(self) -> &'static str {
         match self {
             HintSource::Profile => "profile",
             HintSource::Overlay => "overlay",
             HintSource::Shapes => "shapes",
+            HintSource::Host => "host",
         }
     }
 
@@ -440,6 +445,7 @@ impl HintSource {
             HintSource::Profile => "the profile",
             HintSource::Overlay => "the overlay",
             HintSource::Shapes => "the shapes",
+            HintSource::Host => "the host",
         }
     }
 }
@@ -503,6 +509,10 @@ pub struct OperandHints {
     pub min_inclusive: Option<String>,
     /// `sh:maxInclusive`: the greatest.
     pub max_inclusive: Option<String>,
+    /// The values a host source gave, with the label and group each is shown
+    /// under; empty unless `sources.values` is [`HintSource::Host`]. They are
+    /// the same values as `value_tree`, which is what validation reads.
+    pub source_values: Vec<SourceValue>,
     /// Where each facet came from.
     pub sources: HintSources,
 }

@@ -1,6 +1,9 @@
 //! The loaded profiles and language preferences one reading uses, and how a
 //! policy's compact terms expand.
-use super::{HintSource, OperandHints, Overlay, ProfileVocab, Term, TermKind, ns};
+use super::{
+    HintSource, OperandHints, Overlay, ProfileVocab, Term, TermKind, ValueSource, ValueSources, ns,
+};
+use crate::edit::EntityRole;
 use crate::shapes::ShapesGraph;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -17,6 +20,7 @@ pub struct Wording {
     conflicts: Vec<String>,
     overlays: Vec<Arc<Overlay>>,
     shapes: Option<Arc<ShapesGraph>>,
+    value_sources: ValueSources,
     /// Left operand IRI -> its profile hints with the overlays, then the
     /// shapes, laid over them, for each left operand one of them gives
     /// something for. Rebuilt whenever a profile, an overlay or the shapes
@@ -100,6 +104,53 @@ impl Wording {
         out
     }
 
+    /// Sets the host's runtime value sources (see [`ValueSources`]), replacing
+    /// any set before; an empty set clears them. A source for a left operand
+    /// a loaded profile declares gives that operand its values, with the host
+    /// on top of the overlays and the shapes (profile < overlay < shapes <
+    /// host) for the values facet alone. A source for a party role is read
+    /// with [`Wording::role_source`]. The order of this call and
+    /// [`Wording::with_profile`] does not matter.
+    pub fn with_value_sources(mut self, sources: ValueSources) -> Wording {
+        self.value_sources = sources;
+        self.layer_hints();
+        self
+    }
+
+    /// The host's value sources.
+    pub fn value_sources(&self) -> &ValueSources {
+        &self.value_sources
+    }
+
+    /// The host's source for the parties (or assets, for the target) of
+    /// `role`, when it gave a non-empty one.
+    pub fn role_source(&self, role: EntityRole) -> Option<&ValueSource> {
+        self.value_sources.role(role).filter(|s| !s.is_empty())
+    }
+
+    /// What the host's sources say that this wording cannot use: a line for
+    /// each left operand they name that no loaded profile declares, or that
+    /// is not a left operand (ignored). Lower-case fragments.
+    pub fn value_source_warnings(&self) -> Vec<String> {
+        self.value_sources
+            .operands()
+            .filter_map(|(iri, _)| self.value_source_warning(iri))
+            .collect()
+    }
+
+    /// Why a source for the left operand `iri` is ignored, when it is.
+    pub fn value_source_warning(&self, iri: &str) -> Option<String> {
+        match self.lookup(iri) {
+            None => Some(format!(
+                "ignored <{iri}>: no loaded profile declares it, and a value source never adds a term"
+            )),
+            Some((t, _)) if !t.kinds.contains(&TermKind::LeftOperand) => Some(format!(
+                "ignored <{iri}>: it is not a left operand, and a value source only gives values to left operands"
+            )),
+            Some(_) => None,
+        }
+    }
+
     /// The companion shapes, when some were given.
     pub fn shapes(&self) -> Option<&ShapesGraph> {
         self.shapes.as_deref()
@@ -148,8 +199,36 @@ impl Wording {
         if let Some(shapes) = self.shapes.clone() {
             self.layer_shapes(&shapes, &mut shaped);
         }
+        self.layer_sources(&mut shaped);
         shaped.retain(|iri, h| self.lookup(iri).is_none_or(|(t, _)| *h != t.hints));
         self.shaped = shaped;
+    }
+
+    /// Lays the host's value sources over `shaped`, on top of everything else.
+    fn layer_sources(&self, shaped: &mut HashMap<String, OperandHints>) {
+        for (iri, source) in self.value_sources.operands() {
+            let Some((term, _)) = self.lookup(iri) else {
+                continue;
+            };
+            if !term.kinds.contains(&TermKind::LeftOperand) || source.is_empty() {
+                continue;
+            }
+            let values: Vec<String> = source
+                .values()
+                .iter()
+                .map(|v| v.value().to_string())
+                .collect();
+            let patch = OperandHints {
+                value_tree: values.iter().map(|v| (v.clone(), 0)).collect(),
+                values,
+                closed: source.is_closed(),
+                source_values: source.values().to_vec(),
+                ..OperandHints::default()
+            };
+            let base = shaped.get(&term.iri).unwrap_or(&term.hints);
+            let layered = super::layer_host(base, &patch);
+            shaped.insert(term.iri.clone(), layered);
+        }
     }
 
     /// Lays the shapes over `shaped` (the profiles' hints with the overlays

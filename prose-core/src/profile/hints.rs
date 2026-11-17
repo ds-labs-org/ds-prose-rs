@@ -1,7 +1,7 @@
 //! Layering hints. A left operand's [`OperandHints`] start as what the
 //! loaded profile's `prose:` triples say; each further source (the operator
-//! overlay, then the companion shapes; later a host's runtime value source)
-//! adds a patch over them, so the precedence is profile < overlay < shapes. A patch holds only the facets its source
+//! overlay, then the companion shapes; then a host's runtime value source)
+//! adds a patch over them, so the precedence is profile < overlay < shapes < host. A patch holds only the facets its source
 //! gives (an empty list or `None` is "not given"), and carries its
 //! provenance, so a finding can name the source that closed the slot.
 use super::{HintSource, OperandHints};
@@ -107,5 +107,35 @@ pub(crate) fn layer_overlay(base: &OperandHints, patch: &OperandHints) -> Operan
         base.clone()
     };
     out.plural |= patch.plural;
+    out
+}
+
+/// `base` with a host's value source laid over it, as `patch`: the values the
+/// host listed (`values`, `value_tree` at depth 0 and `source_values`), and
+/// whether it closes them. Recorded as [`HintSource::Host`], for the values
+/// facet alone.
+///
+/// A closing source closes the left operand as [`layer`] does. An open one
+/// only suggests: it replaces the values of an operand that is not closed,
+/// and never loosens one that is, so what a closed source (a profile, an
+/// overlay or shapes) makes binding stays binding. A patch with no values is
+/// no source.
+pub(crate) fn layer_host(base: &OperandHints, patch: &OperandHints) -> OperandHints {
+    if patch.values.is_empty() {
+        return base.clone();
+    }
+    let mut out = if patch.closed {
+        layer(base, patch, HintSource::Host)
+    } else if base.closed {
+        return base.clone();
+    } else {
+        let mut out = base.clone();
+        out.values = patch.values.clone();
+        out.value_tree = patch.value_tree.clone();
+        out.literal_values.clear();
+        out.sources.values = HintSource::Host;
+        out
+    };
+    out.source_values = patch.source_values.clone();
     out
 }

@@ -147,6 +147,23 @@ returns the summaries again, recomputed against the profiles loaded now (an over
 overlay closed has `expected.source` `"overlay"`. `validate(policyJson, profiles,
 options?, shapes?, overlays?)` takes the overlay texts as its last argument.
 
+`setValueSource(key, values, { closed }?)` and `setValueSources(map)` give the editor and
+the validators the values the host took from its registry or catalog (participant DIDs,
+credential types, asset ids, purposes); the editor never fetches. `key` is a left
+operand's IRI, or `"assigner"`, `"assignee"` or `"target"` (the assets) for a party role;
+`values` is a list of strings or `{ value, label?, group? }`, and `null` clears the
+source (an empty list is no source). With `{ closed: true }` a right operand is a select
+of exactly those values (with `setTermInput("select")`), with the labels under
+`<optgroup>` headings for the groups, and any other value is an error whose
+`expected.source` is `"host"`; without it the list only suggests. A value the source no
+longer lists is kept in the document, selected, noted and flagged (never dropped), and
+loading a source is not an edit. Both return summaries as JSON text (`ValueSourceSummary`:
+`values`, `closed`, `warnings`); `valueSourceSummaries()` recomputes them against the
+profiles loaded now. They throw on what they cannot read and keep the previous sources,
+and sources survive a later `setProfile`. Precedence per facet: profile < overlay <
+shapes < host. `validate(policyJson, profiles, options?, shapes?, overlays?, valueSources?)`
+takes the map as its last argument.
+
 ## Validation
 
 `validate(policyJson, profiles, options?)` checks a policy against ODRL

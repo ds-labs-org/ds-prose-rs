@@ -866,3 +866,160 @@ async fn with_refuse_terms_a_term_the_closed_profile_does_not_allow_is_not_commi
     assert_eq!(calls.borrow().len(), 1, "{}", c.inner_html());
     assert!(calls.borrow()[0].0.contains("ex:train"));
 }
+
+// --- runtime value sources (setValueSource) --------------------------------------
+
+const PURPOSE: &str = "https://example.org/dataspace/purpose";
+const PURPOSES: &str = r#"[
+  {"value":"https://example.org/dataspace/research","label":"Research","group":"Purposes"},
+  {"value":"https://example.org/dataspace/marketing","label":"Marketing","group":"Purposes"},
+  {"value":"https://example.org/dataspace/clinical","label":"Clinical research","group":"Registry"}
+]"#;
+const CLOSED_SOURCE: &str = r#"{"closed":true}"#;
+// The same list, without clinical: a value the registry dropped.
+const FEWER: &str = r#"[
+  {"value":"https://example.org/dataspace/research","label":"Research","group":"Purposes"}
+]"#;
+
+async fn mounted_with_select() -> (Element, ProseEditorHandle, Calls) {
+    let (c, mut h, calls) = mount(DX_POLICY).await;
+    h.set_profile(Some(DX_PROFILE.to_string())).unwrap();
+    h.set_term_input("select").unwrap();
+    h.set_validation(js("{}")).unwrap();
+    settle().await;
+    (c, h, calls)
+}
+
+#[wasm_bindgen_test]
+async fn a_closed_value_source_fills_the_select_with_labelled_groups() {
+    let (c, mut h, calls) = mounted_with_select().await;
+    assert_ne!(select(&c, DX_RIGHT).unwrap().tag_name(), "SELECT");
+    let summary = h
+        .set_value_source(PURPOSE, js(PURPOSES), Some(js(CLOSED_SOURCE)))
+        .expect("source");
+    settle().await;
+    let s: serde_json::Value = serde_json::from_str(&summary).unwrap();
+    assert_eq!(s["values"], 3, "{summary}");
+    assert_eq!(s["closed"], true);
+    let right = select(&c, DX_RIGHT).expect("the right operand");
+    assert_eq!(right.tag_name(), "SELECT", "{}", c.inner_html());
+    let html = right.inner_html();
+    assert!(html.contains("<optgroup label=\"Purposes\">"), "{html}");
+    assert!(html.contains("<optgroup label=\"Registry\">"), "{html}");
+    assert!(html.contains("Marketing"), "{html}");
+    // clinical is listed: nothing outside, no error.
+    assert_eq!(right.get_attribute("data-outside"), None, "{html}");
+    assert!(calls.borrow().is_empty(), "loading a source is not an edit");
+}
+
+#[wasm_bindgen_test]
+async fn a_value_removed_from_the_source_is_kept_flagged_and_not_dropped() {
+    let (c, mut h, calls) = mounted_with_select().await;
+    h.set_value_source(PURPOSE, js(PURPOSES), Some(js(CLOSED_SOURCE)))
+        .unwrap();
+    settle().await;
+    let report = h.report().as_string().expect("a report");
+    assert!(!report.contains("prose.value-not-allowed"), "{report}");
+    // The registry drops clinical.
+    h.set_value_source(PURPOSE, js(FEWER), Some(js(CLOSED_SOURCE)))
+        .unwrap();
+    settle().await;
+    let right = select(&c, DX_RIGHT).expect("the right operand");
+    assert_eq!(right.get_attribute("data-outside").as_deref(), Some("true"));
+    assert!(
+        right.inner_html().contains("dx:clinical"),
+        "the value is kept as an option: {}",
+        right.inner_html()
+    );
+    assert!(
+        c.text_content().unwrap().contains("not in the host's list"),
+        "{}",
+        c.inner_html()
+    );
+    let report = h.report().as_string().expect("a report");
+    assert!(report.contains("prose.value-not-allowed"), "{report}");
+    assert!(report.contains("\"source\":\"host\""), "{report}");
+    // Not dropped: the document says what it said, and nothing was emitted.
+    assert!(h.json().contains("dx:clinical"), "{}", h.json());
+    assert!(calls.borrow().is_empty());
+    // Listed again: the flag goes.
+    h.set_value_source(PURPOSE, js(PURPOSES), Some(js(CLOSED_SOURCE)))
+        .unwrap();
+    settle().await;
+    assert!(
+        !h.report()
+            .as_string()
+            .unwrap()
+            .contains("prose.value-not-allowed")
+    );
+}
+
+#[wasm_bindgen_test]
+async fn a_suggest_only_source_leaves_the_value_free_text_and_null_clears() {
+    let (c, mut h, _calls) = mounted_with_select().await;
+    h.set_value_source(PURPOSE, js(PURPOSES), None).unwrap();
+    settle().await;
+    assert_ne!(select(&c, DX_RIGHT).unwrap().tag_name(), "SELECT");
+    h.set_value_source(PURPOSE, js(PURPOSES), Some(js(CLOSED_SOURCE)))
+        .unwrap();
+    settle().await;
+    assert_eq!(select(&c, DX_RIGHT).unwrap().tag_name(), "SELECT");
+    assert_eq!(
+        h.set_value_source(PURPOSE, JsValue::NULL, None).unwrap(),
+        "null"
+    );
+    settle().await;
+    assert_ne!(select(&c, DX_RIGHT).unwrap().tag_name(), "SELECT");
+}
+
+#[wasm_bindgen_test]
+async fn the_sources_survive_a_new_profile_and_unreadable_ones_throw() {
+    let (c, mut h, _calls) = mounted_with_select().await;
+    h.set_value_sources(js(&format!(
+        r#"{{"{PURPOSE}": {{"values": {PURPOSES}, "closed": true}}}}"#
+    )))
+    .unwrap();
+    settle().await;
+    h.set_profile(Some(DX_PROFILE.to_string())).unwrap();
+    settle().await;
+    assert_eq!(select(&c, DX_RIGHT).unwrap().tag_name(), "SELECT");
+    assert!(h.set_value_source(PURPOSE, js("[1]"), None).is_err());
+    assert!(h.set_value_sources(js(r#"{"k": 3}"#)).is_err());
+    settle().await;
+    assert_eq!(
+        select(&c, DX_RIGHT).unwrap().tag_name(),
+        "SELECT",
+        "the previous sources stay"
+    );
+    h.set_value_sources(JsValue::NULL).unwrap();
+    settle().await;
+    assert_ne!(select(&c, DX_RIGHT).unwrap().tag_name(), "SELECT");
+}
+
+#[wasm_bindgen_test]
+async fn picking_a_listed_value_writes_it_to_the_document() {
+    let (c, mut h, calls) = mounted_with_select().await;
+    h.set_value_source(PURPOSE, js(PURPOSES), Some(js(CLOSED_SOURCE)))
+        .unwrap();
+    settle().await;
+    let right = select(&c, DX_RIGHT).unwrap();
+    let el: web_sys::HtmlSelectElement = right.dyn_into().unwrap();
+    el.set_value("https://example.org/dataspace/marketing");
+    let ev = web_sys::Event::new_with_event_init_dict("change", &{
+        let i = web_sys::EventInit::new();
+        i.set_bubbles(true);
+        i
+    })
+    .unwrap();
+    el.dispatch_event(&ev).unwrap();
+    settle().await;
+    let recorded = calls.borrow().clone();
+    assert_eq!(recorded.len(), 1, "{recorded:?}");
+    assert!(
+        recorded[0]
+            .0
+            .contains("https://example.org/dataspace/marketing"),
+        "{}",
+        recorded[0].0
+    );
+}

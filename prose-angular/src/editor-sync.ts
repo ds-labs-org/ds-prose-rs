@@ -1,4 +1,4 @@
-import type { EditLimits, OutOfScopeMode, OverlaySummary, RemovedSection, ShapesSummary, TermInput, ValidateOptions, ValidationReport } from '@ds-labs/prose-wasm';
+import type { EditLimits, OutOfScopeMode, OverlaySummary, RemovedSection, ShapesSummary, TermInput, ValidateOptions, ValidationReport, ValueSourceSummary, ValueSources } from '@ds-labs/prose-wasm';
 import type { ProfileSummary } from './profile-sync';
 
 // No value imports from the sibling modules: `npm test` runs this file under
@@ -36,6 +36,10 @@ export interface EditorHandleLike {
   setOverlays(texts: string[]): string;
   /** The loaded overlays' summaries as JSON text, recomputed against the profiles loaded now. */
   overlaySummaries(): string;
+  /** The host's runtime value sources, keyed by left operand IRI or party role, or none (`null`); returns the summaries as JSON text, one per key. */
+  setValueSources(sources: ValueSources | null): string;
+  /** The summaries of the value sources against the profiles loaded now, as JSON text. */
+  valueSourceSummaries(): string;
   /** Companion SHACL shapes (text) or none; returns the summary as JSON text, `"null"` after clearing. */
   setShapes(text: string | null): string;
   setLimits(limits: EditLimits | null): void;
@@ -67,6 +71,12 @@ export interface EditorInputs {
   shapes?: string | null;
   /** The texts of operator overlays, or none; blank texts are dropped. */
   overlays?: readonly string[] | null;
+  /**
+   * Values the host took from its registry or catalog, by left operand IRI or
+   * party role (`"assigner"`, `"assignee"`, `"target"`); none when left out,
+   * `null` or `{}`.
+   */
+  valueSources?: ValueSources | null;
   options: ValidateOptions | null;
   limits: EditLimits | null;
   /** How the term slots take their value; `'free'` (the default) when left out. */
@@ -82,6 +92,8 @@ export interface EditorOutcome {
   summaries?: ProfileSummary[];
   /** What the overlays of this `apply` hold, one summary each, for the component to emit; absent when nothing changed or they were cleared. */
   overlaysSummary?: OverlaySummary[];
+  /** What the value sources of this `apply` hold, one summary per key, for the component to emit; absent when nothing changed or they were cleared. */
+  valueSourcesSummary?: Record<string, ValueSourceSummary>;
   /** What the shapes of this `apply` hold, for the component to emit; absent when nothing changed or they were cleared. */
   shapesSummary?: ShapesSummary;
   jsonError?: unknown;
@@ -90,6 +102,8 @@ export interface EditorOutcome {
   overlaysError?: unknown;
   /** The shapes could not be read; the previous shapes stay. */
   shapesError?: unknown;
+  /** The value sources could not be read; the previous sources stay. */
+  valueSourcesError?: unknown;
   validationError?: unknown;
   report?: string | null;
   /** What the scope took out of the document in this `apply` (`outOfScope: 'strip'`); absent when nothing. */
@@ -123,6 +137,9 @@ export class EditorSession<H extends EditorHandleLike = EditorHandleLike> {
   // Whether the handle holds overlays now (for their summaries to refresh).
   private overlaysLoaded = false;
   private readonly shapesChanged = tracker<string>();
+  private readonly sourcesChanged = tracker<ValueSources>();
+  // Whether the handle holds value sources now (for their summaries to refresh).
+  private sourcesLoaded = false;
   /** The handle starts with `'show'`: `setOutOfScope` is called only for a change from it. */
   private outOfScope: OutOfScopeMode = 'show';
   /** The handle starts with free text: `setTermInput` is called only for a change from it. */
@@ -223,6 +240,27 @@ export class EditorSession<H extends EditorHandleLike = EditorHandleLike> {
         out.shapesError = error;
       }
     }
+    // The host's value sources sit on top of everything above.
+    const sources = inputs.valueSources == null || Object.keys(inputs.valueSources).length === 0 ? null : inputs.valueSources;
+    if (this.sourcesChanged(sources)) {
+      try {
+        const summary = JSON.parse(handle.setValueSources(sources)) as Record<string, ValueSourceSummary>;
+        if (Object.keys(summary).length > 0) out.valueSourcesSummary = summary;
+      } catch (error) {
+        out.valueSourcesError = error;
+      }
+    } else if (profilesSet && this.sourcesLoaded) {
+      // The warnings of a source name the left operands no profile declares:
+      // new profiles make the ones reported before stale.
+      try {
+        const summary = JSON.parse(handle.valueSourceSummaries()) as Record<string, ValueSourceSummary>;
+        if (Object.keys(summary).length > 0) out.valueSourcesSummary = summary;
+      } catch (error) {
+        out.valueSourcesError = error;
+      }
+    }
+    if (sources != null && out.valueSourcesError === undefined) this.sourcesLoaded = true;
+    else if (sources == null) this.sourcesLoaded = false;
     const termInput = inputs.termInput ?? 'free';
     if (termInput !== this.termInput) {
       try {

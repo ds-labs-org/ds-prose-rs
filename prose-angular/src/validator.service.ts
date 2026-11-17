@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
-import type { ValidateOptions, ValidationReport } from '@ds-labs/prose-wasm';
-import { overlayTexts, shapesText } from './validation-sync';
+import type { ValidateOptions, ValidationReport, ValueSources } from '@ds-labs/prose-wasm';
+import { overlayTexts, shapesText, valueSourcesOf } from './validation-sync';
 import { PROSE_WASM_MODULE, PROSE_WASM_URL, loadWasm } from './wasm-runtime';
 
 /**
@@ -24,6 +24,10 @@ export class ProseValidatorService {
    * (JSON-LD, or Turtle with the Turtle build); blank is none, and shapes
    * that cannot be read reject. `overlays` are the texts of the dataspace's
    * operator overlays (blank texts are dropped); the shapes win over them.
+   * `valueSources` are the values the host took from its registry or
+   * catalog, by left operand IRI or party role; they sit on top of the
+   * rest, and a closed one makes a value it does not list a finding whose
+   * `expected.source` is `"host"`.
    * A problem in the policy is never a rejection: it is a finding.
    */
   async validate(
@@ -32,9 +36,10 @@ export class ProseValidatorService {
     options: ValidateOptions | null = null,
     shapes: string | null = null,
     overlays: readonly string[] | null = null,
+    valueSources: ValueSources | null = null,
   ): Promise<ValidationReport> {
     const wasm = await loadWasm({ module: this.wasmModule, url: this.wasmUrl });
     const list = typeof profiles === 'string' || profiles == null ? profiles : [...profiles];
-    return JSON.parse(wasm.validate(json, list, options, shapesText(shapes), overlayTexts(overlays))) as ValidationReport;
+    return JSON.parse(wasm.validate(json, list, options, shapesText(shapes), overlayTexts(overlays), valueSourcesOf(valueSources))) as ValidationReport;
   }
 }

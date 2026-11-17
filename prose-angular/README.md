@@ -61,6 +61,7 @@ export class PolicyComponent {
 | `profiles` | input | several profiles, as text each; a list wins over `profile` (an empty list clears them) |
 | `shapes` | input | the dataspace's companion SHACL shapes as text, JSON-LD or Turtle with the Turtle build (`null` or blank: none); a value a shape's `sh:in` does not list is a finding with `expected.source` `"shapes"` |
 | `overlays` | input | the dataspace's operator overlays as text each (`prose:` hints about terms the profile declares; JSON-LD, or Turtle with the Turtle build); blank texts are dropped. Shapes win over an overlay; a finding an overlay closed has `expected.source` `"overlay"` |
+| `valueSources` | input | values the host took from its registry or catalog (participant DIDs, credential types, asset ids, purposes), keyed by left operand IRI or by party role (`assigner`, `assignee`, `target`): a list of values (`string` or `{ value, label, group }`), which only suggests, or `{ values, closed }`. They sit on top of the profile, overlays and shapes; a finding a closed source caused has `expected.source` `"host"`, and a value it no longer lists stays in the policy |
 | `strict` | input | validate with a closed vocabulary: ODRL plus the loaded profiles (default `false`) |
 | `validation` | input | the full `ValidateOptions`; takes precedence over `strict` |
 | `showViolations` | input | also show the findings and the verdict under the prose (needs `strict` or `validation`) |
@@ -72,6 +73,8 @@ export class PolicyComponent {
 | `profileError` | output | emits the error when `profile` is not a readable profile; the previous profile stays |
 | `overlaysLoaded` | output | emits an `OverlaySummary[]` (`terms`, `warnings`, one per overlay) when `overlays` changed to overlays that were read |
 | `overlaysError` | output | emits the error when an overlay is not readable; the previous overlays stay |
+| `valueSourcesLoaded` | output | emits a `Record<string, ValueSourceSummary>` (`values`, `closed`, `warnings`, one per key) when `valueSources` changed to sources that were read |
+| `valueSourcesError` | output | emits the error when `valueSources` cannot be read; the previous sources stay |
 | `shapesLoaded` | output | emits a `ShapesSummary` (`constraints`, `actions`, `leftOperands`, `warnings`) when `shapes` changed to shapes that were read |
 | `shapesError` | output | emits the error when `shapes` is not readable shapes; the previous shapes stay |
 | `PROSE_WASM_URL` | injection token | where the browser fetches the wasm from, relative to the page's base href (default `prose_wasm_bg.wasm`) |

@@ -21,6 +21,7 @@ The component is `ds-odrl-prose`, a standalone component with an empty template 
 | `profiles` | `string[] \| null` | `null` | Several profiles. A list wins over `profile`, and an empty list clears the profile. |
 | `overlays` | `string[] \| null` | `null` | The texts of the dataspace's operator overlays, JSON-LD or Turtle with the [Turtle build](#prose-wasm-module) each. Blank texts are dropped. An overlay is a small graph of `prose:` hints about terms the profiles declare; see [Running in a dataspace](/angular/dataspace/#operator-overlay). With validation on, a value a closed overlay does not list is a finding whose `expected.source` is `"overlay"`. The shapes win over an overlay. |
 | `shapes` | `string \| null` | `null` | The text of the dataspace's companion SHACL shapes, JSON-LD or Turtle with the [Turtle build](#prose-wasm-module). Blank text means none. Only a subset of SHACL is read; see [Running in a dataspace](/angular/dataspace/). With validation on, a value a shape's `sh:in` does not list is a finding whose `expected.source` is `"shapes"`. |
+| `valueSources` | `ValueSources \| null` | `null` | The values the host took from its registry or catalog (participant DIDs, credential types, asset ids, purposes), keyed by left operand IRI or by party role (`"assigner"`, `"assignee"`, `"target"`); each entry is a list of values, or `{ values, closed }`. A value is a string or `{ value, label, group }`. They sit on top of the profiles, overlays and shapes; see [Running in a dataspace](/angular/dataspace/#runtime-value-sources). A value a closed source does not list is a finding whose `expected.source` is `"host"`, and it stays in the policy. |
 | `strict` | `boolean` | `false` | Validate with a closed vocabulary: ODRL plus the loaded profiles. |
 | `validation` | `ValidateOptions \| null` | `null` | The full validation options. They win over `strict`. |
 | `showViolations` | `boolean` | `false` | Show the findings and the verdict under the prose. Effective only when `strict` or `validation` gives options. |
@@ -38,6 +39,8 @@ Validation is covered on [its own page](/angular/validation/).
 | `overlaysError` | `unknown` | An overlay text cannot be read. The previous overlays stay. |
 | `shapesLoaded` | `ShapesSummary` | After the `shapes` input changed to shapes that were read. `warnings` lists what was not read. |
 | `shapesError` | `unknown` | The shapes text cannot be read. The previous shapes stay. |
+| `valueSourcesLoaded` | `Record<string, ValueSourceSummary>` | After the `valueSources` input changed to sources that were read, and again when only the profiles changed (the `warnings` depend on them): one summary per key, with the number of `values`, whether it is `closed`, and the `warnings` for what was not used. |
+| `valueSourcesError` | `unknown` | The `valueSources` cannot be read. The previous sources stay. |
 | `validationChange` | `ValidationReport` | The verdict or the set of findings changed. The first report counts as a change. Never emitted for no report. |
 | `validationError` | `unknown` | The `validation` options cannot be read, or building the report threw. The previous options stay. |
 
@@ -67,6 +70,7 @@ The declared type is writable, because the source declares `readonly report = si
 | `profiles` | `string[] \| null` | `null` | Several profiles. A list wins over `profile`. |
 | `overlays` | `string[] \| null` | `null` | The texts of the dataspace's operator overlays, JSON-LD or Turtle with the [Turtle build](#prose-wasm-module) each. Blank texts are dropped. An overlay merges `prose:` hints onto the terms the profiles declare and never adds or relabels one; see [Running in a dataspace](/angular/dataspace/#operator-overlay). A right operand an overlay closes is a dropdown with `termInput="select"`, and any other value is an error that names the overlay. The shapes win over an overlay. |
 | `shapes` | `string \| null` | `null` | The text of the dataspace's companion SHACL shapes, JSON-LD or Turtle with the [Turtle build](#prose-wasm-module). Blank text means none. Only a subset of SHACL is read; see [Running in a dataspace](/angular/dataspace/). A right operand a shape closes with `sh:in` is a dropdown with `termInput="select"`, and any other value is an error that names the shapes. |
+| `valueSources` | `ValueSources \| null` | `null` | The values the host took from its registry or catalog (participant DIDs, credential types, asset ids, purposes), keyed by left operand IRI or by party role (`"assigner"`, `"assignee"`, `"target"`); each entry is a list of values (suggestions), or `{ values, closed }`. A value is a string or `{ value, label, group }`. A right operand a closed source covers is a dropdown with `termInput="select"`, its values grouped under their `group`; any other value is an error that names the host. A value the source no longer lists stays in the document, selected, noted and flagged; it is never dropped. A party role's list feeds the suggestions of those slots. See [Running in a dataspace](/angular/dataspace/#runtime-value-sources). |
 | `limits` | `EditLimits \| null` | `null` | How many items each list may hold, by list name; a given entry replaces that list's default (`min` 0, `max` unbounded). `{ policyAssigner: { max: 0 } }` removes the assigner button. Unreadable limits are logged and the previous ones stay. |
 | `strict` | `boolean \| undefined` | `undefined` | Validate with a closed vocabulary: ODRL plus the loaded profiles. Not set means `false`, or the `preset`'s. |
 | `validation` | `ValidateOptions \| null` | `null` | The full validation options. They win over `strict`. While validation is on, the editor marks issues inline and shows a problems panel with fix buttons; edits are flagged, never refused. |
@@ -89,6 +93,8 @@ The declared type is writable, because the source declares `readonly report = si
 | `overlaysError` | `unknown` | An overlay text cannot be read. The previous overlays stay. |
 | `shapesLoaded` | `ShapesSummary` | After the `shapes` input changed to shapes that were read. `warnings` lists what was not read. |
 | `shapesError` | `unknown` | The shapes text cannot be read. The previous shapes stay. |
+| `valueSourcesLoaded` | `Record<string, ValueSourceSummary>` | After the `valueSources` input changed to sources that were read, and again when only the profiles changed (the `warnings` depend on them): one summary per key, with the number of `values`, whether it is `closed`, and the `warnings` for what was not used. |
+| `valueSourcesError` | `unknown` | The `valueSources` cannot be read. The previous sources stay. |
 | `validationChange` | `ValidationReport` | The verdict or the set of findings changed, also after an edit. Never emitted for no report. |
 | `validationError` | `unknown` | The `validation` options cannot be read, or building the report threw. The previous options stay. |
 
@@ -131,10 +137,11 @@ async validate(
   options: ValidateOptions | null = null,
   shapes: string | null = null,
   overlays: readonly string[] | null = null,
+  valueSources: ValueSources | null = null,
 ): Promise<ValidationReport>
 ```
 
-It waits for the wasm module and does no network access. `shapes` is the text of companion SHACL shapes and `overlays` the texts of operator overlays; it rejects when either cannot be read. It is strict unless `options.strict` is `false`. It rejects when the wasm cannot be loaded, or when a profile or the options cannot be read. A problem in the policy is a finding in the report, never a rejection.
+It waits for the wasm module and does no network access. `shapes` is the text of companion SHACL shapes and `overlays` the texts of operator overlays; it rejects when either cannot be read. `valueSources` are the host's runtime value sources, by left operand IRI or party role. It is strict unless `options.strict` is `false`. It rejects when the wasm cannot be loaded, or when a profile or the options cannot be read. A problem in the policy is a finding in the report, never a rejection.
 
 {{source prose-angular/test/docs-examples.ts#service}}
 
@@ -170,6 +177,9 @@ The package exports exactly these names from its entry point. Nothing else is pu
 | `RuleInfo` | type | One entry of the rule catalogue, from `@ds-labs/prose-wasm`. |
 | `EditLimits` | type | The `limits` input of the editor, from `@ds-labs/prose-wasm`. |
 | `OutOfScopeMode` | type | The `outOfScope` input of the editor, `"show"`, `"strip"` or `"reject"`, from `@ds-labs/prose-wasm`. |
+| `ValueSources` | type | The `valueSources` input: values by left operand IRI or party role, each a list or `{ values, closed }`, from `@ds-labs/prose-wasm`. |
+| `ValueSourceValue` | type | One value of a source: a string, or `{ value, label, group }`, from `@ds-labs/prose-wasm`. |
+| `ValueSourceSummary` | type | What `valueSourcesLoaded` emits per key: the number of `values`, `closed` and the `warnings`, from `@ds-labs/prose-wasm`. |
 | `OverlaySummary` | type | What `overlaysLoaded` emits per overlay: the number of `terms` it names and the `warnings`, from `@ds-labs/prose-wasm`. |
 | `RemovedSection` | type | What `outOfScopeRemoved` emits per section, from `@ds-labs/prose-wasm`. |
 | `ShapesSummary` | type | What `shapesLoaded` emits: `constraints`, the closed `actions` and `leftOperands` (or `null`) and the `warnings`, from `@ds-labs/prose-wasm`. |
