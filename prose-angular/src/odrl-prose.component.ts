@@ -10,9 +10,9 @@ import {
   output,
   signal,
 } from '@angular/core';
-import type { ProseHandle, ValidateOptions, ValidationReport } from '@ds-labs/prose-wasm';
+import type { ProseHandle, ShapesSummary, ValidateOptions, ValidationReport } from '@ds-labs/prose-wasm';
 import { ProfileSummary, parseSummary } from './profile-sync';
-import { StandaloneReporter, createChangeTracker, parseReport, profileTexts, reportChanged, validationOptions } from './validation-sync';
+import { StandaloneReporter, createChangeTracker, parseReport, profileTexts, reportChanged, shapesText, validationOptions } from './validation-sync';
 import { PROSE_WASM_MODULE, PROSE_WASM_URL, type ProseWasmModule, loadWasm } from './wasm-runtime';
 
 export { PROSE_WASM_MODULE, PROSE_WASM_URL };
@@ -32,6 +32,15 @@ export { PROSE_WASM_MODULE, PROSE_WASM_URL };
  * `profileError` and the previous profile stays.
  *
  * `[profiles]` takes several profiles at once (a list wins over `profile`).
+ *
+ * `[shapes]` takes the text of the dataspace's companion SHACL shapes
+ * (JSON-LD, or Turtle with the Turtle build). With validation on, they add
+ * to the terms the profiles declare: a value a shape's `sh:in` does not list
+ * is a finding whose `expected.source` is `"shapes"`, and `sh:in` on
+ * `odrl:action` or `odrl:leftOperand` closes those lists for the whole
+ * policy. Only a subset of SHACL is read: `shapesLoaded` emits what was, with
+ * the `warnings` for what was not; unreadable shapes emit `shapesError` and
+ * the previous shapes stay.
  *
  * `[strict]="true"` validates the policy against the loaded profiles with a
  * closed vocabulary: ODRL plus those profiles. `[validation]` takes the full
@@ -61,6 +70,8 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
   readonly profile = input<string | null>(null);
   /** Several ODRL profiles, as JSON-LD (or Turtle) text each; wins over `profile`. */
   readonly profiles = input<string[] | null>(null);
+  /** The text of the dataspace's companion SHACL shapes, JSON-LD (or Turtle, with the Turtle build); blank is none. */
+  readonly shapes = input<string | null>(null);
   /** Validate with a closed vocabulary: ODRL plus the loaded profiles. */
   readonly strict = input(false);
   /** The full validation options; they take precedence over `strict`. */
@@ -73,6 +84,10 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
   readonly profileLoaded = output<ProfileSummary>();
   /** Emits when the `profile` input is not a readable profile; the previous one stays. */
   readonly profileError = output<unknown>();
+  /** Emits what the `shapes` input holds, each time it changes to shapes that were read; `warnings` lists what was not read. */
+  readonly shapesLoaded = output<ShapesSummary>();
+  /** Emits when the `shapes` input is not readable shapes; the previous shapes stay. */
+  readonly shapesError = output<unknown>();
   /** Emits the report when the verdict or the findings change. */
   readonly validationChange = output<ValidationReport>();
   /** Emits when `validation` is not readable options; the previous options stay. */
@@ -88,10 +103,24 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
   private handle?: ProseHandle;
   private readonly profilesChanged = createChangeTracker<string[]>();
   private readonly handleOptionsChanged = createChangeTracker<ValidateOptions>();
+  private readonly shapesChanged = createChangeTracker<string>();
+  // The shapes the handle read last, for the validator built beside it.
+  private appliedShapes: string | null = null;
   // The profiles the handle holds now, and the validator built from them for
   // a report the handle is not asked for.
   private appliedProfiles: string[] = [];
-  private readonly standalone = new StandaloneReporter((profiles, options) => new this.wasm!.ProseValidator(profiles, options));
+  private readonly standalone = new StandaloneReporter((profiles, options, shapes) => {
+    const validator = new this.wasm!.ProseValidator(profiles, options);
+    if (shapes != null) {
+      try {
+        validator.setShapes(shapes);
+      } catch (error) {
+        validator.free();
+        throw error;
+      }
+    }
+    return validator;
+  });
   // Whether the handle validates (it was given options, with the findings shown).
   private handleValidates = false;
   private destroyed = false;
@@ -122,6 +151,7 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
     const cls = this.articleClass() ?? null;
     const single = this.profiles() == null;
     const texts = profileTexts(this.profile(), this.profiles());
+    const shapes = shapesText(this.shapes());
     const options = validationOptions(this.strict(), this.validation());
     const show = this.showViolations() && options != null;
     // Yew schedules its own work; keep it out of Angular's change detection.
@@ -131,6 +161,8 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
       this.handle = handle;
       const out: {
         summaries?: ProfileSummary[];
+        shapesSummary?: ShapesSummary;
+        shapesError?: unknown;
         profileError?: unknown;
         validationError?: unknown;
         report?: string | null;
@@ -144,6 +176,16 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
           this.appliedProfiles = texts ?? [];
         } catch (error) {
           out.profileError = error;
+        }
+      }
+      // The shapes add to the profiles above; an unreadable text keeps the previous shapes.
+      if (this.shapesChanged(shapes)) {
+        try {
+          const summary = JSON.parse(handle.setShapes(shapes)) as ShapesSummary | null;
+          if (summary) out.shapesSummary = summary;
+          this.appliedShapes = shapes;
+        } catch (error) {
+          out.shapesError = error;
         }
       }
       if (this.handleOptionsChanged(show ? options : null)) {
@@ -164,7 +206,7 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
           }
         } else {
           // Unreadable options keep the previous ones; see StandaloneReporter.
-          const standalone = this.standalone.report(this.appliedProfiles, options, json);
+          const standalone = this.standalone.report(this.appliedProfiles, options, json, this.appliedShapes);
           out.report = standalone.report;
           if (standalone.error !== undefined) out.validationError ??= standalone.error;
         }
@@ -176,6 +218,8 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
     });
     if (outcome.profileError !== undefined) this.profileError.emit(outcome.profileError);
     for (const summary of outcome.summaries ?? []) this.profileLoaded.emit(summary);
+    if (outcome.shapesError !== undefined) this.shapesError.emit(outcome.shapesError);
+    if (outcome.shapesSummary) this.shapesLoaded.emit(outcome.shapesSummary);
     if (outcome.validationError !== undefined) this.validationError.emit(outcome.validationError);
     if (outcome.report !== undefined) this.publish(parseReport<ValidationReport>(outcome.report));
   }

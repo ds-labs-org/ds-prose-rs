@@ -414,6 +414,7 @@ impl Builder<'_, '_> {
         }
         t.implies = iris(odrl("implies"));
         t.exact_match = iris(skos("exactMatch"));
+        t.types = iris(ns::RDF_TYPE.to_string());
         t.deprecated = g
             .literals(s, &format!("{}deprecated", ns::OWL))
             .iter()

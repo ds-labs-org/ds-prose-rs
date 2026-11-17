@@ -44,7 +44,7 @@ fn hinted_operators(env: &Env, left: &str) -> Vec<String> {
         return Vec::new();
     }
     w.lookup_written(&env.prefixes, left)
-        .map(|(t, _)| t.hints.operators.clone())
+        .map(|(t, _)| w.operand_hints(t).operators.clone())
         .unwrap_or_default()
 }
 
@@ -63,8 +63,10 @@ fn closes_operators(env: &Env, left: &str) -> bool {
     if left.is_empty() || w.is_empty() {
         return false;
     }
-    w.lookup_written(&env.prefixes, left)
-        .is_some_and(|(t, _)| t.hints.closed && !t.hints.operators.is_empty())
+    w.lookup_written(&env.prefixes, left).is_some_and(|(t, _)| {
+        let h = w.operand_hints(t);
+        h.closed && !h.operators.is_empty()
+    })
 }
 
 /// Whether strict validation would refuse `value` written into the select.

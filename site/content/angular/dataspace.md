@@ -9,7 +9,7 @@ order: 6
 
 A dataspace operator wants its members to write only policies the dataspace can evaluate. This page is about what `ds-odrl-prose-editor` does for that today, using the EONA-X profile as the example.
 
-The editor reads the labels of a real profile, but it does not read the `skos:note` prose that says which values suit which left operand. A profile such as EONA-X (or DSP, or EDC) carries no `prose:operator`, `prose:rightOperand`, `prose:unit` or `prose:closed` data. So what it can narrow is the vocabulary (which actions and left operands exist) and the structure (what a constraint, a group and a rule may look like). The values of a right operand stay free text. Reading values from SHACL shapes, an operator overlay or a value list the host supplies is planned (see the issue tracker) and is not part of the editor yet.
+The editor reads the labels of a real profile, but it does not read the `skos:note` prose that says which values suit which left operand. A profile such as EONA-X (or DSP, or EDC) carries no `prose:operator`, `prose:rightOperand`, `prose:unit` or `prose:closed` data. So what it can narrow is the vocabulary (which actions and left operands exist) and the structure (what a constraint, a group and a rule may look like). The values of a right operand stay free text. Values can come from the dataspace's companion SHACL shapes (see [Companion shapes](#companion-shapes)). An operator overlay or a value list the host supplies is planned and is not part of the editor yet.
 
 ## One switch
 
@@ -53,3 +53,38 @@ A host that checks the report before it saves can refuse a document whose `verdi
 `limits.logicalDepth.max` is how deep groups may nest. A group directly in a condition list is at depth 1, a group in it at depth 2. The editor hides the "group" buttons that would go past the limit, and the reducer refuses the event if a script sends it. A document that already nests deeper is kept as written, and ungrouping stays possible.
 
 See [the editor inputs](/angular/interface/#editor-inputs) for the other inputs, and [validation](/angular/validation/) for the report.
+
+## Companion shapes
+
+A dataspace usually publishes SHACL shapes beside its ODRL profile. They say which right operands suit a left operand, which the profile does not. Pass their text in `shapes`, JSON-LD or Turtle (the Turtle needs the [Turtle build](/angular/interface/#prose-wasm-module)):
+
+```html
+<ds-odrl-prose-editor
+  [json]="policy" (jsonChange)="policy = $event"
+  [profile]="eonaXProfileText"
+  [shapes]="eonaXShapesText"
+  preset="dataspace"
+  (shapesLoaded)="onShapes($event)" />
+```
+
+The component does no network access: fetch both texts yourself. The same `[shapes]` input exists on `ds-odrl-prose` and on `ProseValidatorService.validate`, and `setShapes(text)` on the wasm handles.
+
+This is not a SHACL engine. Only this subset is read:
+
+| In a shape | What it gives |
+|---|---|
+| A property shape on `odrl:rightOperand` in a constraint shape selected by `odrl:leftOperand sh:hasValue X`, directly or through `sh:or` or `sh:qualifiedValueShape` | Hints for the right operand of left operand X. |
+| `sh:in` | The closed values. The operand becomes a dropdown with `termInput="select"`, and any other value is `prose.value-not-allowed`. |
+| `sh:class`, `sh:node` | The IRIs of that class in the profile, with the terms narrower by `skos:broader`. |
+| `sh:datatype` | The datatype of the value. |
+| `sh:pattern`, `sh:minInclusive`, `sh:maxInclusive` | Lexical checks on the value. The pattern is a small regular expression subset. |
+| `sh:in` on `odrl:operator` or `odrl:unit` there | The operators or units that suit X. |
+| `sh:in` on `odrl:action` or `odrl:leftOperand` | Closes the action or left operand list for the whole policy, as `profile.unknown-term` under strict validation. |
+
+Everything else is ignored, and each thing ignored is a line in `warnings` of `shapesLoaded`: other `sh:` properties, property paths that are not read, `sh:not` and `sh:xone`, literal values in `sh:in`, and a shape that names no left operand. Shapes only add hints to terms the loaded profiles declare. They never rename a term, so the sentences keep the profile's labels.
+
+A finding that a shape caused has `expected.source` set to `"shapes"` and says "the shapes allow". Findings from the profile say "the profile allows" and carry no `source`. Where both give hints, a shape replaces the profile's for that facet only (operators, values, units, datatype), and the other facets stay the profile's.
+
+An unreadable text emits `shapesError` and the previous shapes stay. Shapes are kept when the profile changes, and `null` or blank text removes them.
+
+Which source to use: the profile for the vocabulary, the shapes for the values the dataspace accepts for each left operand. A value list the shapes cannot say (a literal list, or one fetched at run time) is not read yet.

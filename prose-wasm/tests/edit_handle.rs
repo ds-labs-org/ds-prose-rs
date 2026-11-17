@@ -648,3 +648,102 @@ async fn refuse_terms_is_a_switch_that_leaves_the_document_and_the_rest_alone() 
     click(&c, "[data-add=\"policy[0]@permission\"]").await;
     assert_eq!(calls.borrow().len(), 1);
 }
+
+// --- companion SHACL shapes (setShapes) ------------------------------------------
+
+const DX_PROFILE: &str = include_str!("../../prose-core/tests/shapes/dataspace-profile.jsonld");
+const DX_SHAPES: &str = include_str!("../../prose-core/tests/shapes/dataspace-shapes.jsonld");
+const DX_POLICY: &str = r#"{"@context":["http://www.w3.org/ns/odrl.jsonld",{"dx":"https://example.org/dataspace/"}],"@type":"Set","uid":"urn:p","profile":"https://example.org/dataspace/profile","permission":[{"target":"urn:a","action":"dx:train","constraint":[{"leftOperand":"dx:purpose","operator":"eq","rightOperand":{"@id":"dx:clinical"}}]}]}"#;
+const DX_RIGHT: &str = "[data-slot=\"policy[0].permission[0].constraint[0]#rightOperand[0]\"]";
+
+#[wasm_bindgen_test]
+async fn set_shapes_closes_a_right_operand_to_a_select_and_other_values_are_errors() {
+    let (c, mut h, calls) = mount(DX_POLICY).await;
+    h.set_profile(Some(DX_PROFILE.to_string()))
+        .expect("profile");
+    h.set_term_input("select").expect("select");
+    h.set_validation(js("{}")).expect("validation");
+    settle().await;
+    // Without shapes the value is free text, and nothing is wrong with it.
+    assert_ne!(select(&c, DX_RIGHT).unwrap().tag_name(), "SELECT");
+    assert!(
+        !h.report()
+            .as_string()
+            .unwrap()
+            .contains("value-not-allowed")
+    );
+
+    let summary = h.set_shapes(Some(DX_SHAPES.to_string())).expect("shapes");
+    settle().await;
+    let s: serde_json::Value = serde_json::from_str(&summary).unwrap();
+    assert_eq!(s["constraints"], 5, "{summary}");
+    assert_eq!(s["warnings"], serde_json::json!([]));
+    let right = select(&c, DX_RIGHT).expect("the right operand");
+    assert_eq!(right.tag_name(), "SELECT", "{}", c.inner_html());
+    let options = right.query_selector_all("option").unwrap();
+    let values: Vec<String> = (0..options.length())
+        .filter_map(|i| options.item(i))
+        .filter_map(|o| o.dyn_into::<web_sys::HtmlOptionElement>().ok())
+        .map(|o| o.value())
+        .collect();
+    assert!(values.contains(&"dx:research".to_string()), "{values:?}");
+    assert!(values.contains(&"dx:marketing".to_string()), "{values:?}");
+    // The stored value is outside the list: kept, selected and an error.
+    assert_eq!(right.get_attribute("data-outside").as_deref(), Some("true"));
+    let report = h.report().as_string().expect("a report");
+    assert!(report.contains("prose.value-not-allowed"), "{report}");
+    assert!(report.contains("\"source\":\"shapes\""), "{report}");
+    assert!(calls.borrow().is_empty(), "loading shapes is not an edit");
+
+    // A new profile keeps the shapes.
+    h.set_profile(Some(DX_PROFILE.to_string()))
+        .expect("profile");
+    settle().await;
+    assert_eq!(select(&c, DX_RIGHT).unwrap().tag_name(), "SELECT");
+
+    // Clearing them gives the free text back.
+    assert_eq!(h.set_shapes(None).expect("clear"), "null");
+    settle().await;
+    assert_ne!(select(&c, DX_RIGHT).unwrap().tag_name(), "SELECT");
+    assert!(
+        !h.report()
+            .as_string()
+            .unwrap()
+            .contains("value-not-allowed")
+    );
+}
+
+#[wasm_bindgen_test]
+async fn unreadable_shapes_throw_and_keep_the_previous() {
+    let (c, mut h, _calls) = mount(DX_POLICY).await;
+    h.set_profile(Some(DX_PROFILE.to_string())).unwrap();
+    h.set_term_input("select").unwrap();
+    h.set_shapes(Some(DX_SHAPES.to_string())).unwrap();
+    settle().await;
+    for bad in ["{", "<!doctype html><p>hi</p>", DX_PROFILE] {
+        assert!(h.set_shapes(Some(bad.to_string())).is_err(), "{bad}");
+        settle().await;
+        assert_eq!(
+            select(&c, DX_RIGHT).unwrap().tag_name(),
+            "SELECT",
+            "the previous shapes stay after {bad}"
+        );
+    }
+}
+
+#[wasm_bindgen_test]
+async fn shapes_close_the_action_list_for_the_policy() {
+    let (c, mut h, _calls) = mount(DX_POLICY).await;
+    h.set_profile(Some(DX_PROFILE.to_string())).unwrap();
+    h.set_term_input("select").unwrap();
+    h.set_validation(js("{}")).unwrap();
+    h.set_shapes(Some(DX_SHAPES.to_string())).unwrap();
+    settle().await;
+    let action = select(&c, ACTION).expect("the action select");
+    let html = action.inner_html();
+    assert!(
+        html.contains("dx:train") && html.contains("dx:share"),
+        "{html}"
+    );
+    assert!(!html.contains("dx:publish"), "{html}");
+}

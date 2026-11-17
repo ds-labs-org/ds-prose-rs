@@ -1,0 +1,73 @@
+{
+  "@context": {
+    "sh": "http://www.w3.org/ns/shacl#",
+    "odrl": "http://www.w3.org/ns/odrl/2/",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "dx": "https://example.org/dataspace/"
+  },
+  "@graph": [
+    {
+      "@id": "dx:PurposeConstraintShape",
+      "@type": "sh:NodeShape",
+      "sh:property": [
+        { "sh:path": { "@id": "odrl:leftOperand" }, "sh:hasValue": { "@id": "dx:purpose" } },
+        { "sh:path": { "@id": "odrl:operator" }, "sh:in": { "@list": [{ "@id": "odrl:eq" }, { "@id": "odrl:isAnyOf" }] } },
+        { "sh:path": { "@id": "odrl:rightOperand" }, "sh:in": { "@list": [{ "@id": "dx:research" }, { "@id": "dx:marketing" }] } }
+      ]
+    },
+    {
+      "@id": "dx:AlternativesShape",
+      "@type": "sh:NodeShape",
+      "sh:or": { "@list": [
+        { "@id": "dx:MembershipConstraintShape" },
+        { "@id": "dx:RegionConstraintShape" }
+      ] }
+    },
+    {
+      "@id": "dx:MembershipConstraintShape",
+      "sh:property": [
+        { "sh:path": { "@id": "odrl:leftOperand" }, "sh:hasValue": { "@id": "dx:participantType" } },
+        { "sh:path": { "@id": "odrl:rightOperand" }, "sh:class": { "@id": "dx:Membership" } }
+      ]
+    },
+    {
+      "@id": "dx:RegionConstraintShape",
+      "sh:property": [
+        { "sh:path": { "@id": "odrl:leftOperand" }, "sh:hasValue": { "@id": "dx:region" } },
+        { "sh:path": { "@id": "odrl:rightOperand" }, "sh:in": { "@list": [{ "@id": "dx:eu" }, { "@id": "dx:us" }] } }
+      ]
+    },
+    {
+      "@id": "dx:PolicyShape",
+      "@type": "sh:NodeShape",
+      "sh:property": {
+        "sh:path": { "@id": "odrl:constraint" },
+        "sh:qualifiedValueShape": {
+          "sh:property": [
+            { "sh:path": { "@id": "odrl:leftOperand" }, "sh:hasValue": { "@id": "dx:count" } },
+            { "sh:path": { "@id": "odrl:rightOperand" }, "sh:datatype": { "@id": "xsd:integer" }, "sh:minInclusive": 1, "sh:maxInclusive": 100 },
+            { "sh:path": { "@id": "odrl:unit" }, "sh:in": { "@list": [{ "@id": "dx:people" }] } }
+          ]
+        },
+        "sh:qualifiedMinCount": 1
+      }
+    },
+    {
+      "@id": "dx:CodeConstraintShape",
+      "sh:property": [
+        { "sh:path": { "@id": "odrl:leftOperand" }, "sh:hasValue": { "@id": "dx:code" } },
+        { "sh:path": { "@id": "odrl:rightOperand" }, "sh:pattern": "^[A-Z]{3}-[0-9]+$" }
+      ]
+    },
+    {
+      "@id": "dx:RuleShape",
+      "@type": "sh:NodeShape",
+      "sh:property": [
+        { "sh:path": { "@id": "odrl:action" }, "sh:in": { "@list": [{ "@id": "dx:train" }, { "@id": "dx:share" }] } },
+        { "sh:path": { "@id": "odrl:leftOperand" }, "sh:in": { "@list": [
+          { "@id": "dx:purpose" }, { "@id": "dx:participantType" }, { "@id": "dx:count" }, { "@id": "dx:code" }, { "@id": "dx:region" }
+        ] } }
+      ]
+    }
+  ]
+}

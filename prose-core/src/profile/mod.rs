@@ -46,21 +46,31 @@
 use serde_json::Value;
 
 mod build;
+mod hints;
 mod jsonld;
-mod ns;
+pub(crate) mod ns;
 mod odrl_terms;
 mod text;
-mod triples;
+pub(crate) mod triples;
 #[cfg(feature = "turtle")]
 mod turtle;
 mod wording;
 
+pub(crate) use hints::layer;
 pub(crate) use ns::is_odrl_context;
 pub(crate) use odrl_terms::odrl_spelling;
 pub use odrl_terms::{OdrlTerm, OdrlVocab, odrl_term, odrl_terms};
 pub use text::LangText;
 pub(crate) use wording::Budget;
 pub use wording::{Prefixes, Wording};
+
+/// A JSON-LD value's triples, for [`crate::shapes`].
+pub(crate) fn jsonld_triples(
+    v: &Value,
+    limits: &ProfileLimits,
+) -> Result<triples::Parsed, ProfileError> {
+    jsonld::read(v, None, limits)
+}
 
 /// The vocabulary one ODRL profile declares.
 ///
@@ -138,6 +148,7 @@ fn same_term(a: &Term, b: &Term) -> bool {
         && same_set(&a.implies, &b.implies)
         && same_set(&a.exact_match, &b.exact_match)
         && a.deprecated == b.deprecated
+        && same_set(&a.types, &b.types)
         && same_set(&a.hints.operators, &b.hints.operators)
         && same_set(&a.hints.values, &b.hints.values)
         && a.hints.datatype == b.hints.datatype
@@ -190,6 +201,26 @@ impl ProfileVocab {
             }
             #[cfg(feature = "turtle")]
             Format::Turtle => turtle::vocab(text, base, limits),
+        }
+    }
+
+    /// Reads `text` (JSON-LD, or Turtle with the `turtle` feature) into the
+    /// private triple list, for [`crate::shapes`]: the same syntaxes, size
+    /// check and limits as a profile.
+    pub(crate) fn read_triples(
+        text: &str,
+        base: Option<&str>,
+        limits: &ProfileLimits,
+    ) -> Result<triples::Parsed, ProfileError> {
+        let text = within_size(text, limits)?;
+        match sniff(text)? {
+            Format::Json => {
+                let value: Value =
+                    serde_json::from_str(text).map_err(|e| ProfileError::Json(e.to_string()))?;
+                jsonld::read(&value, base, limits)
+            }
+            #[cfg(feature = "turtle")]
+            Format::Turtle => turtle::triples(text, base, limits),
         }
     }
 
@@ -337,7 +368,12 @@ pub struct Term {
     pub exact_match: Vec<String>,
     /// `owl:deprecated true`.
     pub deprecated: bool,
-    /// The ds-prose extension's suggestions; empty without it.
+    /// Every named `rdf:type` the profile gives the term, the ODRL classes
+    /// among them. A shape's `sh:class` is read against these.
+    pub types: Vec<String>,
+    /// The ds-prose extension's suggestions; empty without it. Read the
+    /// hints a reading uses through [`Wording::operand_hints`], which layers
+    /// the companion shapes over these.
     pub hints: OperandHints,
 }
 
@@ -354,6 +390,7 @@ impl Term {
             implies: Vec::new(),
             exact_match: Vec::new(),
             deprecated: false,
+            types: Vec::new(),
             hints: OperandHints::default(),
         }
     }
@@ -368,8 +405,55 @@ impl Term {
     }
 }
 
-/// Suggestions a profile makes for one left operand through the ds-prose
-/// extension (`prose:`). A ds-prose convention, not ODRL; never exclusive.
+/// Where a hint came from. Hints are layered: each source only adds to the
+/// terms the loaded profiles declare and never relabels one, and a finding
+/// names the source that closed the slot. A later source's facet replaces an
+/// earlier one's for that facet alone; see [`OperandHints`].
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum HintSource {
+    /// The loaded profile's own `prose:` triples.
+    #[default]
+    Profile,
+    /// The companion SHACL shapes ([`crate::shapes`]).
+    Shapes,
+}
+
+impl HintSource {
+    /// The name a report gives the source (`"profile"`, `"shapes"`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            HintSource::Profile => "profile",
+            HintSource::Shapes => "shapes",
+        }
+    }
+
+    /// The source as a sentence names it: "the profile", "the shapes".
+    pub fn noun(self) -> &'static str {
+        match self {
+            HintSource::Profile => "the profile",
+            HintSource::Shapes => "the shapes",
+        }
+    }
+}
+
+/// The source of each facet of an [`OperandHints`]; every facet starts as
+/// the profile's.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HintSources {
+    pub operators: HintSource,
+    pub values: HintSource,
+    pub units: HintSource,
+    pub datatype: HintSource,
+    /// `pattern`, `min_inclusive` and `max_inclusive`.
+    pub lexical: HintSource,
+}
+
+/// Hints for one left operand: what the ds-prose extension (`prose:`) of a
+/// profile suggests for it, with the companion shapes laid over them (see
+/// [`Wording::operand_hints`]). A ds-prose convention, not ODRL. Suggestions
+/// unless `closed`.
 #[non_exhaustive]
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct OperandHints {
@@ -383,7 +467,10 @@ pub struct OperandHints {
     pub units: Vec<String>,
     /// `prose:closed true`: the profile closes this left operand. In strict
     /// validation its operators, values, units and datatype above are then
-    /// binding rather than suggested; nothing else changes.
+    /// binding rather than suggested; nothing else changes. Shapes that give
+    /// a hint for the left operand close it too: every facet a shape gives
+    /// is binding, and the profile's facets that were only suggestions are
+    /// dropped, so a shape makes binding only what the shape says.
     pub closed: bool,
     /// `prose:plural true`: the left operand's label is a plural noun phrase
     /// ("Time windows"), so its operators agree in the plural: "the time
@@ -395,6 +482,18 @@ pub struct OperandHints {
     /// first, each with its depth below the suggested value (0). Each value
     /// appears once, at its first place.
     pub value_tree: Vec<(String, usize)>,
+    /// `sh:pattern` of the companion shapes: a regular expression (the
+    /// subset of [`crate::shapes`]) every literal right operand must match.
+    pub pattern: Option<String>,
+    /// The flags of `pattern` (`sh:flags`), `""` or `"i"`.
+    pub pattern_flags: String,
+    /// `sh:minInclusive`: the lexical form of the least a literal right
+    /// operand may be.
+    pub min_inclusive: Option<String>,
+    /// `sh:maxInclusive`: the greatest.
+    pub max_inclusive: Option<String>,
+    /// Where each facet came from.
+    pub sources: HintSources,
 }
 
 /// What a term is, as far as ODRL is concerned. One term can be several.

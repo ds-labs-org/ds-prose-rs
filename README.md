@@ -698,6 +698,12 @@ validator does not allow. `preset="dataspace"` on `<ds-odrl-prose-editor>`
 turns on strict and structural validation, `termInput="select"`, refusing
 terms, `logicalDepth` 2 and the two lints in one input, each still overridable.
 
+Added with the shapes support: `HintSource`, `ShapesError` and `shapes::{ShapesGraph,
+ConstraintShape}`; `OperandHints` gained `pattern`, `pattern_flags`, `min_inclusive`,
+`max_inclusive` and `sources`, `Term` gained `types`, and `Expected` gained `source`,
+`pattern`, `min_inclusive` and `max_inclusive`. All are `#[non_exhaustive]`, so build
+them with the existing constructors and read them by field.
+
 Changed in 0.8.0: the editor can show its term slots as dropdowns of the loaded
 profiles' terms instead of free text: `EditConfig::term_input =
 TermInput::Select` in Yew, `setTermInput('select')` on `ProseEditorHandle`,
@@ -858,6 +864,32 @@ Changed in 0.3 (breaking, after the tagged 0.2.0; a consumer pinned to the
   holds as a string is written as a string. Moving policies keeps empty
   `@graph` wrappers, and nested `@graph` wrappers inside a top-level `@graph`
   object keep their `@context`.
+
+### Companion SHACL shapes
+
+A dataspace often publishes SHACL shapes beside its profile. `Wording::with_shapes(ShapesGraph)`
+lays them over the profiles (`ShapesGraph::parse` reads JSON-LD, or Turtle with the
+`turtle` feature; the order of `with_profile` and `with_shapes` does not matter).
+This is not a SHACL engine. Only this subset is read:
+
+- a property shape on `odrl:rightOperand` in a constraint shape selected by
+  `odrl:leftOperand sh:hasValue X`, directly or through `sh:or` or
+  `sh:qualifiedValueShape`: `sh:in` (closed values), `sh:class` and `sh:node`
+  (the IRIs of that class in the profile, with `skos:broader` descendants),
+  `sh:datatype`, and `sh:pattern`, `sh:minInclusive`, `sh:maxInclusive` (lexical
+  checks; the pattern is a small regular expression subset);
+- `sh:in` on `odrl:operator` and `odrl:unit` there;
+- `sh:in` on `odrl:action` or `odrl:leftOperand`, which closes those lists for the
+  whole policy (`profile.unknown-term` under strict validation).
+
+Everything else is ignored, and `ShapesGraph::warnings()` says what. Shapes only
+add hints to terms the loaded profiles declare and never relabel a term. The hints
+are layered: `Wording::operand_hints` returns a shape's facet in place of the
+profile's for that facet only, and `OperandHints::sources` records which source
+(`HintSource::Profile` or `Shapes`) gave each facet. A finding that a shape closed
+carries `expected.source: "shapes"` and says "the shapes allow". The same hints
+drive the select in the editor with `TermInput::Select`. On npm: `setShapes(text)` on
+the wasm handles, `validate(..., shapes)`, and `[shapes]` on the Angular components.
 
 ### Using it from Yew
 

@@ -22,6 +22,7 @@ pub mod editor;
 pub mod validation;
 pub use editor::ProseEditorHandle;
 use prose_core::profile::{ProfileError, ProfileVocab, Wording};
+use prose_core::shapes::ShapesGraph;
 use prose_core::validate::{Options, Validator};
 use prose_yew::{OdrlProse, OdrlProseProps, SharedWording};
 use serde_json::{Value, json};
@@ -103,6 +104,21 @@ pub fn read_profile(text: Option<&str>) -> Result<Option<SharedWording>, Profile
     }
 }
 
+/// `wording` (the profiles) with the companion shapes laid over it; the
+/// profiles alone when there are no shapes.
+pub(crate) fn shaped(
+    wording: Option<&SharedWording>,
+    shapes: Option<&ShapesGraph>,
+) -> Option<SharedWording> {
+    match shapes {
+        None => wording.cloned(),
+        Some(s) => {
+            let base = wording.map_or_else(Wording::new, |w| (*w.0).clone());
+            Some(SharedWording::from(base.with_shapes(s.clone())))
+        }
+    }
+}
+
 /// What `setProfile` returns for a loaded profile, as JSON text: `iri`,
 /// `title` and `version` (each `null` when the profile does not say),
 /// `terms`, `counts` (only the kinds present, keyed in camelCase) and
@@ -148,6 +164,8 @@ pub struct ProseHandle {
     // profiles whenever either changes.
     options: Option<Options>,
     validator: Option<Validator>,
+    // Set by `setShapes`; laid over the profiles whenever either changes.
+    shapes: Option<ShapesGraph>,
 }
 
 #[wasm_bindgen]
@@ -167,6 +185,7 @@ impl ProseHandle {
             wording: None,
             options: None,
             validator: None,
+            shapes: None,
         }
     }
 
@@ -212,6 +231,29 @@ impl ProseHandle {
         let wording = (!w.is_empty()).then(|| SharedWording::from(w));
         self.set_wording(wording);
         Ok(format!("[{}]", summaries.join(",")))
+    }
+
+    /// Load companion SHACL shapes (JSON-LD or Turtle text), or none for
+    /// `null`: they add hints to the terms the loaded profiles declare, so
+    /// the validation closes a right operand to the values a shape lists, and
+    /// a finding names `"shapes"` as its source. Only a subset of SHACL is
+    /// read; see `ShapesSummary`. Returns the summary as JSON text (`"null"`
+    /// after clearing). Throws when the text is not readable shapes; the
+    /// previous shapes then stay. Kept when the profiles change.
+    #[wasm_bindgen(js_name = setShapes)]
+    pub fn set_shapes(&mut self, text: Option<String>) -> Result<String, JsError> {
+        let shapes = text
+            .as_deref()
+            .map(validation::shapes)
+            .transpose()
+            .map_err(throw)?;
+        let summary = shapes
+            .as_ref()
+            .map_or_else(|| "null".to_string(), validation::shapes_summary_json);
+        self.shapes = shapes;
+        self.refresh();
+        self.render();
+        Ok(summary)
     }
 
     /// Turn validation on with `options` (see `ValidateOptions`; `{}` is
@@ -263,9 +305,7 @@ impl ProseHandle {
     /// Rebuilds the validator from the options and the profiles.
     fn refresh(&mut self) {
         self.validator = self.options.clone().map(|o| {
-            let w = self
-                .wording
-                .as_ref()
+            let w = shaped(self.wording.as_ref(), self.shapes.as_ref())
                 .map_or_else(Wording::new, |w| (*w.0).clone());
             Validator::new(Arc::new(w), o)
         });
@@ -276,7 +316,7 @@ impl ProseHandle {
             app.update(props(
                 &self.json,
                 self.class.clone(),
-                self.wording.clone(),
+                shaped(self.wording.as_ref(), self.shapes.as_ref()),
                 self.validator.clone(),
             ));
         }
@@ -286,20 +326,23 @@ impl ProseHandle {
 /// Validates the policy `json` against the profiles (one text, a list of
 /// texts, or `null`) and returns the report as JSON text
 /// (`ds-prose/validation-report@1`). Strict unless `options.strict` is
-/// `false`. Needs no DOM. Throws on options or profiles it cannot read; a
-/// problem in the policy is never thrown, it is a finding.
+/// `false`. `shapes` is the text of companion SHACL shapes (see
+/// `ProseHandle.setShapes`), if any. Needs no DOM. Throws on options,
+/// profiles or shapes it cannot read; a problem in the policy is never
+/// thrown, it is a finding.
 #[wasm_bindgen]
 pub fn validate(
     json: &str,
     #[wasm_bindgen(unchecked_param_type = "string | string[] | null")] profiles: JsValue,
     options: Option<ValidateOptionsArg>,
+    shapes: Option<String>,
 ) -> Result<String, JsError> {
     let options = options_of(options.as_ref()).map_err(throw)?;
     let texts = match to_json(&profiles, "profiles").map_err(throw)? {
         Some(v) => validation::profile_list(&v).map_err(throw)?,
         None => Vec::new(),
     };
-    let v = validation::validator(&texts, options).map_err(throw)?;
+    let v = validation::validator_with_shapes(&texts, shapes.as_deref(), options).map_err(throw)?;
     Ok(validation::validate_text(json, &v))
 }
 
@@ -314,6 +357,9 @@ pub fn rules() -> String {
 #[wasm_bindgen]
 pub struct ProseValidator {
     validator: Validator,
+    // What `setShapes` rebuilds the validator from.
+    wording: Wording,
+    options: Options,
 }
 
 #[wasm_bindgen]
@@ -327,8 +373,32 @@ impl ProseValidator {
     ) -> Result<ProseValidator, JsError> {
         let options = options_of(options.as_ref()).map_err(throw)?;
         let texts = texts_of(&profiles).map_err(throw)?;
-        let validator = validation::validator(&texts, options).map_err(throw)?;
-        Ok(ProseValidator { validator })
+        let wording = validation::wording(&texts).map_err(throw)?;
+        let validator = Validator::new(Arc::new(wording.clone()), options.clone());
+        Ok(ProseValidator {
+            validator,
+            wording,
+            options,
+        })
+    }
+
+    /// Loads companion SHACL shapes (JSON-LD or Turtle text), or none for
+    /// `null`; see `ProseHandle.setShapes`. Returns the summary as JSON text
+    /// (`"null"` after clearing). Throws when the text is not readable
+    /// shapes; the previous shapes then stay.
+    #[wasm_bindgen(js_name = setShapes)]
+    pub fn set_shapes(&mut self, text: Option<String>) -> Result<String, JsError> {
+        let shapes = text
+            .as_deref()
+            .map(validation::shapes)
+            .transpose()
+            .map_err(throw)?;
+        let summary = shapes
+            .as_ref()
+            .map_or_else(|| "null".to_string(), validation::shapes_summary_json);
+        let wording = validation::with_shapes(self.wording.clone(), shapes.as_ref());
+        self.validator = Validator::new(Arc::new(wording), self.options.clone());
+        Ok(summary)
     }
 
     /// The report for the policy `json`, as JSON text.

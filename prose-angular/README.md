@@ -59,6 +59,7 @@ export class PolicyComponent {
 | `articleClass` | input | extra class(es) for the rendered `<article class="ds-prose">` |
 | `profile` | input | the ODRL profile the prose is worded with, as JSON-LD text, or Turtle with the Turtle build (`null` or blank: none) |
 | `profiles` | input | several profiles, as text each; a list wins over `profile` (an empty list clears them) |
+| `shapes` | input | the dataspace's companion SHACL shapes as text, JSON-LD or Turtle with the Turtle build (`null` or blank: none); a value a shape's `sh:in` does not list is a finding with `expected.source` `"shapes"` |
 | `strict` | input | validate with a closed vocabulary: ODRL plus the loaded profiles (default `false`) |
 | `validation` | input | the full `ValidateOptions`; takes precedence over `strict` |
 | `showViolations` | input | also show the findings and the verdict under the prose (needs `strict` or `validation`) |
@@ -68,6 +69,8 @@ export class PolicyComponent {
 | `loadFailed` | output | emits the error when the wasm cannot be loaded |
 | `profileLoaded` | output | emits a `ProfileSummary` (`iri`, `title`, `version`, `terms`, `counts`, `warnings`) for each profile loaded |
 | `profileError` | output | emits the error when `profile` is not a readable profile; the previous profile stays |
+| `shapesLoaded` | output | emits a `ShapesSummary` (`constraints`, `actions`, `leftOperands`, `warnings`) when `shapes` changed to shapes that were read |
+| `shapesError` | output | emits the error when `shapes` is not readable shapes; the previous shapes stay |
 | `PROSE_WASM_URL` | injection token | where the browser fetches the wasm from, relative to the page's base href (default `prose_wasm_bg.wasm`) |
 | `PROSE_WASM_MODULE` | injection token | which build of `@ds-labs/prose-wasm` runs: by default JSON-LD profiles only; `() => import('@ds-labs/prose-wasm/turtle')`, with `PROSE_WASM_URL` set to `prose_wasm_turtle_bg.wasm`, reads Turtle as well |
 

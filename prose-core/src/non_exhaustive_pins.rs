@@ -398,3 +398,32 @@
 //!     }
 //! }
 //! ```
+//! ```
+//! #![deny(unreachable_patterns)]
+//! #![allow(dead_code)]
+//! use prose_core::profile::HintSource;
+//! fn f(x: &HintSource) -> u8 {
+//!     match x {
+//!         HintSource::Profile => 0,
+//!         HintSource::Shapes => 0,
+//!         _ => 1,
+//!     }
+//! }
+//! ```
+//! ```
+//! #![deny(unreachable_patterns)]
+//! #![allow(dead_code)]
+//! use prose_core::shapes::ShapesError;
+//! fn f(x: &ShapesError) -> u8 {
+//!     match x {
+//!         ShapesError::TooLarge { .. } => 0,
+//!         ShapesError::Json(_) => 0,
+//!         ShapesError::LooksLikeHtml => 0,
+//!         ShapesError::UnsupportedFormat => 0,
+//!         ShapesError::LimitExceeded(_) => 0,
+//!         ShapesError::Turtle(_) => 0,
+//!         ShapesError::NotShapes(_) => 0,
+//!         _ => 1,
+//!     }
+//! }
+//! ```

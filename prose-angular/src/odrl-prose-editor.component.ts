@@ -10,7 +10,7 @@ import {
   output,
   signal,
 } from '@angular/core';
-import type { EditLimits, OutOfScopeMode, ProseEditorHandle, RemovedSection, TermInput, ValidateOptions, ValidationReport } from '@ds-labs/prose-wasm';
+import type { EditLimits, OutOfScopeMode, ProseEditorHandle, RemovedSection, ShapesSummary, TermInput, ValidateOptions, ValidationReport } from '@ds-labs/prose-wasm';
 import { type EditorInputs, EditorSession, resolvePreset } from './editor-sync';
 import type { ProfileSummary } from './profile-sync';
 import { parseReport, profileTexts, reportChanged } from './validation-sync';
@@ -38,7 +38,13 @@ import { PROSE_WASM_MODULE, PROSE_WASM_URL, type ProseWasmModule, loadWasm } fro
  * `<article class="ds-prose prose-edit">`.
  *
  * `profile` / `profiles` take the text of ODRL profiles, as for
- * `ds-odrl-prose`. `limits` sets how many items each list may hold
+ * `ds-odrl-prose`. `shapes` takes the text of the dataspace's companion SHACL
+ * shapes (JSON-LD, or Turtle with the Turtle build): they add to the terms
+ * the profiles declare, so a right operand a shape closes with `sh:in` is a
+ * dropdown (with `termInput="select"`) and any other value is an error that
+ * names the shapes; `sh:in` on `odrl:action` or `odrl:leftOperand` closes
+ * those lists for the whole policy. Only a subset of SHACL is read:
+ * `shapesLoaded` emits what was, with the `warnings` for what was not. `limits` sets how many items each list may hold
  * (`{ policyAssigner: { max: 0 } }` removes the assigner button; a list
  * capped at 0 is not shown, and `{ policyUid: { max: 0 } }` hides the policy
  * identifier). When
@@ -77,6 +83,12 @@ export class OdrlProseEditorComponent implements OnChanges, OnDestroy {
   readonly profile = input<string | null>(null);
   /** Several ODRL profiles, as JSON-LD (or Turtle) text each; wins over `profile`. */
   readonly profiles = input<string[] | null>(null);
+  /**
+   * The text of the dataspace's companion SHACL shapes, JSON-LD (or Turtle,
+   * with the Turtle build); blank is none. They narrow what the loaded
+   * profiles declare and never relabel a term.
+   */
+  readonly shapes = input<string | null>(null);
   /** How many items each list may hold; a list not named keeps its default. */
   readonly limits = input<EditLimits | null>(null);
   /** Validate with a closed vocabulary: ODRL plus the loaded profiles. Default `false`; with a `preset`, the preset's. */
@@ -119,6 +131,10 @@ export class OdrlProseEditorComponent implements OnChanges, OnDestroy {
   readonly profileLoaded = output<ProfileSummary>();
   /** Emits when the `profile` input is not a readable profile; the previous one stays. */
   readonly profileError = output<unknown>();
+  /** Emits what the `shapes` input holds, each time it changes to shapes that were read; `warnings` lists what was not read. */
+  readonly shapesLoaded = output<ShapesSummary>();
+  /** Emits when the `shapes` input is not readable shapes; the previous shapes stay. */
+  readonly shapesError = output<unknown>();
   /** Emits the report when the verdict or the findings change, also after an edit. */
   readonly validationChange = output<ValidationReport>();
   /** Emits when `validation` is not readable options; the previous options stay. */
@@ -180,6 +196,7 @@ export class OdrlProseEditorComponent implements OnChanges, OnDestroy {
       cls: this.articleClass() ?? null,
       single: this.profiles() == null,
       texts: profileTexts(this.profile(), this.profiles()),
+      shapes: this.shapes(),
       options: resolved.options,
       limits: resolved.limits,
       termInput: resolved.termInput,
@@ -199,6 +216,8 @@ export class OdrlProseEditorComponent implements OnChanges, OnDestroy {
     if (outcome.removed) this.outOfScopeRemoved.emit(outcome.removed);
     if (outcome.profileError !== undefined) this.profileError.emit(outcome.profileError);
     for (const summary of outcome.summaries ?? []) this.profileLoaded.emit(summary);
+    if (outcome.shapesError !== undefined) this.shapesError.emit(outcome.shapesError);
+    if (outcome.shapesSummary) this.shapesLoaded.emit(outcome.shapesSummary);
     if (outcome.validationError !== undefined) this.validationError.emit(outcome.validationError);
     if (outcome.report !== undefined) this.publish(parseReport<ValidationReport>(outcome.report));
   }

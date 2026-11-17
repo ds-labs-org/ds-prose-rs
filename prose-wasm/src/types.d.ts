@@ -100,6 +100,17 @@ export interface Finding {
     units: string[];
     datatype: string | null;
     closed: boolean;
+    /**
+     * What gave the hint, when it was not the loaded profile: `"shapes"` for
+     * the companion SHACL shapes (`setShapes`). Absent when the profile did.
+     */
+    source?: "shapes";
+    /** The `sh:pattern` a value did not match. */
+    pattern?: string;
+    /** The `sh:minInclusive` a value was below. */
+    minInclusive?: string;
+    /** The `sh:maxInclusive` a value was above. */
+    maxInclusive?: string;
   } | null;
   fixes: Fix[];
   /** A short stable name for the finding; reformatting the input does not change it. */
@@ -217,4 +228,23 @@ export interface RemovedSection {
   key: string;
   /** The `EditLimits` name of the list that left it out, such as `ruleAssigner`. */
   limit: LimitName;
+}
+
+/**
+ * What `setShapes` returns for loaded companion SHACL shapes. Only a subset of
+ * SHACL is read: a property shape on `odrl:rightOperand` in a constraint shape
+ * selected by `odrl:leftOperand sh:hasValue X` (`sh:in`, `sh:class`, `sh:node`,
+ * `sh:datatype`, `sh:pattern`, `sh:minInclusive`, `sh:maxInclusive`), `sh:in` on
+ * `odrl:operator` and `odrl:unit` there, and `sh:in` on `odrl:action` or
+ * `odrl:leftOperand`. Everything else is ignored and listed in `warnings`.
+ */
+export interface ShapesSummary {
+  /** How many left operands a shape selects. */
+  constraints: number;
+  /** The actions (expanded IRIs) the shapes close the policy to; `null` when they do not. */
+  actions: string[] | null;
+  /** The left operands the shapes close the policy to; `null` when they do not. */
+  leftOperands: string[] | null;
+  /** What was not read, or read with a guess. */
+  warnings: string[];
 }

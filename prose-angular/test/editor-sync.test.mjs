@@ -35,6 +35,11 @@ function fake(bad = new Set(), scope = {}) {
         if (scope.refuseLimits) throw outOfScope(['permission[0].assignee']);
       },
       setValidation: (o) => calls.push(['setValidation', o]),
+      setShapes: (t) => {
+        calls.push(['setShapes', t]);
+        if (t === 'bad shapes') throw new Error('not shapes');
+        return t == null ? 'null' : '{"constraints":2,"actions":null,"leftOperands":null,"warnings":["ignored sh:minCount"]}';
+      },
       setRefuseTerms: (on) => calls.push(['setRefuseTerms', on]),
       setTermInput: (m) => {
         calls.push(['setTermInput', m]);
@@ -414,4 +419,58 @@ test('a first apply with the preset hands everything over once', () => {
   const r = resolvePreset('dataspace', none);
   s.apply(inputs({ options: r.options, limits: r.limits, termInput: r.termInput, refuseTerms: r.refuseTerms }), f.mount);
   assert.deepEqual(names(f.calls), ['new', 'setLimits', 'setTermInput', 'setRefuseTerms', 'setValidation', 'report']);
+});
+
+test('shapes: handed over once, after the profiles and before the validation, and reported', () => {
+  const s = new EditorSession();
+  const f = fake();
+  const out = s.apply(inputs({ texts: ['p'], shapes: 'S', options: { strict: true } }), f.mount);
+  assert.deepEqual(names(f.calls), ['new', 'setProfile', 'setShapes', 'setValidation', 'report']);
+  assert.deepEqual(f.calls.find((c) => c[0] === 'setShapes'), ['setShapes', 'S']);
+  assert.deepEqual(out.shapesSummary, { constraints: 2, actions: null, leftOperands: null, warnings: ['ignored sh:minCount'] });
+  assert.equal(out.shapesError, undefined);
+  // The same shapes again: nothing is handed over twice.
+  f.calls.length = 0;
+  const again = s.apply(inputs({ texts: ['p'], shapes: 'S', options: { strict: true } }), f.mount);
+  assert.deepEqual(names(f.calls), ['report']);
+  assert.equal(again.shapesSummary, undefined);
+});
+
+test('shapes: none (null, undefined, blank) on a fresh mount needs no call; going back to none clears them', () => {
+  const s = new EditorSession();
+  const f = fake();
+  s.apply(inputs(), f.mount);
+  s.apply(inputs({ shapes: null }), f.mount);
+  s.apply(inputs({ shapes: '  \n' }), f.mount);
+  assert.ok(!names(f.calls).includes('setShapes'));
+  s.apply(inputs({ shapes: 'S' }), f.mount);
+  f.calls.length = 0;
+  const out = s.apply(inputs({ shapes: '' }), f.mount);
+  assert.deepEqual(f.calls.filter((c) => c[0] === 'setShapes'), [['setShapes', null]]);
+  assert.equal(out.shapesSummary, undefined, 'clearing reports no summary');
+  assert.equal(out.shapesError, undefined);
+});
+
+test('shapes: a text the handle refuses is reported once, not retried until it changes', () => {
+  const s = new EditorSession();
+  const f = fake();
+  const out = s.apply(inputs({ shapes: 'bad shapes' }), f.mount);
+  assert.match(String(out.shapesError), /not shapes/);
+  assert.equal(out.shapesSummary, undefined);
+  f.calls.length = 0;
+  const again = s.apply(inputs({ shapes: 'bad shapes' }), f.mount);
+  assert.deepEqual(names(f.calls), ['report']);
+  assert.equal(again.shapesError, undefined);
+  const fixed = s.apply(inputs({ shapes: 'S' }), f.mount);
+  assert.equal(fixed.shapesError, undefined);
+  assert.equal(fixed.shapesSummary.constraints, 2);
+});
+
+test('shapes: a failed first mount keeps them unspent for the retry', () => {
+  const s = new EditorSession();
+  const f = fake(new Set([A]));
+  s.apply(inputs({ shapes: 'S' }), f.mount);
+  assert.ok(!names(f.calls).includes('setShapes'), 'nothing else was handed over');
+  s.apply(inputs({ json: B, shapes: 'S' }), f.mount);
+  assert.deepEqual(f.calls.filter((c) => c[0] === 'setShapes'), [['setShapes', 'S']]);
 });

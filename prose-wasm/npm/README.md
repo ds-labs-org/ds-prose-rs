@@ -121,6 +121,18 @@ strict validation does when a left operand is marked `prose:closed true`
 `setProfiles([text, ...])` loads several at once and returns the summaries as
 the JSON text of a list (it replaces what `setProfile` loaded; `[]` clears).
 
+`setShapes(text | null)` loads the dataspace's companion SHACL shapes (JSON-LD,
+or Turtle in the Turtle build) on `ProseHandle`, `ProseEditorHandle` and
+`ProseValidator`, and returns a summary as JSON text (`ShapesSummary`:
+`constraints`, `actions`, `leftOperands`, `warnings`; `"null"` after clearing).
+It throws on text that is not readable shapes and keeps the previous shapes.
+Shapes add hints to the terms the profiles declare and survive a later
+`setProfile`. `sh:in` on a right operand selected by `odrl:leftOperand
+sh:hasValue X` makes it a dropdown (`setTermInput('select')`) and any other
+value an error whose `expected.source` is `"shapes"`. Only a subset of SHACL is
+read; the rest is listed in `warnings`. `validate(policyJson, profiles,
+options?, shapes?)` takes the shapes text as its last argument.
+
 ## Validation
 
 `validate(policyJson, profiles, options?)` checks a policy against ODRL

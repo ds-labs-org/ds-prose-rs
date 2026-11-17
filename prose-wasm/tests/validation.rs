@@ -346,3 +346,83 @@ fn dts_names_every_key_of_the_report() {
         );
     }
 }
+
+// --- companion shapes ----------------------------------------------------------
+
+const DX_PROFILE: &str = include_str!("../../prose-core/tests/shapes/dataspace-profile.jsonld");
+const DX_SHAPES: &str = include_str!("../../prose-core/tests/shapes/dataspace-shapes.jsonld");
+
+const DX_POLICY: &str = r#"{
+  "@context": ["http://www.w3.org/ns/odrl.jsonld", {"dx": "https://example.org/dataspace/"}],
+  "@type": "Set", "uid": "urn:p", "profile": "https://example.org/dataspace/profile",
+  "permission": [{"target": "urn:a", "action": "dx:train", "constraint": [
+    {"leftOperand": "dx:purpose", "operator": "eq", "rightOperand": {"@id": "dx:clinical"}}
+  ]}]
+}"#;
+
+fn shaped_report(shapes: Option<&str>) -> Value {
+    let texts = vec![DX_PROFILE.to_string()];
+    let v = validator_with_shapes(&texts, shapes, opts(json!({}))).expect("reads");
+    serde_json::from_str(&validate_text(DX_POLICY, &v)).expect("the report is JSON")
+}
+
+#[test]
+fn shapes_summary_says_what_was_read() {
+    let s = shapes(DX_SHAPES).expect("shapes");
+    let v: Value = serde_json::from_str(&shapes_summary_json(&s)).unwrap();
+    assert_eq!(v["constraints"], 5);
+    assert_eq!(
+        v["actions"],
+        json!([
+            "https://example.org/dataspace/train",
+            "https://example.org/dataspace/share"
+        ])
+    );
+    assert_eq!(v["leftOperands"].as_array().unwrap().len(), 5);
+    assert_eq!(v["warnings"], json!([]));
+    let open = shapes(
+        r#"{"@context":{"sh":"http://www.w3.org/ns/shacl#"},"@id":"http://e.org/S","sh:closed":true,"sh:property":{"sh:path":{"@id":"http://e.org/p"}}}"#,
+    )
+    .unwrap();
+    let v: Value = serde_json::from_str(&shapes_summary_json(&open)).unwrap();
+    assert_eq!(v["actions"], Value::Null, "no closed list");
+    assert_eq!(v["leftOperands"], Value::Null);
+    assert!(v["warnings"].as_array().unwrap().len() >= 2, "{v}");
+}
+
+#[test]
+fn a_validator_with_shapes_names_the_shapes_in_its_findings() {
+    let without = shaped_report(None);
+    assert_eq!(without["verdict"], "conforms");
+    let with = shaped_report(Some(DX_SHAPES));
+    assert_eq!(with["verdict"], "violations");
+    let f = &with["findings"][0];
+    assert_eq!(f["rule"], "prose.value-not-allowed");
+    assert_eq!(f["expected"]["source"], "shapes");
+    assert!(f["message"].as_str().unwrap().contains("the shapes allow"));
+}
+
+#[test]
+fn unreadable_shapes_say_what_is_wrong() {
+    for bad in ["", "{", "<!doctype html><p>hi", DX_PROFILE] {
+        let e = shapes(bad).unwrap_err();
+        assert!(e.starts_with("shapes: "), "{e}");
+    }
+    let e = validator_with_shapes(&[DX_PROFILE.to_string()], Some("{"), opts(json!({})))
+        .map(|_| ())
+        .unwrap_err();
+    assert!(e.starts_with("shapes: "), "{e}");
+}
+
+#[test]
+fn dts_declares_the_shapes_api() {
+    for name in [
+        "ShapesSummary",
+        "source?:",
+        "pattern?:",
+        "minInclusive?:",
+        "maxInclusive?:",
+    ] {
+        assert!(TYPES_D_TS.contains(name), "{name}");
+    }
+}

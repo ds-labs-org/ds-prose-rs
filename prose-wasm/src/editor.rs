@@ -11,6 +11,7 @@ use prose_yew::prose_core::edit::{
     read_model, strip_out_of_scope, write_jsonld,
 };
 use prose_yew::prose_core::profile::Wording;
+use prose_yew::prose_core::shapes::ShapesGraph;
 use prose_yew::prose_core::validate::{Options, Report, Validator};
 use prose_yew::{
     EditConfig, EditMode, OdrlProseView, ProseProblems, SharedWording, TermInput, go_to,
@@ -414,6 +415,8 @@ pub struct ProseEditorHandle {
     generation: u64,
     class: Option<String>,
     wording: Option<SharedWording>,
+    /// What `setShapes` loaded, laid over `wording` whenever either changes.
+    shapes: Option<ShapesGraph>,
     options: Option<Options>,
     limits: Option<Value>,
     term_input: TermInput,
@@ -494,6 +497,7 @@ impl ProseEditorHandle {
             generation: 0,
             class,
             wording: None,
+            shapes: None,
             options: None,
             limits: None,
             term_input: TermInput::Free,
@@ -573,6 +577,38 @@ impl ProseEditorHandle {
         Ok(format!("[{}]", summaries.join(",")))
     }
 
+    /// Loads companion SHACL shapes (JSON-LD, or Turtle in the Turtle build),
+    /// or none for `null`. They add hints to the terms the loaded profiles
+    /// declare: a right operand a shape closes with `sh:in` becomes a select
+    /// of those values (with `setTermInput("select")`) and any other value
+    /// is an error naming `"shapes"` as its source; `sh:in` on `odrl:action`
+    /// or `odrl:leftOperand` closes those lists for the whole policy. Only a
+    /// subset of SHACL is read (see `ShapesSummary`), and the rest is
+    /// listed in the `warnings` of the summary this returns as JSON text
+    /// (`"null"` after clearing). Throws when the text is not readable
+    /// shapes; the previous shapes stay. The document and its history stay,
+    /// and a later `setProfile` keeps the shapes.
+    #[wasm_bindgen(js_name = setShapes)]
+    pub fn set_shapes(&mut self, text: Option<String>) -> Result<String, JsError> {
+        let shapes = text
+            .as_deref()
+            .map(validation::shapes)
+            .transpose()
+            .map_err(throw)?;
+        let summary = shapes
+            .as_ref()
+            .map_or_else(|| "null".to_string(), validation::shapes_summary_json);
+        let config = make(
+            crate::shaped(self.wording.as_ref(), shapes.as_ref()).as_ref(),
+            self.options.as_ref(),
+            self.limits.as_ref(),
+        )?;
+        self.install(config);
+        self.shapes = shapes;
+        self.render();
+        Ok(summary)
+    }
+
     /// Validation on with `options` (see `ValidateOptions`; `{}` is strict
     /// mode), or off with `null`. While on, the editor shows inline issue
     /// markers and a problems panel with fix buttons, and `onChange`
@@ -588,7 +624,7 @@ impl ProseEditorHandle {
             Some(v) => Some(validation::options_from_value(Some(&v)).map_err(throw)?),
         };
         let config = make(
-            self.wording.as_ref(),
+            crate::shaped(self.wording.as_ref(), self.shapes.as_ref()).as_ref(),
             options.as_ref(),
             self.limits.as_ref(),
         )?;
@@ -613,7 +649,7 @@ impl ProseEditorHandle {
             .map_err(throw)?
             .filter(|v| !v.is_null());
         let config = make(
-            self.wording.as_ref(),
+            crate::shaped(self.wording.as_ref(), self.shapes.as_ref()).as_ref(),
             self.options.as_ref(),
             limits.as_ref(),
         )?;
@@ -779,7 +815,7 @@ impl ProseEditorHandle {
 
     fn set_wording(&mut self, wording: Option<SharedWording>) -> Result<(), JsError> {
         let config = make(
-            wording.as_ref(),
+            crate::shaped(wording.as_ref(), self.shapes.as_ref()).as_ref(),
             self.options.as_ref(),
             self.limits.as_ref(),
         )?;

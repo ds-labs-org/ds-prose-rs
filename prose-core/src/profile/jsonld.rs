@@ -663,6 +663,19 @@ fn iri_valued(p: &str) -> bool {
             &["imports", "sameAs", "equivalentClass", "equivalentProperty"],
         )
         || local(ns::PROF, &["isProfileOf"])
+        // SHACL's IRI-valued properties, for a shapes document that writes
+        // them as plain strings.
+        || local(
+            ns::SH,
+            &[
+                "path",
+                "class",
+                "node",
+                "datatype",
+                "targetClass",
+                "targetNode",
+            ],
+        )
         || p == ns::RDF_TYPE
 }
 

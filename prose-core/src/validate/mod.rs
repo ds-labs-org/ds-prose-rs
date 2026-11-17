@@ -320,8 +320,17 @@ pub struct Expected {
     pub values_total: usize,
     pub units: Vec<String>,
     pub datatype: Option<String>,
-    /// The left operand is closed by its profile.
+    /// The left operand is closed by its profile or its shapes.
     pub closed: bool,
+    /// What gave the hint the finding is about: the loaded profile, or the
+    /// companion shapes. `None` when the finding is not about a hint.
+    pub source: Option<crate::profile::HintSource>,
+    /// `sh:pattern`, when the finding is about a value that does not match.
+    pub pattern: Option<String>,
+    /// `sh:minInclusive`, when the finding is about a bound.
+    pub min_inclusive: Option<String>,
+    /// `sh:maxInclusive`, when the finding is about a bound.
+    pub max_inclusive: Option<String>,
 }
 
 /// A change that would clear a finding.

@@ -5,10 +5,11 @@ use super::lexical::lexical;
 use super::{Expected, Finding, Fix, Level, MAX_EXPECTED_VALUES, Mode, Options, RuleId, TermRef};
 use crate::edit::*;
 use crate::profile::{
-    OdrlVocab, OperandHints, Prefixes, ProfileVocab, Term, TermKind, Wording, is_odrl_context,
-    odrl_spelling, odrl_term,
+    HintSource, OdrlVocab, OperandHints, Prefixes, ProfileVocab, Term, TermKind, Wording,
+    is_odrl_context, odrl_spelling, odrl_term,
 };
 use crate::read::{join_with, node_prefixes, policy_nodes};
+use crate::shapes::{Bound, Pattern, outside_bounds};
 use crate::words::local_name;
 use crate::words_ctx::{namespace, profile_name};
 use std::collections::{HashMap, HashSet};
@@ -24,6 +25,24 @@ fn odrl_owned(iri: &str, vocab: OdrlVocab) -> bool {
     iri.starts_with(ODRL) || odrl_term(odrl_spelling(iri), vocab).is_some()
 }
 const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
+
+/// "the profile allows" or "the shapes allow": `verb` is the singular form,
+/// as the profile takes it.
+fn the(source: HintSource, verb: &str) -> String {
+    match source {
+        HintSource::Profile => format!("{} {verb}", source.noun()),
+        _ => {
+            let (first, rest) = verb.split_once(' ').unwrap_or((verb, ""));
+            let plural = first.strip_suffix('s').unwrap_or(first);
+            let tail = if rest.is_empty() {
+                String::new()
+            } else {
+                format!(" {rest}")
+            };
+            format!("{} {plural}{tail}", source.noun())
+        }
+    }
+}
 
 /// The most profiles that are not loaded one policy's findings name; one
 /// more finding counts the rest.
@@ -208,7 +227,7 @@ pub(crate) fn admissible_values(
                 && let Some(h) = c
                     .resolve(&a.left)
                     .filter(|(t, _)| t.kinds.contains(&TermKind::LeftOperand))
-                    .map(|(t, _)| &t.hints)
+                    .map(|(t, _)| w.operand_hints(t))
             {
                 let mut written = a.clone();
                 if pos == Pos::Operator {
@@ -839,6 +858,9 @@ impl<'a> Checker<'a> {
             }
             return;
         }
+        if self.closed_out(node, id, field, written, pos, &iri) {
+            return;
+        }
         match resolved {
             Some((t, p)) => {
                 // A profile's term: the policy must name a profile that
@@ -887,6 +909,59 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+    }
+
+    /// A term the companion shapes close the list to (`sh:in` on
+    /// `odrl:action` or `odrl:leftOperand`) and `iri` is not in. Silent while
+    /// an `@context` was not read: it may rebind the prefix, so the term may
+    /// not be the one the list names.
+    fn closed_out(
+        &mut self,
+        node: &NodePath,
+        id: NodeId,
+        field: Field,
+        written: &str,
+        pos: Pos,
+        iri: &str,
+    ) -> bool {
+        let Some(kind) = pos.kind() else {
+            return false;
+        };
+        let Some(allowed) = self.w.closed_terms(kind) else {
+            return false;
+        };
+        if self.context_unread || allowed.iter().any(|a| a == iri) {
+            return false;
+        }
+        let msg = format!(
+            "the {} \"{written}\" is not one {} for this policy",
+            pos.noun(),
+            the(HintSource::Shapes, "allows")
+        );
+        let allowed: Vec<String> = allowed.to_vec();
+        if let Some(f) = self.emit_term(
+            RuleId::ProfileUnknownTerm,
+            false,
+            node,
+            id,
+            field,
+            written,
+            msg,
+        ) {
+            f.expected = Some(Expected {
+                kinds: vec![kind],
+                values_total: if allowed.len() > MAX_EXPECTED_VALUES {
+                    allowed.len()
+                } else {
+                    0
+                },
+                values: allowed.into_iter().take(MAX_EXPECTED_VALUES).collect(),
+                closed: true,
+                source: Some(HintSource::Shapes),
+                ..Expected::default()
+            });
+        }
+        true
     }
 
     fn not_a_conflict_strategy(&mut self, node: &NodePath, id: NodeId, written: &str) {
@@ -1690,7 +1765,7 @@ impl<'a> Checker<'a> {
         let hints = self
             .resolve(&a.left)
             .filter(|(t, _)| t.kinds.contains(&TermKind::LeftOperand))
-            .map(|(t, _)| &t.hints)
+            .map(|(t, _)| self.w.operand_hints(t))
             .filter(|h| !(strict && h.closed && self.context_unread));
         if let Some(h) = hints {
             self.hint_operator(path, a, h);
@@ -1700,6 +1775,7 @@ impl<'a> Checker<'a> {
         // switches a rule on.
         if let Some(h) = hints {
             self.hint_values(path, a, h);
+            self.hint_lexical(path, a, h);
             self.hint_unit(path, a, h);
             self.datatype_conflict(path, a, h);
         }
@@ -1731,8 +1807,11 @@ impl<'a> Checker<'a> {
             .collect();
         let binding = h.closed && self.options.mode() == Mode::Strict;
         let msg = format!(
-            "the profile {} the operators {} for \"{}\"",
-            if binding { "allows only" } else { "suggests" },
+            "{} the operators {} for \"{}\"",
+            the(
+                h.sources.operators,
+                if binding { "allows only" } else { "suggests" }
+            ),
             join_with(&names, "or"),
             a.left
         );
@@ -1748,6 +1827,7 @@ impl<'a> Checker<'a> {
             f.expected = Some(Expected {
                 operators: h.operators.clone(),
                 closed: h.closed,
+                source: Some(h.sources.operators),
                 ..Expected::default()
             });
         }
@@ -1773,7 +1853,8 @@ impl<'a> Checker<'a> {
             let raw = l.raw();
             if !fits(&raw) {
                 let msg = format!(
-                    "\"{raw}\" is not {noun}, which the profile expects for \"{}\"",
+                    "\"{raw}\" is not {noun}, which {} for \"{}\"",
+                    the(h.sources.datatype, "expects"),
                     a.left
                 );
                 if let Some(f) = self.emit(
@@ -1785,6 +1866,7 @@ impl<'a> Checker<'a> {
                     f.expected = Some(Expected {
                         datatype: h.datatype.clone(),
                         closed: h.closed,
+                        source: Some(h.sources.datatype),
                         ..Expected::default()
                     });
                 }
@@ -1814,13 +1896,15 @@ impl<'a> Checker<'a> {
                 0
             },
             closed: h.closed,
+            source: Some(h.sources.values),
             ..Expected::default()
         };
         let values = match &a.right {
             RightOperand::Values(v) => v,
             RightOperand::Reference(_) => {
                 let msg = format!(
-                    "the right operand is only referenced (rightOperandReference), so the values the profile allows for \"{}\" could not be checked",
+                    "the right operand is only referenced (rightOperandReference), so the values {} for \"{}\" could not be checked",
+                    the(h.sources.values, "allows"),
                     a.left
                 );
                 if h.closed {
@@ -1841,7 +1925,8 @@ impl<'a> Checker<'a> {
                 continue;
             } else if allowed.contains(self.expand(&raw).as_str()) {
                 let msg = format!(
-                    "\"{raw}\" names a value the profile allows for \"{}\", but as a plain string; write it as an IRI ({{\"@id\": \"{raw}\"}})",
+                    "\"{raw}\" names a value {} for \"{}\", but as a plain string; write it as an IRI ({{\"@id\": \"{raw}\"}})",
+                    the(h.sources.values, "allows"),
                     a.left
                 );
                 let fix = fix_slot(
@@ -1873,7 +1958,8 @@ impl<'a> Checker<'a> {
                 continue;
             }
             let msg = format!(
-                "\"{raw}\" is not a value the profile allows for \"{}\"",
+                "\"{raw}\" is not a value {} for \"{}\"",
+                the(h.sources.values, "allows"),
                 a.left
             );
             if let Some(f) = self.emit_term(
@@ -1890,6 +1976,71 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Each literal value, against the lexical checks of the companion
+    /// shapes: `sh:pattern`, `sh:minInclusive` and `sh:maxInclusive`.
+    fn hint_lexical(&mut self, path: &NodePath, a: &AtomicConstraint, h: &OperandHints) {
+        if h.pattern.is_none() && h.min_inclusive.is_none() && h.max_inclusive.is_none() {
+            return;
+        }
+        let RightOperand::Values(values) = &a.right else {
+            return;
+        };
+        let pattern = h
+            .pattern
+            .as_deref()
+            .and_then(|p| Pattern::new(p, &h.pattern_flags).ok());
+        let source = h.sources.lexical;
+        for (k, l) in values.iter().enumerate() {
+            if matches!(l, Literal::Iri(_)) {
+                continue;
+            }
+            let raw = l.raw();
+            let broken = if let Some(p) = &pattern
+                && p.is_match(&raw) == Some(false)
+            {
+                Some(format!(
+                    "\"{raw}\" does not match the pattern \"{}\" {} for \"{}\"",
+                    p.source(),
+                    the(source, "requires"),
+                    a.left
+                ))
+            } else {
+                outside_bounds(&raw, h.min_inclusive.as_deref(), h.max_inclusive.as_deref()).map(
+                    |bound| {
+                        let (which, limit) = match bound {
+                            Bound::Below => ("below the least", h.min_inclusive.as_deref()),
+                            Bound::Above => ("above the greatest", h.max_inclusive.as_deref()),
+                        };
+                        format!(
+                            "\"{raw}\" is {which} value {} for \"{}\" ({})",
+                            the(source, "allows"),
+                            a.left,
+                            limit.unwrap_or_default()
+                        )
+                    },
+                )
+            };
+            let Some(msg) = broken else {
+                continue;
+            };
+            if let Some(f) = self.emit(
+                RuleId::ProseValueNotAllowed,
+                h.closed,
+                slot(path, Field::RightOperand(k)),
+                msg,
+            ) {
+                f.expected = Some(Expected {
+                    closed: h.closed,
+                    source: Some(source),
+                    pattern: h.pattern.clone(),
+                    min_inclusive: h.min_inclusive.clone(),
+                    max_inclusive: h.max_inclusive.clone(),
+                    ..Expected::default()
+                });
+            }
+        }
+    }
+
     /// The unit, against `prose:unit`.
     fn hint_unit(&mut self, path: &NodePath, a: &AtomicConstraint, h: &OperandHints) {
         let Some(u) = a.unit.as_deref().filter(|u| !u.is_empty()) else {
@@ -1901,8 +2052,11 @@ impl<'a> Checker<'a> {
         let names: Vec<String> = h.units.iter().map(|u| local_name(u).to_string()).collect();
         let binding = h.closed && self.options.mode() == Mode::Strict;
         let msg = format!(
-            "the profile {} the units {} for \"{}\"",
-            if binding { "allows only" } else { "suggests" },
+            "{} the units {} for \"{}\"",
+            the(
+                h.sources.units,
+                if binding { "allows only" } else { "suggests" }
+            ),
             join_with(&names, "or"),
             a.left
         );
@@ -1918,6 +2072,7 @@ impl<'a> Checker<'a> {
             f.expected = Some(Expected {
                 units: h.units.clone(),
                 closed: h.closed,
+                source: Some(h.sources.units),
                 ..Expected::default()
             });
         }
@@ -1932,6 +2087,7 @@ impl<'a> Checker<'a> {
         let expected = || Expected {
             datatype: Some(want.to_string()),
             closed: h.closed,
+            source: Some(h.sources.datatype),
             ..Expected::default()
         };
         if let RightOperand::Values(values) = &a.right {
@@ -1942,7 +2098,8 @@ impl<'a> Checker<'a> {
                 let got = self.expand(datatype);
                 if got != want {
                     let msg = format!(
-                        "\"{value}\" is typed <{got}>, but the profile gives \"{}\" the datatype <{want}>",
+                        "\"{value}\" is typed <{got}>, but {} gives \"{}\" the datatype <{want}>",
+                        h.sources.datatype.noun(),
                         a.left
                     );
                     if let Some(f) = self.emit(
@@ -1965,7 +2122,8 @@ impl<'a> Checker<'a> {
             let got = self.expand(own);
             if got != want {
                 let msg = format!(
-                    "the constraint's dataType is <{got}>, but the profile gives \"{}\" the datatype <{want}>",
+                    "the constraint's dataType is <{got}>, but {} gives \"{}\" the datatype <{want}>",
+                    h.sources.datatype.noun(),
                     a.left
                 );
                 if let Some(f) = self.emit(

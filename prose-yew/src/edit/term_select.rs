@@ -20,7 +20,7 @@ use prose_core::validate::{Level, RuleId};
 use super::choice::use_select_in_step;
 use super::config::{Suggestion, TermInput, cls, merge_styles};
 use super::slot::{
-    Closure, allowed_options, holds_iri, left_operand_term, options_for, placeholder,
+    Closure, allowed_options, holds_iri, left_operand_hints, options_for, placeholder,
     profile_suggestion, set_text, strict,
 };
 use super::{Env, EnvRef, FocusKind, SlotFocus};
@@ -38,11 +38,11 @@ pub(crate) fn takes_select(env: &Env, slot: &Slot) -> bool {
     }
     match slot.kind {
         SlotKind::Action | SlotKind::LeftOperand | SlotKind::PolicyKind => true,
-        SlotKind::Unit => left_operand_term(env, slot)
-            .is_some_and(|t| t.hints.closed && !t.hints.units.is_empty()),
+        SlotKind::Unit => {
+            left_operand_hints(env, slot).is_some_and(|h| h.closed && !h.units.is_empty())
+        }
         SlotKind::Literal if matches!(slot.path.field, Field::RightOperand(_)) => {
-            left_operand_term(env, slot)
-                .is_some_and(|t| t.hints.closed && !t.hints.value_tree.is_empty())
+            left_operand_hints(env, slot).is_some_and(|h| h.closed && !h.value_tree.is_empty())
         }
         _ => false,
     }

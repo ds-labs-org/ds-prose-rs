@@ -16,7 +16,7 @@ use prose_core::edit::{
     ConstraintNode, EditDoc, EditEvent, Field, IssueTarget, Literal, NodeRef, RightOperand,
     Severity, Slot, SlotKind, SlotPath, left_operand_at,
 };
-use prose_core::profile::{Term, TermKind};
+use prose_core::profile::{OperandHints, Term, TermKind};
 use prose_core::validate::{Level, Mode, RuleId, Validator};
 use prose_core::wording;
 
@@ -217,8 +217,8 @@ fn closure(env: &Env, slot: &Slot) -> Option<Closure> {
                 Level::Error
             );
             let closed_values = binding
-                && left_operand_term(env, slot)
-                    .is_some_and(|t| t.hints.closed && !t.hints.value_tree.is_empty());
+                && left_operand_hints(env, slot)
+                    .is_some_and(|h| h.closed && !h.value_tree.is_empty());
             closed_values.then_some(Closure::Values)
         }
         _ => None,
@@ -359,10 +359,9 @@ pub(crate) fn options_for(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<A
             profile_values(env, slot)
         }
         SlotKind::Unit => flat(
-            left_operand_term(env, slot)
-                .map(|t| {
-                    t.hints
-                        .units
+            left_operand_hints(env, slot)
+                .map(|h| {
+                    h.units
                         .iter()
                         .map(|u| profile_suggestion(env, u, None))
                         .collect()
@@ -381,6 +380,12 @@ pub(crate) fn left_operand_term<'e>(env: &'e Env, slot: &Slot) -> Option<&'e Ter
     }
     let left = left_operand_at(&env.doc, &slot.path)?;
     w.lookup_written(&env.prefixes, left).map(|(t, _)| t)
+}
+
+/// The hints for the slot's left operand: the loaded profile's, with the
+/// companion shapes laid over them.
+pub(crate) fn left_operand_hints<'e>(env: &'e Env, slot: &Slot) -> Option<&'e OperandHints> {
+    left_operand_term(env, slot).map(|t| env.cfg.wording.operand_hints(t))
 }
 
 /// A suggestion for the IRI `iri`: the loaded term's label and definition
@@ -412,13 +417,12 @@ fn profile_values(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<AttrValue
     if w.is_empty() {
         return (vec![], HashMap::new());
     }
-    let left = left_operand_term(env, slot);
-    if let Some(t) = left
-        && !t.hints.value_tree.is_empty()
+    let left = left_operand_hints(env, slot);
+    if let Some(h) = left
+        && !h.value_tree.is_empty()
     {
         let mut depth = HashMap::new();
-        let list = t
-            .hints
+        let list = h
             .value_tree
             .iter()
             .map(|(iri, d)| {
@@ -432,7 +436,7 @@ fn profile_values(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<AttrValue
         return (list, depth);
     }
     if left
-        .and_then(|t| t.hints.datatype.as_deref())
+        .and_then(|h| h.datatype.as_deref())
         .is_some_and(|d| d != ANY_URI)
     {
         return (vec![], HashMap::new());
@@ -463,7 +467,7 @@ pub(crate) fn holds_iri(doc: &EditDoc, path: &SlotPath) -> bool {
 
 pub(crate) fn placeholder(env: &Env, slot: &Slot) -> AttrValue {
     if slot.kind == SlotKind::Literal
-        && let Some(dt) = left_operand_term(env, slot).and_then(|t| t.hints.datatype.as_deref())
+        && let Some(dt) = left_operand_hints(env, slot).and_then(|h| h.datatype.as_deref())
         && let Some((_, p)) = env
             .cfg
             .labels

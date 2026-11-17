@@ -1,0 +1,34 @@
+{
+  "@context": {
+    "odrl": "http://www.w3.org/ns/odrl/2/",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "skos": "http://www.w3.org/2004/02/skos/core#",
+    "owl": "http://www.w3.org/2002/07/owl#",
+    "dx": "https://example.org/dataspace/"
+  },
+  "@graph": [
+    { "@id": "https://example.org/dataspace/profile", "@type": "owl:Ontology", "rdfs:label": "Example dataspace profile" },
+
+    { "@id": "dx:train", "@type": ["odrl:Action", "skos:Concept"], "rdfs:label": "Train", "odrl:includedIn": { "@id": "odrl:use" } },
+    { "@id": "dx:share", "@type": ["odrl:Action", "skos:Concept"], "rdfs:label": "Share", "odrl:includedIn": { "@id": "odrl:distribute" } },
+    { "@id": "dx:publish", "@type": ["odrl:Action", "skos:Concept"], "rdfs:label": "Publish", "odrl:includedIn": { "@id": "odrl:distribute" } },
+
+    { "@id": "dx:purpose", "@type": ["odrl:LeftOperand", "skos:Concept"], "rdfs:label": "Purpose", "skos:note": "The purpose must be one of research, marketing." },
+    { "@id": "dx:participantType", "@type": ["odrl:LeftOperand", "skos:Concept"], "rdfs:label": "Participant type" },
+    { "@id": "dx:count", "@type": ["odrl:LeftOperand", "skos:Concept"], "rdfs:label": "Count" },
+    { "@id": "dx:code", "@type": ["odrl:LeftOperand", "skos:Concept"], "rdfs:label": "Reference code" },
+    { "@id": "dx:region", "@type": ["odrl:LeftOperand", "skos:Concept"], "rdfs:label": "Region" },
+    { "@id": "dx:price", "@type": ["odrl:LeftOperand", "skos:Concept"], "rdfs:label": "Price" },
+
+    { "@id": "dx:Purpose", "@type": ["rdfs:Class"], "rdfs:label": "Purpose class" },
+    { "@id": "dx:Membership", "@type": ["rdfs:Class"], "rdfs:label": "Membership class" },
+
+    { "@id": "dx:research", "@type": ["odrl:RightOperand", "dx:Purpose", "skos:Concept"], "rdfs:label": "Research" },
+    { "@id": "dx:clinical", "@type": ["odrl:RightOperand", "dx:Purpose", "skos:Concept"], "rdfs:label": "Clinical research", "skos:broader": { "@id": "dx:research" } },
+    { "@id": "dx:marketing", "@type": ["odrl:RightOperand", "dx:Purpose", "skos:Concept"], "rdfs:label": "Marketing" },
+    { "@id": "dx:member", "@type": ["odrl:RightOperand", "dx:Membership", "skos:Concept"], "rdfs:label": "Member" },
+    { "@id": "dx:partner", "@type": ["odrl:RightOperand", "dx:Membership", "skos:Concept"], "rdfs:label": "Partner" },
+    { "@id": "dx:eu", "@type": ["odrl:RightOperand", "skos:Concept"], "rdfs:label": "European Union" },
+    { "@id": "dx:us", "@type": ["odrl:RightOperand", "skos:Concept"], "rdfs:label": "United States" }
+  ]
+}

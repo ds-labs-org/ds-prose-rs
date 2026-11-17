@@ -7,4 +7,4 @@ export { reportChanged } from './validation-sync';
 export { DATASPACE_PRESET } from './editor-sync';
 export type { Preset } from './editor-sync';
 export type { ReportLike } from './validation-sync';
-export type { EditLimits, Finding, OutOfScopeMode, RemovedSection, RuleId, RuleInfo, TermInput, ValidateOptions, ValidationReport, Verdict } from '@ds-labs/prose-wasm';
+export type { EditLimits, Finding, OutOfScopeMode, RemovedSection, RuleId, RuleInfo, ShapesSummary, TermInput, ValidateOptions, ValidationReport, Verdict } from '@ds-labs/prose-wasm';

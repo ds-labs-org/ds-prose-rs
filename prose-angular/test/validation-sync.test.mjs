@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  StandaloneReporter, createChangeTracker, parseReport, profileTexts, reportChanged, validationOptions,
+  StandaloneReporter, createChangeTracker, parseReport, profileTexts, reportChanged, shapesText, validationOptions,
 } from '../src/validation-sync.ts';
 
 const finding = (rule, fingerprint, severity = 'error') => ({ rule, fingerprint, severity, message: `${rule} said so` });
@@ -160,4 +160,28 @@ test('free releases the validator', () => {
   r.report([], { strict: true }, 'A');
   r.free();
   assert.equal(freed.length, 1);
+});
+
+test('shapes: blank means none, the text is kept as given', () => {
+  assert.equal(shapesText(null), null);
+  assert.equal(shapesText(undefined), null);
+  assert.equal(shapesText(''), null);
+  assert.equal(shapesText('  \n'), null);
+  assert.equal(shapesText('{"@id":"x"}'), '{"@id":"x"}');
+});
+
+test('a standalone validator is built with the shapes, and rebuilt when they change', () => {
+  const built = [];
+  const r = new StandaloneReporter((profiles, options, shapes) => {
+    const v = { validate: (json) => JSON.stringify({ json, shapes }), free: () => {} };
+    built.push([profiles, options, shapes]);
+    return v;
+  });
+  assert.deepEqual(JSON.parse(r.report(['p'], {}, 'A', 'S').report), { json: 'A', shapes: 'S' });
+  r.report(['p'], {}, 'B', 'S');
+  assert.equal(built.length, 1, 'reused while nothing changed');
+  r.report(['p'], {}, 'B', 'T');
+  assert.equal(built.length, 2, 'rebuilt for other shapes');
+  assert.deepEqual(JSON.parse(r.report(['p'], {}, 'B').report), { json: 'B', shapes: null }, 'no shapes is null');
+  assert.equal(built.length, 3);
 });

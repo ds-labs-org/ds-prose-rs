@@ -31,6 +31,7 @@ pub mod edit;
 mod model;
 pub mod profile;
 mod read;
+pub mod shapes;
 pub mod validate;
 mod words;
 mod words_ctx;

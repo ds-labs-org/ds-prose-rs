@@ -1,8 +1,9 @@
 //! The loaded profiles and language preferences one reading uses, and how a
 //! policy's compact terms expand.
-use super::{ProfileVocab, Term, ns};
+use super::{HintSource, OperandHints, ProfileVocab, Term, TermKind, ns};
+use crate::shapes::ShapesGraph;
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Bound;
 use std::sync::{Arc, OnceLock};
 
@@ -14,6 +15,11 @@ pub struct Wording {
     profiles: Vec<Arc<ProfileVocab>>,
     languages: Vec<String>,
     conflicts: Vec<String>,
+    shapes: Option<Arc<ShapesGraph>>,
+    /// Left operand IRI -> its profile hints with the shapes laid over them,
+    /// for each left operand a shape gives something for. Rebuilt whenever a
+    /// profile or the shapes are added, so their order does not matter.
+    shaped: HashMap<String, OperandHints>,
 }
 
 impl Wording {
@@ -37,7 +43,95 @@ impl Wording {
             }
         }
         self.profiles.push(Arc::new(p));
+        self.layer_shapes();
         self
+    }
+
+    /// Adds the companion SHACL shapes (see [`crate::shapes`]): they add
+    /// hints to the left operands the loaded profiles declare, and may close
+    /// the lists of actions and left operands for the whole policy. They
+    /// never add or relabel a term. Replaces shapes given earlier; the order
+    /// of this call and [`Wording::with_profile`] does not matter.
+    pub fn with_shapes(mut self, shapes: ShapesGraph) -> Wording {
+        self.shapes = Some(Arc::new(shapes));
+        self.layer_shapes();
+        self
+    }
+
+    /// The companion shapes, when some were given.
+    pub fn shapes(&self) -> Option<&ShapesGraph> {
+        self.shapes.as_deref()
+    }
+
+    /// The hints for a left operand `t` (a term this wording looked up):
+    /// the loaded profile's own `prose:` hints with the companion shapes
+    /// laid over them. A facet a shape gives replaces the profile's for that
+    /// facet, and a left operand a shape says anything about is closed, with
+    /// [`OperandHints::sources`] naming who closed each facet. Without
+    /// shapes, or for a left operand none of them selects, these are
+    /// `t.hints`.
+    pub fn operand_hints<'a>(&'a self, t: &'a Term) -> &'a OperandHints {
+        self.shaped.get(&t.iri).unwrap_or(&t.hints)
+    }
+
+    /// The terms of `kind` the shapes close the policy to (`sh:in` on
+    /// `odrl:action` or `odrl:leftOperand`), as expanded IRIs; `None` when
+    /// no shape closes that list.
+    pub fn closed_terms(&self, kind: TermKind) -> Option<&[String]> {
+        let shapes = self.shapes.as_deref()?;
+        match kind {
+            TermKind::Action => shapes.closed_actions(),
+            TermKind::LeftOperand => shapes.closed_left_operands(),
+            _ => None,
+        }
+    }
+
+    /// Recomputes `shaped` from the profiles and the shapes.
+    fn layer_shapes(&mut self) {
+        self.shaped.clear();
+        let Some(shapes) = self.shapes.clone() else {
+            return;
+        };
+        let narrower = narrower_values(self);
+        let mut shaped = HashMap::new();
+        for (left, shape) in shapes.constraints() {
+            let Some((term, _)) = self.lookup(left) else {
+                continue;
+            };
+            if !term.kinds.contains(&TermKind::LeftOperand) {
+                continue;
+            }
+            let mut patch = OperandHints {
+                operators: shape.operators.clone(),
+                units: shape.units.clone(),
+                datatype: shape.datatype.clone(),
+                min_inclusive: shape.min_inclusive.clone(),
+                max_inclusive: shape.max_inclusive.clone(),
+                ..OperandHints::default()
+            };
+            if let Some((src, flags)) = &shape.pattern {
+                patch.pattern = Some(src.clone());
+                patch.pattern_flags = flags.clone();
+            }
+            if !shape.values.is_empty() {
+                // `sh:in` is exactly its list: no descendants.
+                patch.values = shape.values.clone();
+                patch.value_tree = shape.values.iter().map(|v| (v.clone(), 0)).collect();
+            } else if !shape.classes.is_empty() {
+                let tree = class_members(self, &narrower, &shape.classes);
+                patch.values = tree
+                    .iter()
+                    .filter(|(_, d)| *d == 0)
+                    .map(|(v, _)| v.clone())
+                    .collect();
+                patch.value_tree = tree;
+            }
+            let layered = super::layer(&term.hints, &patch, HintSource::Shapes);
+            if layered != term.hints {
+                shaped.insert(term.iri.clone(), layered);
+            }
+        }
+        self.shaped = shaped;
     }
 
     /// The label languages to prefer, most preferred first.
@@ -104,6 +198,94 @@ impl Wording {
     pub fn is_empty(&self) -> bool {
         self.profiles.is_empty()
     }
+}
+
+/// Broader value -> its narrower right operands across the loaded profiles
+/// (the first profile that declares a term wins), in load order.
+fn narrower_values(w: &Wording) -> HashMap<String, Vec<String>> {
+    let mut out: HashMap<String, Vec<String>> = HashMap::new();
+    let mut seen: HashSet<&str> = HashSet::new();
+    for p in w.profiles() {
+        for t in p.terms() {
+            if !seen.insert(&t.iri) || !t.kinds.contains(&TermKind::RightOperand) {
+                continue;
+            }
+            for b in &t.broader {
+                out.entry(b.clone()).or_default().push(t.iri.clone());
+            }
+        }
+    }
+    out
+}
+
+/// The right operands that belong to any of `classes` (`sh:class`): those
+/// the profile types with the class, the class itself when it is a right
+/// operand, and the right operands directly narrower than it; each with the
+/// descendants a `skos:broader` link leads to, depth first, each once, with
+/// its depth below the member that holds it. At most `max_values_per_key`
+/// values, and no deeper than `max_depth`.
+fn class_members(
+    w: &Wording,
+    narrower: &HashMap<String, Vec<String>>,
+    classes: &[String],
+) -> Vec<(String, usize)> {
+    let limits = super::ProfileLimits::default();
+    let mut members: Vec<&str> = Vec::new();
+    let mut seen: HashSet<&str> = HashSet::new();
+    for p in w.profiles() {
+        for t in p.terms() {
+            if !seen.insert(&t.iri) || !t.kinds.contains(&TermKind::RightOperand) {
+                continue;
+            }
+            let of_class = classes
+                .iter()
+                .any(|c| *c == t.iri || t.types.contains(c) || t.broader.contains(c));
+            if of_class {
+                members.push(&t.iri);
+            }
+        }
+    }
+    // A member narrower than another member is listed under it.
+    let member_set: HashSet<&str> = members.iter().copied().collect();
+    let by_iri = |iri: &str| w.lookup(iri).map(|(t, _)| t);
+    let roots: Vec<&str> = members
+        .iter()
+        .copied()
+        .filter(|m| {
+            !by_iri(m).is_some_and(|t| t.broader.iter().any(|b| member_set.contains(b.as_str())))
+        })
+        .collect();
+    let mut out: Vec<(String, usize)> = Vec::new();
+    let mut done: HashSet<&str> = HashSet::new();
+    let kids: HashMap<&str, Vec<&str>> = narrower
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.iter().map(String::as_str).collect()))
+        .collect();
+    // An explicit stack, so a deep hierarchy cannot overflow the call stack:
+    // (index into `child_lists`, the next item of that list, its depth).
+    let mut child_lists: Vec<Vec<&str>> = vec![roots];
+    let mut frames: Vec<(usize, usize, usize)> = vec![(0, 0, 0)];
+    while let Some(&(list, next, depth)) = frames.last() {
+        let Some(&item) = child_lists[list].get(next) else {
+            frames.pop();
+            continue;
+        };
+        frames.last_mut().unwrap().1 += 1;
+        if !done.insert(item) {
+            continue;
+        }
+        if out.len() >= limits.max_values_per_key {
+            break;
+        }
+        out.push((item.to_string(), depth));
+        if depth + 1 < limits.max_depth
+            && let Some(k) = kids.get(item)
+        {
+            child_lists.push(k.clone());
+            frames.push((child_lists.len() - 1, 0, depth + 1));
+        }
+    }
+    out
 }
 
 /// A local name a compact IRI may end with: not empty, no `/`, `#`, `:` or

@@ -1,4 +1,4 @@
-import type { EditLimits, OutOfScopeMode, RemovedSection, TermInput, ValidateOptions, ValidationReport } from '@ds-labs/prose-wasm';
+import type { EditLimits, OutOfScopeMode, RemovedSection, ShapesSummary, TermInput, ValidateOptions, ValidationReport } from '@ds-labs/prose-wasm';
 import type { ProfileSummary } from './profile-sync';
 
 // No value imports from the sibling modules: `npm test` runs this file under
@@ -32,6 +32,8 @@ export interface EditorHandleLike {
   update(json: string, cls?: string | null): void;
   setProfile(text?: string | null): string;
   setProfiles(texts: string[]): string;
+  /** Companion SHACL shapes (text) or none; returns the summary as JSON text, `"null"` after clearing. */
+  setShapes(text: string | null): string;
   setLimits(limits: EditLimits | null): void;
   setValidation(options: ValidateOptions | null): void;
   setTermInput(mode: TermInput): void;
@@ -57,6 +59,8 @@ export interface EditorInputs {
   /** The `profile` input is used (not `profiles`): load it with `setProfile`. */
   single: boolean;
   texts: string[] | null;
+  /** The text of companion SHACL shapes, or none; blank text is none. */
+  shapes?: string | null;
   options: ValidateOptions | null;
   limits: EditLimits | null;
   /** How the term slots take their value; `'free'` (the default) when left out. */
@@ -70,8 +74,12 @@ export interface EditorInputs {
 /** What one `apply` found, for the component to emit. */
 export interface EditorOutcome {
   summaries?: ProfileSummary[];
+  /** What the shapes of this `apply` hold, for the component to emit; absent when nothing changed or they were cleared. */
+  shapesSummary?: ShapesSummary;
   jsonError?: unknown;
   profileError?: unknown;
+  /** The shapes could not be read; the previous shapes stay. */
+  shapesError?: unknown;
   validationError?: unknown;
   report?: string | null;
   /** What the scope took out of the document in this `apply` (`outOfScope: 'strip'`); absent when nothing. */
@@ -101,6 +109,7 @@ export class EditorSession<H extends EditorHandleLike = EditorHandleLike> {
   private readonly profilesChanged = tracker<string[]>();
   private readonly optionsChanged = tracker<ValidateOptions>();
   private readonly limitsChanged = tracker<EditLimits>();
+  private readonly shapesChanged = tracker<string>();
   /** The handle starts with `'show'`: `setOutOfScope` is called only for a change from it. */
   private outOfScope: OutOfScopeMode = 'show';
   /** The handle starts with free text: `setTermInput` is called only for a change from it. */
@@ -165,6 +174,17 @@ export class EditorSession<H extends EditorHandleLike = EditorHandleLike> {
           : (JSON.parse(handle.setProfiles(inputs.texts ?? [])) as ProfileSummary[]);
       } catch (error) {
         out.profileError = error;
+      }
+    }
+    // The shapes follow the profiles they add hints to (the order does not
+    // matter to the wasm), and come before the validation that reads them.
+    const shapes = inputs.shapes == null || inputs.shapes.trim() === '' ? null : inputs.shapes;
+    if (this.shapesChanged(shapes)) {
+      try {
+        const summary = JSON.parse(handle.setShapes(shapes)) as ShapesSummary | null;
+        if (summary) out.shapesSummary = summary;
+      } catch (error) {
+        out.shapesError = error;
       }
     }
     const termInput = inputs.termInput ?? 'free';

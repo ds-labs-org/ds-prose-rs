@@ -6,6 +6,7 @@
 //! `ProseValidator` and the `ProseHandle` methods; everything here is plain
 //! Rust and tested on the host.
 use prose_core::profile::{OdrlVocab, ProfileError, ProfileVocab, Wording};
+use prose_core::shapes::ShapesGraph;
 use prose_core::validate::{
     Basis, Level, Options, RULES, RULESET, RuleId, RuleInfo, Tier, Validator,
 };
@@ -163,6 +164,58 @@ pub fn wording(texts: &[String]) -> Result<Wording, String> {
 /// A validator for the profiles in `texts`, prepared once.
 pub fn validator(texts: &[String], options: Options) -> Result<Validator, String> {
     Ok(Validator::new(Arc::new(wording(texts)?), options))
+}
+
+/// Reads `text` as companion SHACL shapes (JSON-LD, or Turtle with the
+/// `turtle` feature). The error starts with `shapes: `, so a host can tell
+/// it from a profile's.
+pub fn shapes(text: &str) -> Result<ShapesGraph, String> {
+    ShapesGraph::parse(text).map_err(|e| format!("shapes: {}", shapes_error(&e)))
+}
+
+/// The message for shapes that cannot be read. Without the `turtle`
+/// feature, a text that is not JSON-LD also names the build that reads Turtle.
+fn shapes_error(e: &prose_core::shapes::ShapesError) -> String {
+    match e {
+        #[cfg(not(feature = "turtle"))]
+        prose_core::shapes::ShapesError::UnsupportedFormat => format!(
+            "{e}; or use the build that reads Turtle, @ds-labs/prose-wasm/turtle (prose_wasm_turtle_bg.wasm)"
+        ),
+        _ => e.to_string(),
+    }
+}
+
+/// What `setShapes` returns for loaded shapes, as JSON text: `constraints`
+/// (how many left operands a shape selects), `actions` and `leftOperands`
+/// (the expanded IRIs the shapes close the policy to, `null` when they do
+/// not) and `warnings` (what was not read).
+pub fn shapes_summary_json(s: &ShapesGraph) -> String {
+    json!({
+        "constraints": s.constraints().count(),
+        "actions": s.closed_actions(),
+        "leftOperands": s.closed_left_operands(),
+        "warnings": s.warnings(),
+    })
+    .to_string()
+}
+
+/// `base` with `shapes` laid over it, when there are some.
+pub fn with_shapes(base: Wording, shapes: Option<&ShapesGraph>) -> Wording {
+    match shapes {
+        Some(s) => base.with_shapes(s.clone()),
+        None => base,
+    }
+}
+
+/// [`validator`], with the companion shapes in `shapes` (none when `None`).
+pub fn validator_with_shapes(
+    texts: &[String],
+    shapes_text: Option<&str>,
+    options: Options,
+) -> Result<Validator, String> {
+    let shapes = shapes_text.map(shapes).transpose()?;
+    let w = with_shapes(wording(texts)?, shapes.as_ref());
+    Ok(Validator::new(Arc::new(w), options))
 }
 
 /// The report for `json` as `ds-prose/validation-report@1` text. Never
