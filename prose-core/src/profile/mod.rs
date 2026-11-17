@@ -50,16 +50,18 @@ mod hints;
 mod jsonld;
 pub(crate) mod ns;
 mod odrl_terms;
+mod overlay;
 mod text;
 pub(crate) mod triples;
 #[cfg(feature = "turtle")]
 mod turtle;
 mod wording;
 
-pub(crate) use hints::layer;
+pub(crate) use hints::{layer, layer_overlay};
 pub(crate) use ns::is_odrl_context;
 pub(crate) use odrl_terms::odrl_spelling;
 pub use odrl_terms::{OdrlTerm, OdrlVocab, odrl_term, odrl_terms};
+pub use overlay::{Overlay, OverlayError};
 pub use text::LangText;
 pub(crate) use wording::Budget;
 pub use wording::{Prefixes, Wording};
@@ -408,22 +410,26 @@ impl Term {
 /// Where a hint came from. Hints are layered: each source only adds to the
 /// terms the loaded profiles declare and never relabels one, and a finding
 /// names the source that closed the slot. A later source's facet replaces an
-/// earlier one's for that facet alone; see [`OperandHints`].
+/// earlier one's for that facet alone (profile < overlay < shapes); see
+/// [`OperandHints`].
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum HintSource {
     /// The loaded profile's own `prose:` triples.
     #[default]
     Profile,
+    /// The operator overlay ([`Overlay`]).
+    Overlay,
     /// The companion SHACL shapes ([`crate::shapes`]).
     Shapes,
 }
 
 impl HintSource {
-    /// The name a report gives the source (`"profile"`, `"shapes"`).
+    /// The name a report gives the source (`"profile"`, `"overlay"`, `"shapes"`).
     pub fn as_str(self) -> &'static str {
         match self {
             HintSource::Profile => "profile",
+            HintSource::Overlay => "overlay",
             HintSource::Shapes => "shapes",
         }
     }
@@ -432,6 +438,7 @@ impl HintSource {
     pub fn noun(self) -> &'static str {
         match self {
             HintSource::Profile => "the profile",
+            HintSource::Overlay => "the overlay",
             HintSource::Shapes => "the shapes",
         }
     }

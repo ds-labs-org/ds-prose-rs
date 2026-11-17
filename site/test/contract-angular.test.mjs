@@ -22,7 +22,7 @@ function members(kind, file = COMPONENT) {
 
 test('inputs: the table lists exactly the input() members, with type and default', () => {
   const inputs = members('input');
-  assert.equal(inputs.length, 8);
+  assert.equal(inputs.length, 9);
   const rows = tableRows(sec('Inputs'));
   assert.deepEqual(rows.map((r) => tick(col(r, 0))).sort(), inputs.map((i) => i.name).sort());
   for (const i of inputs) {
@@ -38,7 +38,7 @@ test('inputs: the table lists exactly the input() members, with type and default
 
 test('outputs: the table lists exactly the output() members and their payload types', () => {
   const outputs = members('output');
-  assert.equal(outputs.length, 7);
+  assert.equal(outputs.length, 9);
   const rows = tableRows(sec('Outputs'));
   assert.deepEqual(rows.map((r) => tick(col(r, 0))).sort(), outputs.map((o) => o.name).sort());
   for (const o of outputs) {
@@ -61,7 +61,7 @@ test('the report signal: documented with its declared type, initial value, and t
 
 test('editor inputs: the table lists exactly the input() members of the editor, with type and default', () => {
   const inputs = members('input', EDITOR);
-  assert.equal(inputs.length, 12);
+  assert.equal(inputs.length, 13);
   const rows = tableRows(sec('Editor inputs'));
   assert.deepEqual(rows.map((r) => tick(col(r, 0))).sort(), inputs.map((i) => i.name).sort());
   for (const i of inputs) {
@@ -77,7 +77,7 @@ test('editor inputs: the table lists exactly the input() members of the editor, 
 
 test('editor outputs: the table lists exactly the output() members of the editor and their payload types', () => {
   const outputs = members('output', EDITOR);
-  assert.equal(outputs.length, 10);
+  assert.equal(outputs.length, 12);
   const rows = tableRows(sec('Editor outputs'));
   assert.deepEqual(rows.map((r) => tick(col(r, 0))).sort(), outputs.map((o) => o.name).sort());
   for (const o of outputs) {

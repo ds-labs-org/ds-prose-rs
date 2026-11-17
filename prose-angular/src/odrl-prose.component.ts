@@ -10,9 +10,9 @@ import {
   output,
   signal,
 } from '@angular/core';
-import type { ProseHandle, ShapesSummary, ValidateOptions, ValidationReport } from '@ds-labs/prose-wasm';
+import type { OverlaySummary, ProseHandle, ShapesSummary, ValidateOptions, ValidationReport } from '@ds-labs/prose-wasm';
 import { ProfileSummary, parseSummary } from './profile-sync';
-import { StandaloneReporter, createChangeTracker, parseReport, profileTexts, reportChanged, shapesText, validationOptions } from './validation-sync';
+import { StandaloneReporter, createChangeTracker, overlayTexts, parseReport, profileTexts, reportChanged, shapesText, validationOptions } from './validation-sync';
 import { PROSE_WASM_MODULE, PROSE_WASM_URL, type ProseWasmModule, loadWasm } from './wasm-runtime';
 
 export { PROSE_WASM_MODULE, PROSE_WASM_URL };
@@ -41,6 +41,16 @@ export { PROSE_WASM_MODULE, PROSE_WASM_URL };
  * policy. Only a subset of SHACL is read: `shapesLoaded` emits what was, with
  * the `warnings` for what was not; unreadable shapes emit `shapesError` and
  * the previous shapes stay.
+ *
+ * `[overlays]` takes the texts of the dataspace's operator overlays: small
+ * annotation-only graphs of `prose:` hints (`prose:operator`,
+ * `prose:rightOperand`, `prose:unit`, `prose:closed` ...) about terms the
+ * profiles declare, for a dataspace that publishes no SHACL. They merge onto
+ * those terms and never add or relabel one; the shapes, when given, win over
+ * them. A value an overlay closes and a policy does not list is a finding
+ * whose `expected.source` is `"overlay"`. `overlaysLoaded` emits one
+ * `OverlaySummary` per overlay (`terms`, `warnings`); unreadable overlays emit
+ * `overlaysError` and the previous overlays stay.
  *
  * `[strict]="true"` validates the policy against the loaded profiles with a
  * closed vocabulary: ODRL plus those profiles. `[validation]` takes the full
@@ -72,6 +82,8 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
   readonly profiles = input<string[] | null>(null);
   /** The text of the dataspace's companion SHACL shapes, JSON-LD (or Turtle, with the Turtle build); blank is none. */
   readonly shapes = input<string | null>(null);
+  /** The texts of the dataspace's operator overlays, JSON-LD (or Turtle, with the Turtle build) each; blank texts are dropped. */
+  readonly overlays = input<string[] | null>(null);
   /** Validate with a closed vocabulary: ODRL plus the loaded profiles. */
   readonly strict = input(false);
   /** The full validation options; they take precedence over `strict`. */
@@ -84,6 +96,10 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
   readonly profileLoaded = output<ProfileSummary>();
   /** Emits when the `profile` input is not a readable profile; the previous one stays. */
   readonly profileError = output<unknown>();
+  /** Emits one summary per overlay, each time the `overlays` input changes to overlays that were read; `warnings` lists what was not used. */
+  readonly overlaysLoaded = output<OverlaySummary[]>();
+  /** Emits when an `overlays` text is not a readable overlay; the previous overlays stay. */
+  readonly overlaysError = output<unknown>();
   /** Emits what the `shapes` input holds, each time it changes to shapes that were read; `warnings` lists what was not read. */
   readonly shapesLoaded = output<ShapesSummary>();
   /** Emits when the `shapes` input is not readable shapes; the previous shapes stay. */
@@ -104,16 +120,20 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
   private readonly profilesChanged = createChangeTracker<string[]>();
   private readonly handleOptionsChanged = createChangeTracker<ValidateOptions>();
   private readonly shapesChanged = createChangeTracker<string>();
+  private readonly overlaysChanged = createChangeTracker<string[]>();
+  // The overlays the handle read last, for the validator built beside it.
+  private appliedOverlays: string[] = [];
   // The shapes the handle read last, for the validator built beside it.
   private appliedShapes: string | null = null;
   // The profiles the handle holds now, and the validator built from them for
   // a report the handle is not asked for.
   private appliedProfiles: string[] = [];
-  private readonly standalone = new StandaloneReporter((profiles, options, shapes) => {
+  private readonly standalone = new StandaloneReporter((profiles, options, shapes, overlays) => {
     const validator = new this.wasm!.ProseValidator(profiles, options);
-    if (shapes != null) {
+    if (shapes != null || overlays.length > 0) {
       try {
-        validator.setShapes(shapes);
+        if (overlays.length > 0) validator.setOverlays(overlays);
+        if (shapes != null) validator.setShapes(shapes);
       } catch (error) {
         validator.free();
         throw error;
@@ -152,6 +172,7 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
     const single = this.profiles() == null;
     const texts = profileTexts(this.profile(), this.profiles());
     const shapes = shapesText(this.shapes());
+    const overlays = overlayTexts(this.overlays());
     const options = validationOptions(this.strict(), this.validation());
     const show = this.showViolations() && options != null;
     // Yew schedules its own work; keep it out of Angular's change detection.
@@ -163,6 +184,8 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
         summaries?: ProfileSummary[];
         shapesSummary?: ShapesSummary;
         shapesError?: unknown;
+        overlaysSummary?: OverlaySummary[];
+        overlaysError?: unknown;
         profileError?: unknown;
         validationError?: unknown;
         report?: string | null;
@@ -176,6 +199,16 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
           this.appliedProfiles = texts ?? [];
         } catch (error) {
           out.profileError = error;
+        }
+      }
+      // The overlays add to the profiles above, and the shapes below win over them.
+      if (this.overlaysChanged(overlays.length > 0 ? overlays : null)) {
+        try {
+          const summary = JSON.parse(handle.setOverlays(overlays)) as OverlaySummary[];
+          if (summary.length > 0) out.overlaysSummary = summary;
+          this.appliedOverlays = overlays;
+        } catch (error) {
+          out.overlaysError = error;
         }
       }
       // The shapes add to the profiles above; an unreadable text keeps the previous shapes.
@@ -206,7 +239,7 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
           }
         } else {
           // Unreadable options keep the previous ones; see StandaloneReporter.
-          const standalone = this.standalone.report(this.appliedProfiles, options, json, this.appliedShapes);
+          const standalone = this.standalone.report(this.appliedProfiles, options, json, this.appliedShapes, this.appliedOverlays);
           out.report = standalone.report;
           if (standalone.error !== undefined) out.validationError ??= standalone.error;
         }
@@ -218,6 +251,8 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
     });
     if (outcome.profileError !== undefined) this.profileError.emit(outcome.profileError);
     for (const summary of outcome.summaries ?? []) this.profileLoaded.emit(summary);
+    if (outcome.overlaysError !== undefined) this.overlaysError.emit(outcome.overlaysError);
+    if (outcome.overlaysSummary) this.overlaysLoaded.emit(outcome.overlaysSummary);
     if (outcome.shapesError !== undefined) this.shapesError.emit(outcome.shapesError);
     if (outcome.shapesSummary) this.shapesLoaded.emit(outcome.shapesSummary);
     if (outcome.validationError !== undefined) this.validationError.emit(outcome.validationError);

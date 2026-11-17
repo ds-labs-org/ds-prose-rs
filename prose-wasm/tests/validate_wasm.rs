@@ -68,11 +68,11 @@ fn has(c: &Element, selector: &str) -> bool {
 
 #[wasm_bindgen_test]
 fn validate_takes_a_string_a_list_or_null() {
-    let one = validate(CLEAN, JsValue::from_str(RESEARCH), None, None).unwrap();
-    let many = validate(CLEAN, list(&[RESEARCH]), None, None).unwrap();
+    let one = validate(CLEAN, JsValue::from_str(RESEARCH), None, None, None).unwrap();
+    let many = validate(CLEAN, list(&[RESEARCH]), None, None, None).unwrap();
     assert_eq!(one, many);
     assert_eq!(parsed(&one)["verdict"], "conforms");
-    let none = parsed(&validate(NOT_LOADED, JsValue::NULL, None, None).unwrap());
+    let none = parsed(&validate(NOT_LOADED, JsValue::NULL, None, None, None).unwrap());
     assert_eq!(none["verdict"], "incomplete");
     assert_eq!(none["gaps"][0]["rule"], "profile.not-loaded");
 }
@@ -80,37 +80,56 @@ fn validate_takes_a_string_a_list_or_null() {
 #[wasm_bindgen_test]
 fn validate_reads_options() {
     let o = opts(r#"{"strict": false}"#);
-    let r = parsed(&validate(CLEAN, JsValue::from_str(RESEARCH), Some(o), None).unwrap());
+    let r = parsed(&validate(CLEAN, JsValue::from_str(RESEARCH), Some(o), None, None).unwrap());
     assert_eq!(r["mode"], "advisory");
     let o = opts(r#"{"structural": true, "rules": {"odrl.no-rule": "off"}}"#);
-    let r = parsed(&validate(CLEAN, JsValue::from_str(RESEARCH), Some(o), None).unwrap());
+    let r = parsed(&validate(CLEAN, JsValue::from_str(RESEARCH), Some(o), None, None).unwrap());
     assert_eq!(r["mode"], "strict");
     assert!(r["tiers"].as_array().unwrap().iter().any(|t| t == "odrl"));
 }
 
 #[wasm_bindgen_test]
 fn two_profiles_conform_when_both_are_loaded() {
-    let r = parsed(&validate(MIXED, list(&[RESEARCH, OTHER]), None, None).unwrap());
+    let r = parsed(&validate(MIXED, list(&[RESEARCH, OTHER]), None, None, None).unwrap());
     assert_eq!(r["verdict"], "conforms", "{r}");
-    let r = parsed(&validate(MIXED, list(&[RESEARCH]), None, None).unwrap());
+    let r = parsed(&validate(MIXED, list(&[RESEARCH]), None, None, None).unwrap());
     assert_ne!(r["verdict"], "conforms");
 }
 
 #[wasm_bindgen_test]
 fn bad_input_throws_and_a_bad_policy_does_not() {
-    assert!(validate(CLEAN, JsValue::from_str("<!doctype html><p>hi"), None, None).is_err());
-    assert!(validate(CLEAN, JsValue::from_f64(3.0), None, None).is_err());
-    assert!(validate(CLEAN, JsValue::NULL, Some(opts(r#"{"strictt": 1}"#)), None).is_err());
+    assert!(
+        validate(
+            CLEAN,
+            JsValue::from_str("<!doctype html><p>hi"),
+            None,
+            None,
+            None
+        )
+        .is_err()
+    );
+    assert!(validate(CLEAN, JsValue::from_f64(3.0), None, None, None).is_err());
+    assert!(
+        validate(
+            CLEAN,
+            JsValue::NULL,
+            Some(opts(r#"{"strictt": 1}"#)),
+            None,
+            None
+        )
+        .is_err()
+    );
     assert!(
         validate(
             CLEAN,
             JsValue::NULL,
             Some(JsValue::from_str("strict").unchecked_into()),
+            None,
             None
         )
         .is_err()
     );
-    let r = parsed(&validate("not json at all", JsValue::NULL, None, None).unwrap());
+    let r = parsed(&validate("not json at all", JsValue::NULL, None, None, None).unwrap());
     assert_eq!(r["findings"][0]["rule"], "input.unreadable");
     // Undefined and null options are the defaults.
     assert!(
@@ -118,6 +137,7 @@ fn bad_input_throws_and_a_bad_policy_does_not() {
             CLEAN,
             JsValue::NULL,
             Some(JsValue::UNDEFINED.unchecked_into()),
+            None,
             None
         )
         .is_ok()
@@ -127,6 +147,7 @@ fn bad_input_throws_and_a_bad_policy_does_not() {
             CLEAN,
             JsValue::NULL,
             Some(JsValue::NULL.unchecked_into()),
+            None,
             None
         )
         .is_ok()
@@ -330,7 +351,7 @@ async fn the_rendering_handle_validates_with_shapes_too() {
 fn validate_takes_shapes_as_its_last_argument() {
     let report = |shapes: Option<String>| -> Value {
         serde_json::from_str(
-            &validate(DX_POLICY, list(&[DX_PROFILE]), None, shapes).expect("validates"),
+            &validate(DX_POLICY, list(&[DX_PROFILE]), None, shapes, None).expect("validates"),
         )
         .unwrap()
     };
@@ -338,5 +359,89 @@ fn validate_takes_shapes_as_its_last_argument() {
     let with = report(Some(DX_SHAPES.to_string()));
     assert_eq!(with["verdict"], "violations");
     assert_eq!(with["findings"][0]["expected"]["source"], "shapes");
-    assert!(validate(DX_POLICY, list(&[DX_PROFILE]), None, Some("{".to_string())).is_err());
+    assert!(
+        validate(
+            DX_POLICY,
+            list(&[DX_PROFILE]),
+            None,
+            Some("{".to_string()),
+            None
+        )
+        .is_err()
+    );
+}
+
+// --- operator overlays (setOverlays) -----------------------------------------------
+
+const DX_OVERLAY: &str = include_str!("../../prose-core/tests/overlay/dataspace-overlay.jsonld");
+
+fn overlays(items: &[&str]) -> Vec<String> {
+    items.iter().map(|s| s.to_string()).collect()
+}
+
+#[wasm_bindgen_test]
+fn a_validator_takes_overlays_and_drops_them() {
+    let mut v = ProseValidator::new(list(&[DX_PROFILE]), None).unwrap();
+    assert_eq!(parsed(&v.validate(DX_POLICY))["verdict"], "conforms");
+    let summary: Value =
+        serde_json::from_str(&v.set_overlays(overlays(&[DX_OVERLAY])).unwrap()).unwrap();
+    assert_eq!(summary[0]["terms"], 3, "{summary}");
+    let report = parsed(&v.validate(DX_POLICY));
+    assert_eq!(report["verdict"], "violations");
+    assert_eq!(report["findings"][0]["expected"]["source"], "overlay");
+    // Unreadable overlays throw and keep the previous.
+    assert!(v.set_overlays(overlays(&["{"])).is_err());
+    assert_eq!(parsed(&v.validate(DX_POLICY))["verdict"], "violations");
+    // Shapes laid over the overlay win, and are kept when the overlays change.
+    v.set_shapes(Some(DX_SHAPES.to_string())).unwrap();
+    assert_eq!(
+        parsed(&v.validate(DX_POLICY))["findings"][0]["expected"]["source"],
+        "shapes"
+    );
+    assert_eq!(v.set_overlays(Vec::new()).unwrap(), "[]");
+    assert_eq!(
+        parsed(&v.validate(DX_POLICY))["findings"][0]["expected"]["source"],
+        "shapes"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn the_rendering_handle_validates_with_overlays_too() {
+    let (c, mut h) = mount(DX_POLICY).await;
+    h.set_profiles(list(&[DX_PROFILE])).unwrap();
+    h.set_validation(js("{}")).unwrap();
+    settle().await;
+    assert_eq!(parsed(&report_of(&h).unwrap())["verdict"], "conforms");
+    h.set_overlays(overlays(&[DX_OVERLAY])).unwrap();
+    settle().await;
+    let report = parsed(&report_of(&h).unwrap());
+    assert_eq!(report["verdict"], "violations", "{}", c.inner_html());
+    assert_eq!(report["findings"][0]["expected"]["source"], "overlay");
+    // New profiles keep the overlays.
+    h.set_profiles(list(&[DX_PROFILE])).unwrap();
+    assert_eq!(parsed(&report_of(&h).unwrap())["verdict"], "violations");
+    assert_eq!(h.set_overlays(Vec::new()).unwrap(), "[]");
+    assert_eq!(parsed(&report_of(&h).unwrap())["verdict"], "conforms");
+    assert!(h.set_overlays(overlays(&["{"])).is_err());
+}
+
+#[wasm_bindgen_test]
+fn validate_takes_overlays_as_its_last_argument() {
+    let report = |o: Option<Vec<String>>| -> Value {
+        parsed(&validate(DX_POLICY, list(&[DX_PROFILE]), None, None, o).expect("validates"))
+    };
+    assert_eq!(report(None)["verdict"], "conforms");
+    let with = report(Some(overlays(&[DX_OVERLAY])));
+    assert_eq!(with["verdict"], "violations");
+    assert_eq!(with["findings"][0]["expected"]["source"], "overlay");
+    assert!(
+        validate(
+            DX_POLICY,
+            list(&[DX_PROFILE]),
+            None,
+            None,
+            Some(overlays(&["{"]))
+        )
+        .is_err()
+    );
 }

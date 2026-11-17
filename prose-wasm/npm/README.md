@@ -133,6 +133,18 @@ value an error whose `expected.source` is `"shapes"`. Only a subset of SHACL is
 read; the rest is listed in `warnings`. `validate(policyJson, profiles,
 options?, shapes?)` takes the shapes text as its last argument.
 
+`setOverlays(texts)` loads the dataspace's operator overlays (JSON-LD, or Turtle in
+the Turtle build; `[]` clears) on `ProseHandle`, `ProseEditorHandle` and
+`ProseValidator`, and returns one summary per overlay as the JSON text of a list
+(`OverlaySummary`: `terms`, `warnings`). An overlay is a small graph of `prose:`
+hints (`prose:operator`, `prose:rightOperand`, `prose:unit`, `prose:closed` ...)
+about terms the profiles declare: it merges onto them and never adds or relabels
+one, and a term no profile declares is ignored with a warning. It throws on a text
+that is not a readable overlay and keeps the previous overlays. Overlays survive a
+later `setProfile`. Precedence per facet: profile < overlay < shapes; a finding an
+overlay closed has `expected.source` `"overlay"`. `validate(policyJson, profiles,
+options?, shapes?, overlays?)` takes the overlay texts as its last argument.
+
 ## Validation
 
 `validate(policyJson, profiles, options?)` checks a policy against ODRL

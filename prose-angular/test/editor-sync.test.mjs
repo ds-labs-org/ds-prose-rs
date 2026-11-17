@@ -40,6 +40,11 @@ function fake(bad = new Set(), scope = {}) {
         if (t === 'bad shapes') throw new Error('not shapes');
         return t == null ? 'null' : '{"constraints":2,"actions":null,"leftOperands":null,"warnings":["ignored sh:minCount"]}';
       },
+      setOverlays: (t) => {
+        calls.push(['setOverlays', t]);
+        if (t.includes('bad overlay')) throw new Error('not an overlay');
+        return JSON.stringify(t.map(() => ({ terms: 3, warnings: ['ignored <x>'] })));
+      },
       setRefuseTerms: (on) => calls.push(['setRefuseTerms', on]),
       setTermInput: (m) => {
         calls.push(['setTermInput', m]);
@@ -473,4 +478,60 @@ test('shapes: a failed first mount keeps them unspent for the retry', () => {
   assert.ok(!names(f.calls).includes('setShapes'), 'nothing else was handed over');
   s.apply(inputs({ json: B, shapes: 'S' }), f.mount);
   assert.deepEqual(f.calls.filter((c) => c[0] === 'setShapes'), [['setShapes', 'S']]);
+});
+
+test('overlays: handed over once, after the profiles and before the shapes, and reported', () => {
+  const s = new EditorSession();
+  const f = fake();
+  const out = s.apply(inputs({ texts: ['p'], overlays: ['O'], shapes: 'S', options: { strict: true } }), f.mount);
+  assert.deepEqual(names(f.calls), ['new', 'setProfile', 'setOverlays', 'setShapes', 'setValidation', 'report']);
+  assert.deepEqual(f.calls.find((c) => c[0] === 'setOverlays'), ['setOverlays', ['O']]);
+  assert.deepEqual(out.overlaysSummary, [{ terms: 3, warnings: ['ignored <x>'] }]);
+  assert.equal(out.overlaysError, undefined);
+  // The same overlays again: nothing is handed over twice.
+  f.calls.length = 0;
+  const again = s.apply(inputs({ texts: ['p'], overlays: ['O'], shapes: 'S', options: { strict: true } }), f.mount);
+  assert.deepEqual(names(f.calls), ['report']);
+  assert.equal(again.overlaysSummary, undefined);
+});
+
+test('overlays: blank texts are dropped; none (null, undefined, [], blank) on a fresh mount needs no call; going back to none clears them', () => {
+  const s = new EditorSession();
+  const f = fake();
+  s.apply(inputs(), f.mount);
+  s.apply(inputs({ overlays: null }), f.mount);
+  s.apply(inputs({ overlays: [] }), f.mount);
+  s.apply(inputs({ overlays: ['  \n', ''] }), f.mount);
+  assert.ok(!names(f.calls).includes('setOverlays'));
+  s.apply(inputs({ overlays: ['O', ' '] }), f.mount);
+  assert.deepEqual(f.calls.filter((c) => c[0] === 'setOverlays'), [['setOverlays', ['O']]]);
+  f.calls.length = 0;
+  const out = s.apply(inputs({ overlays: [] }), f.mount);
+  assert.deepEqual(f.calls.filter((c) => c[0] === 'setOverlays'), [['setOverlays', []]]);
+  assert.equal(out.overlaysSummary, undefined, 'clearing reports no summary');
+  assert.equal(out.overlaysError, undefined);
+});
+
+test('overlays: a list the handle refuses is reported once, not retried until it changes', () => {
+  const s = new EditorSession();
+  const f = fake();
+  const out = s.apply(inputs({ overlays: ['bad overlay'] }), f.mount);
+  assert.match(String(out.overlaysError), /not an overlay/);
+  assert.equal(out.overlaysSummary, undefined);
+  f.calls.length = 0;
+  const again = s.apply(inputs({ overlays: ['bad overlay'] }), f.mount);
+  assert.deepEqual(names(f.calls), ['report']);
+  assert.equal(again.overlaysError, undefined);
+  const fixed = s.apply(inputs({ overlays: ['O'] }), f.mount);
+  assert.equal(fixed.overlaysError, undefined);
+  assert.equal(fixed.overlaysSummary[0].terms, 3);
+});
+
+test('overlays: a failed first mount keeps them unspent for the retry', () => {
+  const s = new EditorSession();
+  const f = fake(new Set([A]));
+  s.apply(inputs({ overlays: ['O'] }), f.mount);
+  assert.ok(!names(f.calls).includes('setOverlays'), 'nothing else was handed over');
+  s.apply(inputs({ json: B, overlays: ['O'] }), f.mount);
+  assert.deepEqual(f.calls.filter((c) => c[0] === 'setOverlays'), [['setOverlays', ['O']]]);
 });

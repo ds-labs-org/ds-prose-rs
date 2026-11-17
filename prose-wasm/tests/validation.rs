@@ -426,3 +426,89 @@ fn dts_declares_the_shapes_api() {
         assert!(TYPES_D_TS.contains(name), "{name}");
     }
 }
+
+// --- operator overlays ---------------------------------------------------------
+
+const DX_OVERLAY: &str = include_str!("../../prose-core/tests/overlay/dataspace-overlay.jsonld");
+
+fn overlaid_report(overlays: &[&str]) -> Value {
+    let texts = vec![DX_PROFILE.to_string()];
+    let overlays: Vec<String> = overlays.iter().map(|s| s.to_string()).collect();
+    let v = validator_with(&texts, None, &overlays, opts(json!({}))).expect("reads");
+    serde_json::from_str(&validate_text(DX_POLICY, &v)).expect("the report is JSON")
+}
+
+#[test]
+fn overlay_summaries_say_what_was_read_and_what_was_ignored() {
+    let o = overlays(&[DX_OVERLAY.to_string()]).expect("overlay");
+    let w = with_overlays(wording(&[DX_PROFILE.to_string()]).unwrap(), &o);
+    let v: Value = serde_json::from_str(&overlay_summaries_json(&w, &o)).unwrap();
+    assert_eq!(v.as_array().unwrap().len(), 1);
+    assert_eq!(v[0]["terms"], 3);
+    assert_eq!(v[0]["warnings"], json!([]));
+    // A term no loaded profile declares is ignored, with a warning.
+    let ghost = r#"{"@context":{"prose":"https://ds-labs-org.github.io/ds-prose-rs/profile#"},"@id":"https://example.org/dataspace/ghost","prose:closed":true}"#;
+    let o = overlays(&[ghost.to_string()]).expect("overlay");
+    let w = with_overlays(wording(&[DX_PROFILE.to_string()]).unwrap(), &o);
+    let v: Value = serde_json::from_str(&overlay_summaries_json(&w, &o)).unwrap();
+    assert!(
+        v[0]["warnings"][0].as_str().unwrap().contains("ghost"),
+        "{v}"
+    );
+}
+
+#[test]
+fn a_validator_with_an_overlay_names_the_overlay_in_its_findings() {
+    assert_eq!(overlaid_report(&[])["verdict"], "conforms");
+    let with = overlaid_report(&[DX_OVERLAY]);
+    assert_eq!(with["verdict"], "violations");
+    let f = &with["findings"][0];
+    assert_eq!(f["rule"], "prose.value-not-allowed");
+    assert_eq!(f["expected"]["source"], "overlay");
+    assert!(
+        f["message"]
+            .as_str()
+            .unwrap()
+            .contains("the overlay allows")
+    );
+}
+
+#[test]
+fn shapes_win_over_an_overlay_in_one_validator() {
+    let shapes = r#"{"@context":{"sh":"http://www.w3.org/ns/shacl#","odrl":"http://www.w3.org/ns/odrl/2/","dx":"https://example.org/dataspace/"},
+      "@id":"dx:S","sh:property":[{"sh:path":{"@id":"odrl:leftOperand"},"sh:hasValue":{"@id":"dx:purpose"}},
+      {"sh:path":{"@id":"odrl:rightOperand"},"sh:in":{"@list":[{"@id":"dx:marketing"}]}}]}"#;
+    let v = validator_with(
+        &[DX_PROFILE.to_string()],
+        Some(shapes),
+        &[DX_OVERLAY.to_string()],
+        opts(json!({})),
+    )
+    .unwrap();
+    let r: Value = serde_json::from_str(&validate_text(DX_POLICY, &v)).unwrap();
+    assert_eq!(r["findings"][0]["expected"]["source"], "shapes");
+}
+
+#[test]
+fn unreadable_overlays_say_what_is_wrong() {
+    for bad in ["", "{", "<!doctype html><p>hi", DX_PROFILE] {
+        let e = overlay(bad).unwrap_err();
+        assert!(e.starts_with("overlay: "), "{e}");
+    }
+    let e = validator_with(
+        &[DX_PROFILE.to_string()],
+        None,
+        &["{".to_string()],
+        opts(json!({})),
+    )
+    .map(|_| ())
+    .unwrap_err();
+    assert!(e.starts_with("overlay: "), "{e}");
+}
+
+#[test]
+fn dts_declares_the_overlay_api() {
+    for name in ["OverlaySummary", "\"overlay\""] {
+        assert!(TYPES_D_TS.contains(name), "{name}");
+    }
+}

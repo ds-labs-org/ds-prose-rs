@@ -10,7 +10,7 @@ import {
   output,
   signal,
 } from '@angular/core';
-import type { EditLimits, OutOfScopeMode, ProseEditorHandle, RemovedSection, ShapesSummary, TermInput, ValidateOptions, ValidationReport } from '@ds-labs/prose-wasm';
+import type { EditLimits, OutOfScopeMode, OverlaySummary, ProseEditorHandle, RemovedSection, ShapesSummary, TermInput, ValidateOptions, ValidationReport } from '@ds-labs/prose-wasm';
 import { type EditorInputs, EditorSession, resolvePreset } from './editor-sync';
 import type { ProfileSummary } from './profile-sync';
 import { parseReport, profileTexts, reportChanged } from './validation-sync';
@@ -38,7 +38,11 @@ import { PROSE_WASM_MODULE, PROSE_WASM_URL, type ProseWasmModule, loadWasm } fro
  * `<article class="ds-prose prose-edit">`.
  *
  * `profile` / `profiles` take the text of ODRL profiles, as for
- * `ds-odrl-prose`. `shapes` takes the text of the dataspace's companion SHACL
+ * `ds-odrl-prose`. `overlays` takes the texts of the dataspace's operator
+ * overlays (annotation-only graphs of `prose:` hints about terms the profiles
+ * declare, for a dataspace that publishes no SHACL): they merge onto those
+ * terms like shapes do, never add or relabel one, and the shapes win over
+ * them; `overlaysLoaded` emits one summary per overlay. `shapes` takes the text of the dataspace's companion SHACL
  * shapes (JSON-LD, or Turtle with the Turtle build): they add to the terms
  * the profiles declare, so a right operand a shape closes with `sh:in` is a
  * dropdown (with `termInput="select"`) and any other value is an error that
@@ -83,6 +87,12 @@ export class OdrlProseEditorComponent implements OnChanges, OnDestroy {
   readonly profile = input<string | null>(null);
   /** Several ODRL profiles, as JSON-LD (or Turtle) text each; wins over `profile`. */
   readonly profiles = input<string[] | null>(null);
+  /**
+   * The texts of the dataspace's operator overlays, JSON-LD (or Turtle, with
+   * the Turtle build) each; blank texts are dropped. They narrow what the
+   * loaded profiles declare and never relabel a term; the shapes win over them.
+   */
+  readonly overlays = input<string[] | null>(null);
   /**
    * The text of the dataspace's companion SHACL shapes, JSON-LD (or Turtle,
    * with the Turtle build); blank is none. They narrow what the loaded
@@ -131,6 +141,10 @@ export class OdrlProseEditorComponent implements OnChanges, OnDestroy {
   readonly profileLoaded = output<ProfileSummary>();
   /** Emits when the `profile` input is not a readable profile; the previous one stays. */
   readonly profileError = output<unknown>();
+  /** Emits one summary per overlay, each time the `overlays` input changes to overlays that were read; `warnings` lists what was not used. */
+  readonly overlaysLoaded = output<OverlaySummary[]>();
+  /** Emits when an `overlays` text is not a readable overlay; the previous overlays stay. */
+  readonly overlaysError = output<unknown>();
   /** Emits what the `shapes` input holds, each time it changes to shapes that were read; `warnings` lists what was not read. */
   readonly shapesLoaded = output<ShapesSummary>();
   /** Emits when the `shapes` input is not readable shapes; the previous shapes stay. */
@@ -196,6 +210,7 @@ export class OdrlProseEditorComponent implements OnChanges, OnDestroy {
       cls: this.articleClass() ?? null,
       single: this.profiles() == null,
       texts: profileTexts(this.profile(), this.profiles()),
+      overlays: this.overlays(),
       shapes: this.shapes(),
       options: resolved.options,
       limits: resolved.limits,
@@ -216,6 +231,8 @@ export class OdrlProseEditorComponent implements OnChanges, OnDestroy {
     if (outcome.removed) this.outOfScopeRemoved.emit(outcome.removed);
     if (outcome.profileError !== undefined) this.profileError.emit(outcome.profileError);
     for (const summary of outcome.summaries ?? []) this.profileLoaded.emit(summary);
+    if (outcome.overlaysError !== undefined) this.overlaysError.emit(outcome.overlaysError);
+    if (outcome.overlaysSummary) this.overlaysLoaded.emit(outcome.overlaysSummary);
     if (outcome.shapesError !== undefined) this.shapesError.emit(outcome.shapesError);
     if (outcome.shapesSummary) this.shapesLoaded.emit(outcome.shapesSummary);
     if (outcome.validationError !== undefined) this.validationError.emit(outcome.validationError);

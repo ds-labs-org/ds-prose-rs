@@ -9,7 +9,7 @@ order: 6
 
 A dataspace operator wants its members to write only policies the dataspace can evaluate. This page is about what `ds-odrl-prose-editor` does for that today, using the EONA-X profile as the example.
 
-The editor reads the labels of a real profile, but it does not read the `skos:note` prose that says which values suit which left operand. A profile such as EONA-X (or DSP, or EDC) carries no `prose:operator`, `prose:rightOperand`, `prose:unit` or `prose:closed` data. So what it can narrow is the vocabulary (which actions and left operands exist) and the structure (what a constraint, a group and a rule may look like). The values of a right operand stay free text. Values can come from the dataspace's companion SHACL shapes (see [Companion shapes](#companion-shapes)). An operator overlay or a value list the host supplies is planned and is not part of the editor yet.
+The editor reads the labels of a real profile, but it does not read the `skos:note` prose that says which values suit which left operand. A profile such as EONA-X (or DSP, or EDC) carries no `prose:operator`, `prose:rightOperand`, `prose:unit` or `prose:closed` data. So what it can narrow is the vocabulary (which actions and left operands exist) and the structure (what a constraint, a group and a rule may look like). The values of a right operand stay free text. Values can come from the dataspace's companion SHACL shapes (see [Companion shapes](#companion-shapes)) or, when it publishes none, from an operator overlay (see [Operator overlay](#operator-overlay)). A value list the host supplies is planned and is not part of the editor yet.
 
 ## One switch
 
@@ -87,4 +87,46 @@ A finding that a shape caused has `expected.source` set to `"shapes"` and says "
 
 An unreadable text emits `shapesError` and the previous shapes stay. Shapes are kept when the profile changes, and `null` or blank text removes them.
 
-Which source to use: the profile for the vocabulary, the shapes for the values the dataspace accepts for each left operand. A value list the shapes cannot say (a literal list, or one fetched at run time) is not read yet.
+## Operator overlay
+
+When the dataspace publishes no SHACL, its governance can publish an overlay next to the profile and version it with it. An overlay is a small annotation-only graph: `prose:` triples (`prose:operator`, `prose:rightOperand`, `prose:unit`, `prose:datatype`, `prose:closed`, `prose:plural`) about left operands that the profile declares. Pass the texts in `overlays`, JSON-LD or Turtle (the Turtle needs the [Turtle build](/angular/interface/#prose-wasm-module)):
+
+```turtle
+@prefix prose: <https://ds-labs-org.github.io/ds-prose-rs/profile#> .
+@prefix odrl:  <http://www.w3.org/ns/odrl/2/> .
+@prefix dx:    <https://example.org/dataspace/> .
+
+dx:purpose prose:closed true ;
+    prose:operator odrl:eq, odrl:isAnyOf ;
+    prose:rightOperand dx:research, dx:marketing .
+```
+
+```html
+<ds-odrl-prose-editor
+  [json]="policy" (jsonChange)="policy = $event"
+  [profile]="eonaXProfileText"
+  [overlays]="[eonaXOverlayText]"
+  preset="dataspace"
+  (overlaysLoaded)="onOverlays($event)" />
+```
+
+The same `[overlays]` input exists on `ds-odrl-prose` and on `ProseValidatorService.validate`, and `setOverlays(texts)` on the wasm handles (`[]` removes them).
+
+A second profile that names the same IRI is a "declared by both" conflict. An overlay is not a second declaration: it merges its hints onto the term and never adds or relabels one. A triple about an IRI that no loaded profile declares as a left operand is ignored, with a line in the `warnings` of `overlaysLoaded`, and so is a label or a type the overlay gives. The sentences keep the profile's labels.
+
+An overlay lists exactly the values it means, as `sh:in` does: values narrower than a listed one are not added. Without `prose:closed true` its hints are suggestions, as a profile's are. With it they are binding under strict validation: a right operand becomes a dropdown with `termInput="select"`, and any other value is `prose.value-not-allowed`. A finding an overlay caused has `expected.source` set to `"overlay"` and says "the overlay allows". A later overlay replaces an earlier one for each facet it gives.
+
+An overlay and a shape that say the same thing give the same hints, so a dataspace can start with an overlay and move to shapes later. An overlay cannot say what shapes add: `sh:class`, patterns, bounds, and the closed lists of actions and left operands.
+
+## Which source to use when
+
+Sources are layered, and each facet (operators, values, units, datatype) is taken from the last source that gives it: profile, then overlay, then shapes. A source never relabels a term, and each finding names the source that closed the slot (`profile`, `overlay` or `shapes`; the profile's findings carry no `source`).
+
+| You have | Use |
+|---|---|
+| Only a profile (EONA-X, DSP, EDC) | The profile for the vocabulary, with `preset="dataspace"` to close the action and left-operand lists to what it declares. Values stay free text. |
+| A profile, and SHACL the connector already checks | `[shapes]`. One source of truth: what the editor offers is what the connector checks. Shapes also close the action and left-operand lists, and give classes, patterns and bounds. |
+| A profile, and no SHACL | `[overlays]`, published by the governance next to the profile. Lists of values, operators and units per left operand. |
+| Both | Both. The shapes win for each facet they give; the overlay fills the rest. |
+
+A value list the shapes and the overlay cannot say (one fetched at run time, such as participants) is not read yet.

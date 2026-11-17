@@ -1,6 +1,6 @@
 //! The loaded profiles and language preferences one reading uses, and how a
 //! policy's compact terms expand.
-use super::{HintSource, OperandHints, ProfileVocab, Term, TermKind, ns};
+use super::{HintSource, OperandHints, Overlay, ProfileVocab, Term, TermKind, ns};
 use crate::shapes::ShapesGraph;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -15,10 +15,12 @@ pub struct Wording {
     profiles: Vec<Arc<ProfileVocab>>,
     languages: Vec<String>,
     conflicts: Vec<String>,
+    overlays: Vec<Arc<Overlay>>,
     shapes: Option<Arc<ShapesGraph>>,
-    /// Left operand IRI -> its profile hints with the shapes laid over them,
-    /// for each left operand a shape gives something for. Rebuilt whenever a
-    /// profile or the shapes are added, so their order does not matter.
+    /// Left operand IRI -> its profile hints with the overlays, then the
+    /// shapes, laid over them, for each left operand one of them gives
+    /// something for. Rebuilt whenever a profile, an overlay or the shapes
+    /// are added, so their order does not matter.
     shaped: HashMap<String, OperandHints>,
 }
 
@@ -43,7 +45,7 @@ impl Wording {
             }
         }
         self.profiles.push(Arc::new(p));
-        self.layer_shapes();
+        self.layer_hints();
         self
     }
 
@@ -54,8 +56,48 @@ impl Wording {
     /// of this call and [`Wording::with_profile`] does not matter.
     pub fn with_shapes(mut self, shapes: ShapesGraph) -> Wording {
         self.shapes = Some(Arc::new(shapes));
-        self.layer_shapes();
+        self.layer_hints();
         self
+    }
+
+    /// Adds an operator overlay (see [`Overlay`]): its `prose:` hints merge
+    /// onto the left operands the loaded profiles declare, and never add or
+    /// relabel a term. An overlay is not a second declaration, so it is no
+    /// "declared by both" conflict. Overlays are laid over the profiles in
+    /// the order they are added (a later one's facet replaces an earlier
+    /// one's), and the shapes over those: profile < overlay < shapes. The
+    /// order of this call and [`Wording::with_profile`] does not matter.
+    pub fn with_overlay(mut self, overlay: Overlay) -> Wording {
+        self.overlays.push(Arc::new(overlay));
+        self.layer_hints();
+        self
+    }
+
+    /// The overlays, in the order they were added.
+    pub fn overlays(&self) -> impl Iterator<Item = &Overlay> {
+        self.overlays.iter().map(|o| &**o)
+    }
+
+    /// What `overlay` says that this wording cannot use: its own warnings,
+    /// then a line for each term it names that no loaded profile declares as
+    /// a left operand (ignored). Lower-case fragments, each once.
+    pub fn overlay_warnings(&self, overlay: &Overlay) -> Vec<String> {
+        let mut out: Vec<String> = overlay.warnings().to_vec();
+        for (iri, _) in overlay.terms() {
+            let msg = match self.lookup(iri) {
+                None => format!(
+                    "ignored <{iri}>: no loaded profile declares it, and an overlay never adds a term"
+                ),
+                Some((t, _)) if !t.kinds.contains(&TermKind::LeftOperand) => format!(
+                    "ignored <{iri}>: it is not a left operand, and an overlay only gives hints to left operands"
+                ),
+                Some(_) => continue,
+            };
+            if !out.contains(&msg) {
+                out.push(msg);
+            }
+        }
+        out
     }
 
     /// The companion shapes, when some were given.
@@ -86,14 +128,34 @@ impl Wording {
         }
     }
 
-    /// Recomputes `shaped` from the profiles and the shapes.
-    fn layer_shapes(&mut self) {
+    /// Recomputes `shaped` from the profiles, the overlays and the shapes.
+    fn layer_hints(&mut self) {
         self.shaped.clear();
-        let Some(shapes) = self.shapes.clone() else {
-            return;
-        };
+        let mut shaped: HashMap<String, OperandHints> = HashMap::new();
+        for overlay in self.overlays.clone() {
+            for (iri, patch) in overlay.terms() {
+                let Some((term, _)) = self.lookup(iri) else {
+                    continue;
+                };
+                if !term.kinds.contains(&TermKind::LeftOperand) {
+                    continue;
+                }
+                let base = shaped.get(&term.iri).unwrap_or(&term.hints);
+                let layered = super::layer_overlay(base, patch);
+                shaped.insert(term.iri.clone(), layered);
+            }
+        }
+        if let Some(shapes) = self.shapes.clone() {
+            self.layer_shapes(&shapes, &mut shaped);
+        }
+        shaped.retain(|iri, h| self.lookup(iri).is_none_or(|(t, _)| *h != t.hints));
+        self.shaped = shaped;
+    }
+
+    /// Lays the shapes over `shaped` (the profiles' hints with the overlays
+    /// over them).
+    fn layer_shapes(&self, shapes: &ShapesGraph, shaped: &mut HashMap<String, OperandHints>) {
         let narrower = narrower_values(self);
-        let mut shaped = HashMap::new();
         for (left, shape) in shapes.constraints() {
             let Some((term, _)) = self.lookup(left) else {
                 continue;
@@ -126,12 +188,10 @@ impl Wording {
                     .collect();
                 patch.value_tree = tree;
             }
-            let layered = super::layer(&term.hints, &patch, HintSource::Shapes);
-            if layered != term.hints {
-                shaped.insert(term.iri.clone(), layered);
-            }
+            let base = shaped.get(&term.iri).unwrap_or(&term.hints);
+            let layered = super::layer(base, &patch, HintSource::Shapes);
+            shaped.insert(term.iri.clone(), layered);
         }
-        self.shaped = shaped;
     }
 
     /// The label languages to prefer, most preferred first.

@@ -698,6 +698,9 @@ validator does not allow. `preset="dataspace"` on `<ds-odrl-prose-editor>`
 turns on strict and structural validation, `termInput="select"`, refusing
 terms, `logicalDepth` 2 and the two lints in one input, each still overridable.
 
+Added with the operator overlay: `HintSource::Overlay`, `profile::{Overlay, OverlayError}` and
+`Wording::{with_overlay, overlays, overlay_warnings}`; both are `#[non_exhaustive]`.
+
 Added with the shapes support: `HintSource`, `ShapesError` and `shapes::{ShapesGraph,
 ConstraintShape}`; `OperandHints` gained `pattern`, `pattern_flags`, `min_inclusive`,
 `max_inclusive` and `sources`, `Term` gained `types`, and `Expected` gained `source`,
@@ -886,10 +889,35 @@ Everything else is ignored, and `ShapesGraph::warnings()` says what. Shapes only
 add hints to terms the loaded profiles declare and never relabel a term. The hints
 are layered: `Wording::operand_hints` returns a shape's facet in place of the
 profile's for that facet only, and `OperandHints::sources` records which source
-(`HintSource::Profile` or `Shapes`) gave each facet. A finding that a shape closed
+(`HintSource::Profile`, `Overlay` or `Shapes`) gave each facet. A finding that a shape closed
 carries `expected.source: "shapes"` and says "the shapes allow". The same hints
 drive the select in the editor with `TermInput::Select`. On npm: `setShapes(text)` on
 the wasm handles, `validate(..., shapes)`, and `[shapes]` on the Angular components.
+
+### Operator overlay
+
+When the dataspace publishes no SHACL, its governance can publish an overlay next to the
+profile: a small annotation-only graph of `prose:` triples (`prose:operator`,
+`prose:rightOperand`, `prose:unit`, `prose:datatype`, `prose:closed`, `prose:plural`) about
+terms the profiles declare. `Wording::with_overlay(Overlay)` merges it onto them
+(`Overlay::parse` reads JSON-LD, or Turtle with the `turtle` feature; the order of
+`with_profile` and `with_overlay` does not matter). Where a second profile naming the same
+IRI is a "declared by both" conflict, an overlay never adds or relabels a term. A triple
+about an IRI no loaded profile declares as a left operand is ignored, and so is a label or a
+type; `Overlay::warnings()` and `Wording::overlay_warnings(&overlay)` say what.
+
+An overlay lists exactly the values it means, as `sh:in` does (no descendants). Without
+`prose:closed true` its hints are suggestions; with it they are binding in strict
+validation, and the right operand is a select with `TermInput::Select`. Precedence, per
+facet (operators, values, units, datatype): profile < overlay < shapes, and a later overlay
+replaces an earlier one. A finding an overlay closed carries `expected.source: "overlay"`
+and says "the overlay allows". An overlay and a shape that say the same give equal
+`OperandHints` apart from `sources`. An overlay cannot say what only shapes can: `sh:class`,
+patterns, bounds and the closed lists of actions and left operands. Use shapes when the
+connector already checks SHACL, an overlay when it does not, and both when you have both
+(see the site's "Running in a dataspace" page). On npm: `setOverlays(texts)` on the wasm
+handles (`[]` clears), `validate(..., shapes, overlays)`, and `[overlays]` on the Angular
+components, with `overlaysLoaded` and `overlaysError`.
 
 ### Using it from Yew
 

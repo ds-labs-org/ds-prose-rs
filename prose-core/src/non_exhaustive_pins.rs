@@ -405,6 +405,7 @@
 //! fn f(x: &HintSource) -> u8 {
 //!     match x {
 //!         HintSource::Profile => 0,
+//!         HintSource::Overlay => 0,
 //!         HintSource::Shapes => 0,
 //!         _ => 1,
 //!     }
@@ -423,6 +424,23 @@
 //!         ShapesError::LimitExceeded(_) => 0,
 //!         ShapesError::Turtle(_) => 0,
 //!         ShapesError::NotShapes(_) => 0,
+//!         _ => 1,
+//!     }
+//! }
+//! ```
+//! ```
+//! #![deny(unreachable_patterns)]
+//! #![allow(dead_code)]
+//! use prose_core::profile::OverlayError;
+//! fn f(x: &OverlayError) -> u8 {
+//!     match x {
+//!         OverlayError::TooLarge { .. } => 0,
+//!         OverlayError::Json(_) => 0,
+//!         OverlayError::LooksLikeHtml => 0,
+//!         OverlayError::UnsupportedFormat => 0,
+//!         OverlayError::LimitExceeded(_) => 0,
+//!         OverlayError::Turtle(_) => 0,
+//!         OverlayError::NotOverlay(_) => 0,
 //!         _ => 1,
 //!     }
 //! }

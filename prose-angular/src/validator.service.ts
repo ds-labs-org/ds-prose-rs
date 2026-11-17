@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import type { ValidateOptions, ValidationReport } from '@ds-labs/prose-wasm';
-import { shapesText } from './validation-sync';
+import { overlayTexts, shapesText } from './validation-sync';
 import { PROSE_WASM_MODULE, PROSE_WASM_URL, loadWasm } from './wasm-runtime';
 
 /**
@@ -22,7 +22,8 @@ export class ProseValidatorService {
    * the options cannot be read.
    * `shapes` is the text of the dataspace's companion SHACL shapes
    * (JSON-LD, or Turtle with the Turtle build); blank is none, and shapes
-   * that cannot be read reject.
+   * that cannot be read reject. `overlays` are the texts of the dataspace's
+   * operator overlays (blank texts are dropped); the shapes win over them.
    * A problem in the policy is never a rejection: it is a finding.
    */
   async validate(
@@ -30,9 +31,10 @@ export class ProseValidatorService {
     profiles: string | readonly string[] | null = null,
     options: ValidateOptions | null = null,
     shapes: string | null = null,
+    overlays: readonly string[] | null = null,
   ): Promise<ValidationReport> {
     const wasm = await loadWasm({ module: this.wasmModule, url: this.wasmUrl });
     const list = typeof profiles === 'string' || profiles == null ? profiles : [...profiles];
-    return JSON.parse(wasm.validate(json, list, options, shapesText(shapes))) as ValidationReport;
+    return JSON.parse(wasm.validate(json, list, options, shapesText(shapes), overlayTexts(overlays))) as ValidationReport;
   }
 }

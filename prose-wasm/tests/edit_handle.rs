@@ -747,3 +747,83 @@ async fn shapes_close_the_action_list_for_the_policy() {
     );
     assert!(!html.contains("dx:publish"), "{html}");
 }
+
+// --- operator overlays (setOverlays) ---------------------------------------------
+
+const DX_OVERLAY: &str = include_str!("../../prose-core/tests/overlay/dataspace-overlay.jsonld");
+
+#[wasm_bindgen_test]
+async fn set_overlays_closes_a_right_operand_to_a_select_and_other_values_are_errors() {
+    let (c, mut h, calls) = mount(DX_POLICY).await;
+    h.set_profile(Some(DX_PROFILE.to_string()))
+        .expect("profile");
+    h.set_term_input("select").expect("select");
+    h.set_validation(js("{}")).expect("validation");
+    settle().await;
+    assert_ne!(select(&c, DX_RIGHT).unwrap().tag_name(), "SELECT");
+
+    let summary = h
+        .set_overlays(vec![DX_OVERLAY.to_string()])
+        .expect("overlay");
+    settle().await;
+    let s: serde_json::Value = serde_json::from_str(&summary).unwrap();
+    assert_eq!(s[0]["terms"], 3, "{summary}");
+    assert_eq!(s[0]["warnings"], serde_json::json!([]));
+    let right = select(&c, DX_RIGHT).expect("the right operand");
+    assert_eq!(right.tag_name(), "SELECT", "{}", c.inner_html());
+    let html = right.inner_html();
+    assert!(
+        html.contains("dx:research") && html.contains("dx:marketing"),
+        "{html}"
+    );
+    assert_eq!(right.get_attribute("data-outside").as_deref(), Some("true"));
+    let report = h.report().as_string().expect("a report");
+    assert!(report.contains("prose.value-not-allowed"), "{report}");
+    assert!(report.contains("\"source\":\"overlay\""), "{report}");
+    assert!(
+        calls.borrow().is_empty(),
+        "loading an overlay is not an edit"
+    );
+
+    // A new profile keeps the overlay.
+    h.set_profile(Some(DX_PROFILE.to_string()))
+        .expect("profile");
+    settle().await;
+    assert_eq!(select(&c, DX_RIGHT).unwrap().tag_name(), "SELECT");
+
+    // Shapes win over it and the overlay survives their removal.
+    h.set_shapes(Some(DX_SHAPES.to_string())).expect("shapes");
+    settle().await;
+    assert!(
+        h.report()
+            .as_string()
+            .unwrap()
+            .contains("\"source\":\"shapes\"")
+    );
+    h.set_shapes(None).expect("clear shapes");
+    settle().await;
+    assert_eq!(select(&c, DX_RIGHT).unwrap().tag_name(), "SELECT");
+
+    // Clearing gives the free text back.
+    assert_eq!(h.set_overlays(Vec::new()).expect("clear"), "[]");
+    settle().await;
+    assert_ne!(select(&c, DX_RIGHT).unwrap().tag_name(), "SELECT");
+}
+
+#[wasm_bindgen_test]
+async fn unreadable_overlays_throw_and_keep_the_previous() {
+    let (c, mut h, _calls) = mount(DX_POLICY).await;
+    h.set_profile(Some(DX_PROFILE.to_string())).unwrap();
+    h.set_term_input("select").unwrap();
+    h.set_overlays(vec![DX_OVERLAY.to_string()]).unwrap();
+    settle().await;
+    for bad in ["{", "<!doctype html><p>hi</p>", DX_PROFILE] {
+        assert!(h.set_overlays(vec![bad.to_string()]).is_err(), "{bad}");
+        settle().await;
+        assert_eq!(
+            select(&c, DX_RIGHT).unwrap().tag_name(),
+            "SELECT",
+            "the previous overlays stay after {bad}"
+        );
+    }
+}

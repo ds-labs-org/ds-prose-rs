@@ -19,6 +19,7 @@ The component is `ds-odrl-prose`, a standalone component with an empty template 
 | `articleClass` | `string` | `undefined` | Extra classes, separated by spaces, for the rendered `article.ds-prose`. Nothing else receives them. |
 | `profile` | `string \| null` | `null` | One ODRL profile as JSON-LD text, or Turtle with the [Turtle build](#prose-wasm-module). Blank text means no profile. The component does no network access: fetch the text yourself. |
 | `profiles` | `string[] \| null` | `null` | Several profiles. A list wins over `profile`, and an empty list clears the profile. |
+| `overlays` | `string[] \| null` | `null` | The texts of the dataspace's operator overlays, JSON-LD or Turtle with the [Turtle build](#prose-wasm-module) each. Blank texts are dropped. An overlay is a small graph of `prose:` hints about terms the profiles declare; see [Running in a dataspace](/angular/dataspace/#operator-overlay). With validation on, a value a closed overlay does not list is a finding whose `expected.source` is `"overlay"`. The shapes win over an overlay. |
 | `shapes` | `string \| null` | `null` | The text of the dataspace's companion SHACL shapes, JSON-LD or Turtle with the [Turtle build](#prose-wasm-module). Blank text means none. Only a subset of SHACL is read; see [Running in a dataspace](/angular/dataspace/). With validation on, a value a shape's `sh:in` does not list is a finding whose `expected.source` is `"shapes"`. |
 | `strict` | `boolean` | `false` | Validate with a closed vocabulary: ODRL plus the loaded profiles. |
 | `validation` | `ValidateOptions \| null` | `null` | The full validation options. They win over `strict`. |
@@ -33,6 +34,8 @@ Validation is covered on [its own page](/angular/validation/).
 | `loadFailed` | `unknown` | The wasm module cannot be loaded. The next input change tries again. |
 | `profileLoaded` | `ProfileSummary` | Once per profile read, after the `profile` or `profiles` input changed. |
 | `profileError` | `unknown` | A profile text cannot be read. The previous profile stays. |
+| `overlaysLoaded` | `OverlaySummary[]` | After the `overlays` input changed to overlays that were read: one summary per overlay, with the `terms` it names and the `warnings` for what was not used. |
+| `overlaysError` | `unknown` | An overlay text cannot be read. The previous overlays stay. |
 | `shapesLoaded` | `ShapesSummary` | After the `shapes` input changed to shapes that were read. `warnings` lists what was not read. |
 | `shapesError` | `unknown` | The shapes text cannot be read. The previous shapes stay. |
 | `validationChange` | `ValidationReport` | The verdict or the set of findings changed. The first report counts as a change. Never emitted for no report. |
@@ -62,6 +65,7 @@ The declared type is writable, because the source declares `readonly report = si
 | `articleClass` | `string` | `undefined` | Extra classes, separated by spaces, for the rendered `article.ds-prose.prose-edit`. |
 | `profile` | `string \| null` | `null` | One ODRL profile as JSON-LD text, or Turtle with the [Turtle build](#prose-wasm-module). The editor then words the sentences with it and suggests its terms. |
 | `profiles` | `string[] \| null` | `null` | Several profiles. A list wins over `profile`. |
+| `overlays` | `string[] \| null` | `null` | The texts of the dataspace's operator overlays, JSON-LD or Turtle with the [Turtle build](#prose-wasm-module) each. Blank texts are dropped. An overlay merges `prose:` hints onto the terms the profiles declare and never adds or relabels one; see [Running in a dataspace](/angular/dataspace/#operator-overlay). A right operand an overlay closes is a dropdown with `termInput="select"`, and any other value is an error that names the overlay. The shapes win over an overlay. |
 | `shapes` | `string \| null` | `null` | The text of the dataspace's companion SHACL shapes, JSON-LD or Turtle with the [Turtle build](#prose-wasm-module). Blank text means none. Only a subset of SHACL is read; see [Running in a dataspace](/angular/dataspace/). A right operand a shape closes with `sh:in` is a dropdown with `termInput="select"`, and any other value is an error that names the shapes. |
 | `limits` | `EditLimits \| null` | `null` | How many items each list may hold, by list name; a given entry replaces that list's default (`min` 0, `max` unbounded). `{ policyAssigner: { max: 0 } }` removes the assigner button. Unreadable limits are logged and the previous ones stay. |
 | `strict` | `boolean \| undefined` | `undefined` | Validate with a closed vocabulary: ODRL plus the loaded profiles. Not set means `false`, or the `preset`'s. |
@@ -81,6 +85,8 @@ The declared type is writable, because the source declares `readonly report = si
 | `loadFailed` | `unknown` | The wasm module cannot be loaded. The next input change tries again. |
 | `profileLoaded` | `ProfileSummary` | Once per profile read, after the `profile` or `profiles` input changed. |
 | `profileError` | `unknown` | A profile text cannot be read. The previous profile stays. |
+| `overlaysLoaded` | `OverlaySummary[]` | After the `overlays` input changed to overlays that were read: one summary per overlay, with the `terms` it names and the `warnings` for what was not used. |
+| `overlaysError` | `unknown` | An overlay text cannot be read. The previous overlays stay. |
 | `shapesLoaded` | `ShapesSummary` | After the `shapes` input changed to shapes that were read. `warnings` lists what was not read. |
 | `shapesError` | `unknown` | The shapes text cannot be read. The previous shapes stay. |
 | `validationChange` | `ValidationReport` | The verdict or the set of findings changed, also after an edit. Never emitted for no report. |
@@ -124,10 +130,11 @@ async validate(
   profiles: string | readonly string[] | null = null,
   options: ValidateOptions | null = null,
   shapes: string | null = null,
+  overlays: readonly string[] | null = null,
 ): Promise<ValidationReport>
 ```
 
-It waits for the wasm module and does no network access. `shapes` is the text of companion SHACL shapes, and it rejects when they cannot be read. It is strict unless `options.strict` is `false`. It rejects when the wasm cannot be loaded, or when a profile or the options cannot be read. A problem in the policy is a finding in the report, never a rejection.
+It waits for the wasm module and does no network access. `shapes` is the text of companion SHACL shapes and `overlays` the texts of operator overlays; it rejects when either cannot be read. It is strict unless `options.strict` is `false`. It rejects when the wasm cannot be loaded, or when a profile or the options cannot be read. A problem in the policy is a finding in the report, never a rejection.
 
 {{source prose-angular/test/docs-examples.ts#service}}
 
@@ -163,6 +170,7 @@ The package exports exactly these names from its entry point. Nothing else is pu
 | `RuleInfo` | type | One entry of the rule catalogue, from `@ds-labs/prose-wasm`. |
 | `EditLimits` | type | The `limits` input of the editor, from `@ds-labs/prose-wasm`. |
 | `OutOfScopeMode` | type | The `outOfScope` input of the editor, `"show"`, `"strip"` or `"reject"`, from `@ds-labs/prose-wasm`. |
+| `OverlaySummary` | type | What `overlaysLoaded` emits per overlay: the number of `terms` it names and the `warnings`, from `@ds-labs/prose-wasm`. |
 | `RemovedSection` | type | What `outOfScopeRemoved` emits per section, from `@ds-labs/prose-wasm`. |
 | `ShapesSummary` | type | What `shapesLoaded` emits: `constraints`, the closed `actions` and `leftOperands` (or `null`) and the `warnings`, from `@ds-labs/prose-wasm`. |
 | `TermInput` | type | The `termInput` input of the editor, `"free"` or `"select"`, from `@ds-labs/prose-wasm`. |

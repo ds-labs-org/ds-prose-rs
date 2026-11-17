@@ -101,10 +101,12 @@ export interface Finding {
     datatype: string | null;
     closed: boolean;
     /**
-     * What gave the hint, when it was not the loaded profile: `"shapes"` for
-     * the companion SHACL shapes (`setShapes`). Absent when the profile did.
+     * What gave the hint, when it was not the loaded profile: `"overlay"` for
+     * an operator overlay (`setOverlays`), `"shapes"` for the companion SHACL
+     * shapes (`setShapes`). Absent when the profile did. Precedence: profile
+     * < overlay < shapes.
      */
-    source?: "shapes";
+    source?: "overlay" | "shapes";
     /** The `sh:pattern` a value did not match. */
     pattern?: string;
     /** The `sh:minInclusive` a value was below. */
@@ -246,5 +248,19 @@ export interface ShapesSummary {
   /** The left operands the shapes close the policy to; `null` when they do not. */
   leftOperands: string[] | null;
   /** What was not read, or read with a guess. */
+  warnings: string[];
+}
+
+/**
+ * What `setOverlays` returns, as a list with one entry per overlay. An overlay
+ * is an annotation-only graph of `prose:` triples (`prose:operator`,
+ * `prose:rightOperand`, `prose:unit`, `prose:datatype`, `prose:closed`,
+ * `prose:plural`) about terms the loaded profiles declare. It merges onto
+ * those terms and never adds or relabels one.
+ */
+export interface OverlaySummary {
+  /** How many terms the overlay names. */
+  terms: number;
+  /** What was not read, or cannot be used: a term no loaded profile declares as a left operand is ignored. */
   warnings: string[];
 }

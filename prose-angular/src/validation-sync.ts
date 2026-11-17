@@ -54,6 +54,15 @@ export function shapesText(shapes: string | null | undefined): string | null {
 }
 
 /**
+ * The texts for the `overlays` input (operator overlays, JSON-LD or Turtle):
+ * as given, except that blank texts are dropped, as for the profiles. `null`
+ * and `undefined` are no overlays.
+ */
+export function overlayTexts(overlays: readonly string[] | null | undefined): string[] {
+  return (overlays ?? []).filter((t) => t.trim() !== '');
+}
+
+/**
  * A tracker of the value last handed to the wasm, one per component. It
  * returns true when `value` differs from the last one (compared as JSON), so
  * an unchanged input is not handed over again. `null` and `undefined` are
@@ -91,27 +100,28 @@ export class StandaloneReporter<V extends ValidatorLike = ValidatorLike> {
   private cached?: { key: string; value: V };
   private good: ValidateOptions | null = null;
 
-  private readonly build: (profiles: string[], options: ValidateOptions, shapes: string | null) => V;
+  private readonly build: (profiles: string[], options: ValidateOptions, shapes: string | null, overlays: string[]) => V;
 
   // No parameter property: the tests run this file with types stripped only.
-  constructor(build: (profiles: string[], options: ValidateOptions, shapes: string | null) => V) {
+  constructor(build: (profiles: string[], options: ValidateOptions, shapes: string | null, overlays: string[]) => V) {
     this.build = build;
   }
 
   /**
    * The report text for `json`, and the error when `options` were unreadable.
    * `shapes` is the text of companion SHACL shapes the validator is built
-   * with; the caller passes only shapes that were read.
+   * with; the caller passes only shapes that were read, and likewise the
+   * operator `overlays` (texts).
    */
-  report(profiles: string[], options: ValidateOptions, json: string, shapes: string | null = null): { report: string | null; error?: unknown } {
+  report(profiles: string[], options: ValidateOptions, json: string, shapes: string | null = null, overlays: string[] = []): { report: string | null; error?: unknown } {
     try {
-      const report = this.validator(profiles, options, shapes).validate(json);
+      const report = this.validator(profiles, options, shapes, overlays).validate(json);
       this.good = options;
       return { report };
     } catch (error) {
       if (this.good) {
         try {
-          return { report: this.validator(profiles, this.good, shapes).validate(json), error };
+          return { report: this.validator(profiles, this.good, shapes, overlays).validate(json), error };
         } catch {
           // Not even the previous options work (the profiles changed under them).
         }
@@ -130,10 +140,10 @@ export class StandaloneReporter<V extends ValidatorLike = ValidatorLike> {
     this.cached = undefined;
   }
 
-  private validator(profiles: string[], options: ValidateOptions, shapes: string | null): V {
-    const key = JSON.stringify([profiles, options, shapes]);
+  private validator(profiles: string[], options: ValidateOptions, shapes: string | null, overlays: string[]): V {
+    const key = JSON.stringify([profiles, options, shapes, overlays]);
     if (this.cached?.key !== key) {
-      const value = this.build(profiles, options, shapes);
+      const value = this.build(profiles, options, shapes, overlays);
       this.cached?.value.free();
       this.cached = { key, value };
     }

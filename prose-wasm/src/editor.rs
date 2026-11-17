@@ -10,7 +10,7 @@ use prose_yew::prose_core::edit::{
     EditDoc, EditRules, IssueTarget, Limit, OutOfScope, StrictEdit, check_profile, out_of_scope,
     read_model, strip_out_of_scope, write_jsonld,
 };
-use prose_yew::prose_core::profile::Wording;
+use prose_yew::prose_core::profile::{Overlay, Wording};
 use prose_yew::prose_core::shapes::ShapesGraph;
 use prose_yew::prose_core::validate::{Options, Report, Validator};
 use prose_yew::{
@@ -417,6 +417,8 @@ pub struct ProseEditorHandle {
     wording: Option<SharedWording>,
     /// What `setShapes` loaded, laid over `wording` whenever either changes.
     shapes: Option<ShapesGraph>,
+    /// What `setOverlays` loaded, laid over `wording` under the shapes.
+    overlays: Vec<Overlay>,
     options: Option<Options>,
     limits: Option<Value>,
     term_input: TermInput,
@@ -498,6 +500,7 @@ impl ProseEditorHandle {
             class,
             wording: None,
             shapes: None,
+            overlays: Vec::new(),
             options: None,
             limits: None,
             term_input: TermInput::Free,
@@ -599,12 +602,45 @@ impl ProseEditorHandle {
             .as_ref()
             .map_or_else(|| "null".to_string(), validation::shapes_summary_json);
         let config = make(
-            crate::shaped(self.wording.as_ref(), shapes.as_ref()).as_ref(),
+            crate::shaped(self.wording.as_ref(), shapes.as_ref(), &self.overlays).as_ref(),
             self.options.as_ref(),
             self.limits.as_ref(),
         )?;
         self.install(config);
         self.shapes = shapes;
+        self.render();
+        Ok(summary)
+    }
+
+    /// Loads operator overlays (JSON-LD, or Turtle in the Turtle build, one
+    /// text each), or none for `[]`: annotation-only graphs of `prose:` hints
+    /// about terms the loaded profiles declare. They merge onto those terms
+    /// and never add or relabel one, and the shapes, when loaded, win over
+    /// them. A right operand an overlay closes becomes a select (with
+    /// `setTermInput("select")`) and any other value is an error naming
+    /// `"overlay"` as its source. Returns one summary per overlay as the JSON
+    /// text of a list (`OverlaySummary`: `terms`, `warnings`). Throws when a
+    /// text is not a readable overlay; the previous overlays stay. The
+    /// document and its history stay, and a later `setProfile` keeps the
+    /// overlays.
+    #[wasm_bindgen(js_name = setOverlays)]
+    pub fn set_overlays(&mut self, texts: Vec<String>) -> Result<String, JsError> {
+        let overlays = validation::overlays(&texts).map_err(throw)?;
+        let config = make(
+            crate::shaped(self.wording.as_ref(), self.shapes.as_ref(), &overlays).as_ref(),
+            self.options.as_ref(),
+            self.limits.as_ref(),
+        )?;
+        let base = self
+            .wording
+            .as_ref()
+            .map_or_else(Wording::new, |w| (*w.0).clone());
+        let summary = validation::overlay_summaries_json(
+            &validation::with_overlays(base, &overlays),
+            &overlays,
+        );
+        self.install(config);
+        self.overlays = overlays;
         self.render();
         Ok(summary)
     }
@@ -624,7 +660,7 @@ impl ProseEditorHandle {
             Some(v) => Some(validation::options_from_value(Some(&v)).map_err(throw)?),
         };
         let config = make(
-            crate::shaped(self.wording.as_ref(), self.shapes.as_ref()).as_ref(),
+            crate::shaped(self.wording.as_ref(), self.shapes.as_ref(), &self.overlays).as_ref(),
             options.as_ref(),
             self.limits.as_ref(),
         )?;
@@ -649,7 +685,7 @@ impl ProseEditorHandle {
             .map_err(throw)?
             .filter(|v| !v.is_null());
         let config = make(
-            crate::shaped(self.wording.as_ref(), self.shapes.as_ref()).as_ref(),
+            crate::shaped(self.wording.as_ref(), self.shapes.as_ref(), &self.overlays).as_ref(),
             self.options.as_ref(),
             limits.as_ref(),
         )?;
@@ -815,7 +851,7 @@ impl ProseEditorHandle {
 
     fn set_wording(&mut self, wording: Option<SharedWording>) -> Result<(), JsError> {
         let config = make(
-            crate::shaped(wording.as_ref(), self.shapes.as_ref()).as_ref(),
+            crate::shaped(wording.as_ref(), self.shapes.as_ref(), &self.overlays).as_ref(),
             self.options.as_ref(),
             self.limits.as_ref(),
         )?;

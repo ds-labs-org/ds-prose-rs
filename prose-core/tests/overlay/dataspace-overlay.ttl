@@ -1,0 +1,15 @@
+@prefix prose: <https://ds-labs-org.github.io/ds-prose-rs/profile#> .
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix dx: <https://example.org/dataspace/> .
+
+dx:purpose prose:closed true ;
+    prose:operator odrl:eq, odrl:isAnyOf ;
+    prose:rightOperand dx:research, dx:marketing .
+
+dx:region prose:closed true ;
+    prose:rightOperand dx:eu, dx:us .
+
+dx:count prose:closed true ;
+    prose:datatype xsd:integer ;
+    prose:unit dx:people .

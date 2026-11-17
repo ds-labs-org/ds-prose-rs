@@ -5,7 +5,7 @@
 //! `lib.rs` exposes these through wasm-bindgen as `validate`, `rules`,
 //! `ProseValidator` and the `ProseHandle` methods; everything here is plain
 //! Rust and tested on the host.
-use prose_core::profile::{OdrlVocab, ProfileError, ProfileVocab, Wording};
+use prose_core::profile::{OdrlVocab, Overlay, ProfileError, ProfileVocab, Wording};
 use prose_core::shapes::ShapesGraph;
 use prose_core::validate::{
     Basis, Level, Options, RULES, RULESET, RuleId, RuleInfo, Tier, Validator,
@@ -205,6 +205,75 @@ pub fn with_shapes(base: Wording, shapes: Option<&ShapesGraph>) -> Wording {
         Some(s) => base.with_shapes(s.clone()),
         None => base,
     }
+}
+
+/// Reads `text` as an operator overlay (JSON-LD, or Turtle with the `turtle`
+/// feature). The error starts with `overlay: `, so a host can tell it from a
+/// profile's or the shapes'.
+pub fn overlay(text: &str) -> Result<Overlay, String> {
+    Overlay::parse(text).map_err(|e| format!("overlay: {}", overlay_error(&e)))
+}
+
+/// The message for an overlay that cannot be read; see [`shapes_error`].
+fn overlay_error(e: &prose_core::profile::OverlayError) -> String {
+    match e {
+        #[cfg(not(feature = "turtle"))]
+        prose_core::profile::OverlayError::UnsupportedFormat => format!(
+            "{e}; or use the build that reads Turtle, @ds-labs/prose-wasm/turtle (prose_wasm_turtle_bg.wasm)"
+        ),
+        _ => e.to_string(),
+    }
+}
+
+/// Reads every text as an overlay. The error names which one when there are
+/// several.
+pub fn overlays(texts: &[String]) -> Result<Vec<Overlay>, String> {
+    texts
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            overlay(t).map_err(|e| match texts.len() {
+                1 => e,
+                _ => e.replacen("overlay: ", &format!("overlay {}: ", i + 1), 1),
+            })
+        })
+        .collect()
+}
+
+/// What `setOverlays` returns, as the JSON text of a list with one entry per
+/// overlay: `terms` (how many terms it names) and `warnings` (what was not
+/// read, or cannot be used with the profiles in `wording`: a term no profile
+/// declares as a left operand is ignored).
+pub fn overlay_summaries_json(wording: &Wording, overlays: &[Overlay]) -> String {
+    let items: Vec<Value> = overlays
+        .iter()
+        .map(|o| {
+            json!({
+                "terms": o.terms().count(),
+                "warnings": wording.overlay_warnings(o),
+            })
+        })
+        .collect();
+    Value::Array(items).to_string()
+}
+
+/// `base` with `overlays` laid over it, in order.
+pub fn with_overlays(base: Wording, overlays: &[Overlay]) -> Wording {
+    overlays.iter().fold(base, |w, o| w.with_overlay(o.clone()))
+}
+
+/// [`validator`], with companion shapes and operator overlays, given as
+/// texts (none when `None`, or empty).
+pub fn validator_with(
+    texts: &[String],
+    shapes_text: Option<&str>,
+    overlay_texts: &[String],
+    options: Options,
+) -> Result<Validator, String> {
+    let shapes = shapes_text.map(shapes).transpose()?;
+    let overlays = overlays(overlay_texts)?;
+    let w = with_shapes(with_overlays(wording(texts)?, &overlays), shapes.as_ref());
+    Ok(Validator::new(Arc::new(w), options))
 }
 
 /// [`validator`], with the companion shapes in `shapes` (none when `None`).

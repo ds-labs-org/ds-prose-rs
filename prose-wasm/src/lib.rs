@@ -21,7 +21,7 @@
 pub mod editor;
 pub mod validation;
 pub use editor::ProseEditorHandle;
-use prose_core::profile::{ProfileError, ProfileVocab, Wording};
+use prose_core::profile::{Overlay, ProfileError, ProfileVocab, Wording};
 use prose_core::shapes::ShapesGraph;
 use prose_core::validate::{Options, Validator};
 use prose_yew::{OdrlProse, OdrlProseProps, SharedWording};
@@ -104,19 +104,20 @@ pub fn read_profile(text: Option<&str>) -> Result<Option<SharedWording>, Profile
     }
 }
 
-/// `wording` (the profiles) with the companion shapes laid over it; the
-/// profiles alone when there are no shapes.
+/// `wording` (the profiles) with the operator overlays laid over it, then the
+/// companion shapes (profile < overlay < shapes); the profiles alone when
+/// there are neither.
 pub(crate) fn shaped(
     wording: Option<&SharedWording>,
     shapes: Option<&ShapesGraph>,
+    overlays: &[Overlay],
 ) -> Option<SharedWording> {
-    match shapes {
-        None => wording.cloned(),
-        Some(s) => {
-            let base = wording.map_or_else(Wording::new, |w| (*w.0).clone());
-            Some(SharedWording::from(base.with_shapes(s.clone())))
-        }
+    if shapes.is_none() && overlays.is_empty() {
+        return wording.cloned();
     }
+    let base = wording.map_or_else(Wording::new, |w| (*w.0).clone());
+    let w = validation::with_overlays(base, overlays);
+    Some(SharedWording::from(validation::with_shapes(w, shapes)))
 }
 
 /// What `setProfile` returns for a loaded profile, as JSON text: `iri`,
@@ -166,6 +167,8 @@ pub struct ProseHandle {
     validator: Option<Validator>,
     // Set by `setShapes`; laid over the profiles whenever either changes.
     shapes: Option<ShapesGraph>,
+    // Set by `setOverlays`; laid over the profiles, under the shapes.
+    overlays: Vec<Overlay>,
 }
 
 #[wasm_bindgen]
@@ -186,6 +189,7 @@ impl ProseHandle {
             options: None,
             validator: None,
             shapes: None,
+            overlays: Vec::new(),
         }
     }
 
@@ -256,6 +260,34 @@ impl ProseHandle {
         Ok(summary)
     }
 
+    /// Load operator overlays (JSON-LD or Turtle text each), or none for `[]`:
+    /// annotation-only graphs of `prose:` hints about terms the loaded
+    /// profiles declare. They merge onto those terms and never add or relabel
+    /// one; the shapes, when loaded, win over them. A finding names
+    /// `"overlay"` as its source. Returns one summary per overlay as the JSON
+    /// text of a list (`OverlaySummary`). Throws when a text is not a
+    /// readable overlay (the message names which); the previous overlays then
+    /// stay. Kept when the profiles change.
+    #[wasm_bindgen(js_name = setOverlays)]
+    pub fn set_overlays(&mut self, texts: Vec<String>) -> Result<String, JsError> {
+        let overlays = validation::overlays(&texts).map_err(throw)?;
+        self.overlays = overlays;
+        let summary = self.overlay_summaries();
+        self.refresh();
+        self.render();
+        Ok(summary)
+    }
+
+    /// The overlays' summaries against the profiles loaded now.
+    fn overlay_summaries(&self) -> String {
+        let w = self
+            .wording
+            .as_ref()
+            .map_or_else(Wording::new, |w| (*w.0).clone());
+        let w = validation::with_overlays(w, &self.overlays);
+        validation::overlay_summaries_json(&w, &self.overlays)
+    }
+
     /// Turn validation on with `options` (see `ValidateOptions`; `{}` is
     /// strict mode), or off with `null`. While on, the rendering gains a
     /// section with the findings and the verdict, and `report()` returns
@@ -305,7 +337,7 @@ impl ProseHandle {
     /// Rebuilds the validator from the options and the profiles.
     fn refresh(&mut self) {
         self.validator = self.options.clone().map(|o| {
-            let w = shaped(self.wording.as_ref(), self.shapes.as_ref())
+            let w = shaped(self.wording.as_ref(), self.shapes.as_ref(), &self.overlays)
                 .map_or_else(Wording::new, |w| (*w.0).clone());
             Validator::new(Arc::new(w), o)
         });
@@ -316,7 +348,7 @@ impl ProseHandle {
             app.update(props(
                 &self.json,
                 self.class.clone(),
-                shaped(self.wording.as_ref(), self.shapes.as_ref()),
+                shaped(self.wording.as_ref(), self.shapes.as_ref(), &self.overlays),
                 self.validator.clone(),
             ));
         }
@@ -327,8 +359,9 @@ impl ProseHandle {
 /// texts, or `null`) and returns the report as JSON text
 /// (`ds-prose/validation-report@1`). Strict unless `options.strict` is
 /// `false`. `shapes` is the text of companion SHACL shapes (see
-/// `ProseHandle.setShapes`), if any. Needs no DOM. Throws on options,
-/// profiles or shapes it cannot read; a problem in the policy is never
+/// `ProseHandle.setShapes`), if any, and `overlays` the texts of operator
+/// overlays (see `ProseHandle.setOverlays`). Needs no DOM. Throws on
+/// options, profiles, shapes or overlays it cannot read; a problem in the policy is never
 /// thrown, it is a finding.
 #[wasm_bindgen]
 pub fn validate(
@@ -336,13 +369,20 @@ pub fn validate(
     #[wasm_bindgen(unchecked_param_type = "string | string[] | null")] profiles: JsValue,
     options: Option<ValidateOptionsArg>,
     shapes: Option<String>,
+    overlays: Option<Vec<String>>,
 ) -> Result<String, JsError> {
     let options = options_of(options.as_ref()).map_err(throw)?;
     let texts = match to_json(&profiles, "profiles").map_err(throw)? {
         Some(v) => validation::profile_list(&v).map_err(throw)?,
         None => Vec::new(),
     };
-    let v = validation::validator_with_shapes(&texts, shapes.as_deref(), options).map_err(throw)?;
+    let v = validation::validator_with(
+        &texts,
+        shapes.as_deref(),
+        &overlays.unwrap_or_default(),
+        options,
+    )
+    .map_err(throw)?;
     Ok(validation::validate_text(json, &v))
 }
 
@@ -357,8 +397,10 @@ pub fn rules() -> String {
 #[wasm_bindgen]
 pub struct ProseValidator {
     validator: Validator,
-    // What `setShapes` rebuilds the validator from.
+    // What `setShapes` and `setOverlays` rebuild the validator from.
     wording: Wording,
+    shapes: Option<ShapesGraph>,
+    overlays: Vec<Overlay>,
     options: Options,
 }
 
@@ -378,6 +420,8 @@ impl ProseValidator {
         Ok(ProseValidator {
             validator,
             wording,
+            shapes: None,
+            overlays: Vec::new(),
             options,
         })
     }
@@ -396,9 +440,34 @@ impl ProseValidator {
         let summary = shapes
             .as_ref()
             .map_or_else(|| "null".to_string(), validation::shapes_summary_json);
-        let wording = validation::with_shapes(self.wording.clone(), shapes.as_ref());
-        self.validator = Validator::new(Arc::new(wording), self.options.clone());
+        self.shapes = shapes;
+        self.rebuild();
         Ok(summary)
+    }
+
+    /// Loads operator overlays (JSON-LD or Turtle text each), or none for
+    /// `[]`; see `ProseHandle.setOverlays`. Returns the summaries as the JSON
+    /// text of a list. Throws when a text is not a readable overlay; the
+    /// previous overlays then stay.
+    #[wasm_bindgen(js_name = setOverlays)]
+    pub fn set_overlays(&mut self, texts: Vec<String>) -> Result<String, JsError> {
+        let overlays = validation::overlays(&texts).map_err(throw)?;
+        let summary = validation::overlay_summaries_json(
+            &validation::with_overlays(self.wording.clone(), &overlays),
+            &overlays,
+        );
+        self.overlays = overlays;
+        self.rebuild();
+        Ok(summary)
+    }
+
+    /// The validator for the profiles with the overlays, then the shapes.
+    fn rebuild(&mut self) {
+        let wording = validation::with_shapes(
+            validation::with_overlays(self.wording.clone(), &self.overlays),
+            self.shapes.as_ref(),
+        );
+        self.validator = Validator::new(Arc::new(wording), self.options.clone());
     }
 
     /// The report for the policy `json`, as JSON text.

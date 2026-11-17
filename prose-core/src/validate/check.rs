@@ -26,11 +26,11 @@ fn odrl_owned(iri: &str, vocab: OdrlVocab) -> bool {
 }
 const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
 
-/// "the profile allows" or "the shapes allow": `verb` is the singular form,
-/// as the profile takes it.
+/// "the profile allows", "the overlay allows" or "the shapes allow": `verb`
+/// is the singular form, as the profile takes it.
 fn the(source: HintSource, verb: &str) -> String {
     match source {
-        HintSource::Profile => format!("{} {verb}", source.noun()),
+        HintSource::Profile | HintSource::Overlay => format!("{} {verb}", source.noun()),
         _ => {
             let (first, rest) = verb.split_once(' ').unwrap_or((verb, ""));
             let plural = first.strip_suffix('s').unwrap_or(first);

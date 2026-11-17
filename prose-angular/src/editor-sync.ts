@@ -1,4 +1,4 @@
-import type { EditLimits, OutOfScopeMode, RemovedSection, ShapesSummary, TermInput, ValidateOptions, ValidationReport } from '@ds-labs/prose-wasm';
+import type { EditLimits, OutOfScopeMode, OverlaySummary, RemovedSection, ShapesSummary, TermInput, ValidateOptions, ValidationReport } from '@ds-labs/prose-wasm';
 import type { ProfileSummary } from './profile-sync';
 
 // No value imports from the sibling modules: `npm test` runs this file under
@@ -32,6 +32,8 @@ export interface EditorHandleLike {
   update(json: string, cls?: string | null): void;
   setProfile(text?: string | null): string;
   setProfiles(texts: string[]): string;
+  /** Operator overlays (one text each) or none (`[]`); returns the summaries as JSON text, one per overlay. */
+  setOverlays(texts: string[]): string;
   /** Companion SHACL shapes (text) or none; returns the summary as JSON text, `"null"` after clearing. */
   setShapes(text: string | null): string;
   setLimits(limits: EditLimits | null): void;
@@ -61,6 +63,8 @@ export interface EditorInputs {
   texts: string[] | null;
   /** The text of companion SHACL shapes, or none; blank text is none. */
   shapes?: string | null;
+  /** The texts of operator overlays, or none; blank texts are dropped. */
+  overlays?: readonly string[] | null;
   options: ValidateOptions | null;
   limits: EditLimits | null;
   /** How the term slots take their value; `'free'` (the default) when left out. */
@@ -74,10 +78,14 @@ export interface EditorInputs {
 /** What one `apply` found, for the component to emit. */
 export interface EditorOutcome {
   summaries?: ProfileSummary[];
+  /** What the overlays of this `apply` hold, one summary each, for the component to emit; absent when nothing changed or they were cleared. */
+  overlaysSummary?: OverlaySummary[];
   /** What the shapes of this `apply` hold, for the component to emit; absent when nothing changed or they were cleared. */
   shapesSummary?: ShapesSummary;
   jsonError?: unknown;
   profileError?: unknown;
+  /** The overlays could not be read; the previous overlays stay. */
+  overlaysError?: unknown;
   /** The shapes could not be read; the previous shapes stay. */
   shapesError?: unknown;
   validationError?: unknown;
@@ -109,6 +117,7 @@ export class EditorSession<H extends EditorHandleLike = EditorHandleLike> {
   private readonly profilesChanged = tracker<string[]>();
   private readonly optionsChanged = tracker<ValidateOptions>();
   private readonly limitsChanged = tracker<EditLimits>();
+  private readonly overlaysChanged = tracker<string[]>();
   private readonly shapesChanged = tracker<string>();
   /** The handle starts with `'show'`: `setOutOfScope` is called only for a change from it. */
   private outOfScope: OutOfScopeMode = 'show';
@@ -176,8 +185,18 @@ export class EditorSession<H extends EditorHandleLike = EditorHandleLike> {
         out.profileError = error;
       }
     }
-    // The shapes follow the profiles they add hints to (the order does not
-    // matter to the wasm), and come before the validation that reads them.
+    // The overlays and the shapes follow the profiles they add hints to (the
+    // order does not matter to the wasm; the shapes win over an overlay), and
+    // come before the validation that reads them.
+    const overlays = inputs.overlays == null ? [] : inputs.overlays.filter((t) => t.trim() !== '');
+    if (this.overlaysChanged(overlays.length > 0 ? overlays : null)) {
+      try {
+        const summary = JSON.parse(handle.setOverlays(overlays)) as OverlaySummary[];
+        if (summary.length > 0) out.overlaysSummary = summary;
+      } catch (error) {
+        out.overlaysError = error;
+      }
+    }
     const shapes = inputs.shapes == null || inputs.shapes.trim() === '' ? null : inputs.shapes;
     if (this.shapesChanged(shapes)) {
       try {

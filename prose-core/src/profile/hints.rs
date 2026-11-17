@@ -1,7 +1,7 @@
 //! Layering hints. A left operand's [`OperandHints`] start as what the
-//! loaded profile's `prose:` triples say; each further source (today the
-//! companion shapes, later an operator overlay or a host's runtime value
-//! source) adds a patch over them. A patch holds only the facets its source
+//! loaded profile's `prose:` triples say; each further source (the operator
+//! overlay, then the companion shapes; later a host's runtime value source)
+//! adds a patch over them, so the precedence is profile < overlay < shapes. A patch holds only the facets its source
 //! gives (an empty list or `None` is "not given"), and carries its
 //! provenance, so a finding can name the source that closed the slot.
 use super::{HintSource, OperandHints};
@@ -64,5 +64,44 @@ pub(crate) fn layer(base: &OperandHints, patch: &OperandHints, source: HintSourc
         out.sources.lexical = source;
     }
     out.closed = true;
+    out
+}
+
+/// `base` with an operator overlay's patch laid over it. The overlay's
+/// facets replace the base's for that facet alone, recorded as
+/// [`HintSource::Overlay`]. What the overlay says about closing is its own:
+/// with `prose:closed true` it closes the left operand as [`layer`] does;
+/// without it the facets are suggestions and the base stays as open (or as
+/// closed) as it was. `prose:plural` only ever switches the plural on.
+pub(crate) fn layer_overlay(base: &OperandHints, patch: &OperandHints) -> OperandHints {
+    let mut out = if patch.closed {
+        let mut closed = layer(base, patch, HintSource::Overlay);
+        // An overlay that closes without giving a facet closes the base as it is.
+        closed.closed = true;
+        closed
+    } else if gives_any(patch) {
+        let mut out = base.clone();
+        if !patch.operators.is_empty() {
+            out.operators = patch.operators.clone();
+            out.sources.operators = HintSource::Overlay;
+        }
+        if !patch.values.is_empty() || !patch.value_tree.is_empty() {
+            out.values = patch.values.clone();
+            out.value_tree = patch.value_tree.clone();
+            out.sources.values = HintSource::Overlay;
+        }
+        if !patch.units.is_empty() {
+            out.units = patch.units.clone();
+            out.sources.units = HintSource::Overlay;
+        }
+        if patch.datatype.is_some() {
+            out.datatype = patch.datatype.clone();
+            out.sources.datatype = HintSource::Overlay;
+        }
+        out
+    } else {
+        base.clone()
+    };
+    out.plural |= patch.plural;
     out
 }
