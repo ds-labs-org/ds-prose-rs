@@ -74,14 +74,14 @@ This is not a SHACL engine. Only this subset is read:
 | In a shape | What it gives |
 |---|---|
 | A property shape on `odrl:rightOperand` in a constraint shape selected by `odrl:leftOperand sh:hasValue X`, directly or through `sh:or` or `sh:qualifiedValueShape` | Hints for the right operand of left operand X. |
-| `sh:in` | The closed values. The operand becomes a dropdown with `termInput="select"`, and any other value is `prose.value-not-allowed`. |
+| `sh:in` | The closed values: IRIs, and literals (text or numbers; a literal matches on its text, a number by value, whatever its datatype). The operand becomes a dropdown with `termInput="select"` when the list holds only IRIs, and any other value is `prose.value-not-allowed`. A list with a literal stays a free-text slot, which the validation checks. |
 | `sh:class`, `sh:node` | The IRIs of that class in the profile, with the terms narrower by `skos:broader`. |
 | `sh:datatype` | The datatype of the value. |
 | `sh:pattern`, `sh:minInclusive`, `sh:maxInclusive` | Lexical checks on the value. The pattern is a small regular expression subset. |
-| `sh:in` on `odrl:operator` or `odrl:unit` there | The operators or units that suit X. |
-| `sh:in` on `odrl:action` or `odrl:leftOperand` | Closes the action or left operand list for the whole policy, as `profile.unknown-term` under strict validation. |
+| `sh:in` on `odrl:operator` or `odrl:unit` there | The operators or units that suit X (IRIs only). |
+| `sh:in` on `odrl:action` or `odrl:leftOperand` | Closes the action or left operand list for the whole policy (IRIs only), as `profile.unknown-term` under strict validation. Like every unknown term, this binds in strict mode only: the editor narrows its action and left operand selects to these lists only while strict validation is on, and advisory validation does not refuse a term outside them. |
 
-Everything else is ignored, and each thing ignored is a line in `warnings` of `shapesLoaded`: other `sh:` properties, property paths that are not read, `sh:not` and `sh:xone`, literal values in `sh:in`, and a shape that names no left operand. Shapes only add hints to terms the loaded profiles declare. They never rename a term, so the sentences keep the profile's labels.
+Everything else is ignored, and each thing ignored is a line in `warnings` of `shapesLoaded`. That covers other `sh:` properties, property paths that are not read, and `sh:not` and `sh:xone`. It also covers literal values in the `sh:in` of an operator, a unit, an action or a left operand list, and a shape that names no left operand. Shapes only add hints to terms the loaded profiles declare. They never rename a term, so the sentences keep the profile's labels.
 
 A finding that a shape caused has `expected.source` set to `"shapes"` and says "the shapes allow". Findings from the profile say "the profile allows" and carry no `source`. Where both give hints, a shape replaces the profile's for that facet only (operators, values, units, datatype), and the other facets stay the profile's.
 

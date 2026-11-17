@@ -720,7 +720,9 @@ Changed in 0.7.0: the npm packages have an edit mode. `@ds-labs/prose-wasm`
 adds `ProseEditorHandle` and `@ds-labs/prose-angular` adds
 `<ds-odrl-prose-editor>`, both over `OdrlProseView` in Edit mode. A host can
 cap any list with `setLimits` / `[limits]`, including the new `policyUid`
-limit (`EditRules.policy_uid`). In `OdrlProseView`, a list capped at 0 that is
+limit (`EditRules.policy_uid`; a policy's `@id` is its uid, as ODRL's context maps
+`uid` to `@id`, so the scope drops both, while a rule's `@id` and the bare key `id`
+are not read as one by the scope). In `OdrlProseView`, a list capped at 0 that is
 empty and inherits nothing is not shown, and an empty problems panel renders
 nothing. The "a policy has no permission, prohibition or obligation" note is
 recomputed after each edit. The edit code is linked into `prose_wasm_bg.wasm`,
@@ -877,13 +879,18 @@ This is not a SHACL engine. Only this subset is read:
 
 - a property shape on `odrl:rightOperand` in a constraint shape selected by
   `odrl:leftOperand sh:hasValue X`, directly or through `sh:or` or
-  `sh:qualifiedValueShape`: `sh:in` (closed values), `sh:class` and `sh:node`
+  `sh:qualifiedValueShape`: `sh:in` (closed values: IRIs, and literals, which
+  match on their text, a number by value; `ConstraintShape::literals` and
+  `OperandHints::literal_values`), `sh:class` and `sh:node`
   (the IRIs of that class in the profile, with `skos:broader` descendants),
   `sh:datatype`, and `sh:pattern`, `sh:minInclusive`, `sh:maxInclusive` (lexical
   checks; the pattern is a small regular expression subset);
-- `sh:in` on `odrl:operator` and `odrl:unit` there;
+- `sh:in` on `odrl:operator` and `odrl:unit` there (IRIs only: a literal ignores the list,
+  with a warning);
 - `sh:in` on `odrl:action` or `odrl:leftOperand`, which closes those lists for the
-  whole policy (`profile.unknown-term` under strict validation).
+  whole policy (`profile.unknown-term` under strict validation). Like any unknown
+  term this binds in strict mode only, and the editor narrows its action and left
+  operand selects to the lists only while strict validation is on.
 
 Everything else is ignored, and `ShapesGraph::warnings()` says what. Shapes only
 add hints to terms the loaded profiles declare and never relabel a term. The hints
@@ -917,7 +924,17 @@ patterns, bounds and the closed lists of actions and left operands. Use shapes w
 connector already checks SHACL, an overlay when it does not, and both when you have both
 (see the site's "Running in a dataspace" page). On npm: `setOverlays(texts)` on the wasm
 handles (`[]` clears), `validate(..., shapes, overlays)`, and `[overlays]` on the Angular
-components, with `overlaysLoaded` and `overlaysError`.
+components, with `overlaysLoaded` and `overlaysError`. An overlay's `warnings` name the
+terms no loaded profile declares, so they depend on the profiles: `overlaySummaries()` on
+`ProseHandle` and `ProseEditorHandle` recomputes them, and the Angular components emit
+`overlaysLoaded` again when only the profiles change.
+
+Changed in the shapes and overlay release: `Labels` gained `allowed_group_overlay`,
+`not_allowed_group_overlay`, `allowed_group_shapes`, `not_allowed_group_shapes` and
+`suggested_operators_overlay`, so a struct literal of it needs them (use `..Labels::default()`).
+The operator select's group headings name who gave the list: "Allowed by the profile",
+"... by the overlay", "... by the shapes". `OperandHints` and `ConstraintShape` (both
+`#[non_exhaustive]`) gained `literal_values` and `literals`.
 
 ### Using it from Yew
 

@@ -645,6 +645,22 @@ impl ProseEditorHandle {
         Ok(summary)
     }
 
+    /// The summaries of the loaded overlays, as `setOverlays` returns them,
+    /// recomputed against the profiles loaded now (their `warnings` name the
+    /// terms no loaded profile declares, so they change with the profiles).
+    /// `"[]"` without overlays.
+    #[wasm_bindgen(js_name = overlaySummaries)]
+    pub fn overlay_summaries(&self) -> String {
+        let base = self
+            .wording
+            .as_ref()
+            .map_or_else(Wording::new, |w| (*w.0).clone());
+        validation::overlay_summaries_json(
+            &validation::with_overlays(base, &self.overlays),
+            &self.overlays,
+        )
+    }
+
     /// Validation on with `options` (see `ValidateOptions`; `{}` is strict
     /// mode), or off with `null`. While on, the editor shows inline issue
     /// markers and a problems panel with fix buttons, and `onChange`

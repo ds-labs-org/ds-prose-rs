@@ -175,8 +175,9 @@ impl Wording {
                 patch.pattern = Some(src.clone());
                 patch.pattern_flags = flags.clone();
             }
-            if !shape.values.is_empty() {
+            if !shape.values.is_empty() || !shape.literals.is_empty() {
                 // `sh:in` is exactly its list: no descendants.
+                patch.literal_values = shape.literals.clone();
                 patch.values = shape.values.clone();
                 patch.value_tree = shape.values.iter().map(|v| (v.clone(), 0)).collect();
             } else if !shape.classes.is_empty() {

@@ -34,7 +34,7 @@ Validation is covered on [its own page](/angular/validation/).
 | `loadFailed` | `unknown` | The wasm module cannot be loaded. The next input change tries again. |
 | `profileLoaded` | `ProfileSummary` | Once per profile read, after the `profile` or `profiles` input changed. |
 | `profileError` | `unknown` | A profile text cannot be read. The previous profile stays. |
-| `overlaysLoaded` | `OverlaySummary[]` | After the `overlays` input changed to overlays that were read: one summary per overlay, with the `terms` it names and the `warnings` for what was not used. |
+| `overlaysLoaded` | `OverlaySummary[]` | After the `overlays` input changed to overlays that were read, and again when only the profiles changed (the `warnings` depend on them): one summary per overlay, with the `terms` it names and the `warnings` for what was not used. |
 | `overlaysError` | `unknown` | An overlay text cannot be read. The previous overlays stay. |
 | `shapesLoaded` | `ShapesSummary` | After the `shapes` input changed to shapes that were read. `warnings` lists what was not read. |
 | `shapesError` | `unknown` | The shapes text cannot be read. The previous shapes stay. |
@@ -85,7 +85,7 @@ The declared type is writable, because the source declares `readonly report = si
 | `loadFailed` | `unknown` | The wasm module cannot be loaded. The next input change tries again. |
 | `profileLoaded` | `ProfileSummary` | Once per profile read, after the `profile` or `profiles` input changed. |
 | `profileError` | `unknown` | A profile text cannot be read. The previous profile stays. |
-| `overlaysLoaded` | `OverlaySummary[]` | After the `overlays` input changed to overlays that were read: one summary per overlay, with the `terms` it names and the `warnings` for what was not used. |
+| `overlaysLoaded` | `OverlaySummary[]` | After the `overlays` input changed to overlays that were read, and again when only the profiles changed (the `warnings` depend on them): one summary per overlay, with the `terms` it names and the `warnings` for what was not used. |
 | `overlaysError` | `unknown` | An overlay text cannot be read. The previous overlays stay. |
 | `shapesLoaded` | `ShapesSummary` | After the `shapes` input changed to shapes that were read. `warnings` lists what was not read. |
 | `shapesError` | `unknown` | The shapes text cannot be read. The previous shapes stay. |
@@ -98,7 +98,7 @@ The declared type is writable, because the source declares `readonly report = si
 |---|---|---|---|
 | `report` | `WritableSignal<ValidationReport \| null>` | `null` | The latest report. `null` while validation is off. Read it, do not set it. |
 
-`EditLimits` maps a list name (`policies`, `permission`, `prohibition`, `obligation`, `duty`, `remedy`, `consequence`, `policyAssigner`, `policyAssignee`, `policyTarget`, `policyAction`, `policyUid`, `ruleAssigner`, `ruleAssignee`, `ruleTarget`, `ruleAction`, `actionRefinement`, `entityRefinement`, `constraints`, `logicalChildren`, `logicalDepth`, `rightOperandValues`, `profile`, `inheritFrom`) to `{ min?: number; max?: number | null }`. `logicalDepth` is not a list: its `max` is how deep `and`, `or` and `xone` groups may nest, and the editor hides the buttons that would go past it. A host that caps `policyUid` at 0 (the identifier lives elsewhere) should also set the `odrl.policy-uid` rule to `"off"` in `validation.rules`: the rule would otherwise report a policy without an identifier that nobody can set.
+`EditLimits` maps a list name (`policies`, `permission`, `prohibition`, `obligation`, `duty`, `remedy`, `consequence`, `policyAssigner`, `policyAssignee`, `policyTarget`, `policyAction`, `policyUid`, `ruleAssigner`, `ruleAssignee`, `ruleTarget`, `ruleAction`, `actionRefinement`, `entityRefinement`, `constraints`, `logicalChildren`, `logicalDepth`, `rightOperandValues`, `profile`, `inheritFrom`) to `{ min?: number; max?: number | null }`. `logicalDepth` is not a list: its `max` is how deep `and`, `or` and `xone` groups may nest, and the editor hides the buttons that would go past it. A host that caps `policyUid` at 0 (the identifier lives elsewhere) should also set the `odrl.policy-uid` rule to `"off"` in `validation.rules`: the rule would otherwise report a policy without an identifier that nobody can set. A policy's `@id` counts as its identifier, as in ODRL's context, and a rule's does not.
 
 The wasm work runs outside the zone and `jsonChange` and `validationChange` are emitted inside it, as for `ds-odrl-prose`. When the wasm cannot be loaded, the host shows a `p.prose-error` with `role="alert"`: "The ODRL prose editor could not be loaded (the URL)."
 

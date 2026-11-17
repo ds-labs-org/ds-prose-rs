@@ -129,7 +129,7 @@ impl<'t> Graph<'t> {
 /// The items of every `sh:in` of a shape.
 struct Items {
     iris: Vec<String>,
-    literals: bool,
+    literals: Vec<String>,
     /// More values than the reader keeps: a closed list cut short would
     /// close wrongly.
     cut: bool,
@@ -142,7 +142,7 @@ fn items(g: &Graph<'_>, shape: &str, limits: &ProfileLimits) -> Option<Items> {
     }
     let mut out = Items {
         iris: Vec::new(),
-        literals: false,
+        literals: Vec::new(),
         cut: false,
     };
     // A JSON-LD `@list` is read as several values of the property, a Turtle
@@ -158,7 +158,11 @@ fn items(g: &Graph<'_>, shape: &str, limits: &ProfileLimits) -> Option<Items> {
             }
         }
         Object::Iri(_) => {}
-        Object::Literal { .. } => out.literals = true,
+        Object::Literal { value, .. } => {
+            if !out.literals.contains(value) {
+                out.literals.push(value.clone());
+            }
+        }
     };
     for o in objects {
         let Object::Iri(head) = o else {
@@ -458,8 +462,16 @@ impl<'t> Reader<'t> {
     /// The IRIs of the `sh:in` of `p`, or `None` (with a warning when there
     /// was a list that cannot be used).
     fn closed_list(&mut self, p: &str, here: &str) -> Option<Vec<String>> {
+        let items = self.list(p, here, false)?;
+        Some(items.iris)
+    }
+
+    /// As [`Reader::closed_list`], with the literal members kept when
+    /// `literals` (the right operand's list); otherwise a literal ignores
+    /// the whole list.
+    fn list(&mut self, p: &str, here: &str, literals: bool) -> Option<Items> {
         let items = items(&self.g, p, self.limits)?;
-        if items.literals {
+        if !literals && !items.literals.is_empty() {
             self.notes.warn(format!(
                 "ignored the sh:in of {here}: it lists a literal, and only IRIs are read"
             ));
@@ -472,16 +484,16 @@ impl<'t> Reader<'t> {
             ));
             return None;
         }
-        if items.iris.is_empty() {
+        if items.iris.is_empty() && items.literals.is_empty() {
             self.notes
                 .warn(format!("ignored the empty sh:in of {here}"));
             return None;
         }
-        Some(items.iris)
+        Some(items)
     }
 
     fn right_operand(&mut self, p: &str, left: &str, here: &str) {
-        let list = self.closed_list(p, here);
+        let list = self.list(p, here, true);
         let mut classes: Vec<String> = Vec::new();
         for name in ["class", "node"] {
             union(
@@ -522,7 +534,8 @@ impl<'t> Reader<'t> {
         let mut conflicts: Vec<&str> = Vec::new();
         let c = self.constraint(left);
         if let Some(list) = list {
-            union(&mut c.values, list);
+            union(&mut c.values, list.iris);
+            union(&mut c.literals, list.literals);
         }
         union(&mut c.classes, classes);
         // Alternatives that disagree on a single value cannot both be read:

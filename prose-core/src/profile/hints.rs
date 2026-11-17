@@ -11,6 +11,7 @@ pub(crate) fn gives_any(patch: &OperandHints) -> bool {
     !patch.operators.is_empty()
         || !patch.values.is_empty()
         || !patch.value_tree.is_empty()
+        || !patch.literal_values.is_empty()
         || !patch.units.is_empty()
         || patch.datatype.is_some()
         || patch.pattern.is_some()
@@ -36,6 +37,7 @@ pub(crate) fn layer(base: &OperandHints, patch: &OperandHints, source: HintSourc
         out.operators.clear();
         out.values.clear();
         out.value_tree.clear();
+        out.literal_values.clear();
         out.units.clear();
         out.datatype = None;
     }
@@ -43,9 +45,11 @@ pub(crate) fn layer(base: &OperandHints, patch: &OperandHints, source: HintSourc
         out.operators = patch.operators.clone();
         out.sources.operators = source;
     }
-    if !patch.values.is_empty() || !patch.value_tree.is_empty() {
+    if !patch.values.is_empty() || !patch.value_tree.is_empty() || !patch.literal_values.is_empty()
+    {
         out.values = patch.values.clone();
         out.value_tree = patch.value_tree.clone();
+        out.literal_values = patch.literal_values.clone();
         out.sources.values = source;
     }
     if !patch.units.is_empty() {

@@ -234,6 +234,7 @@ Keep the visible text of a button contained in its accessible name. A change of 
 | `from_profile` | `From {profile}` | Profiles and glossary |
 | `deprecated` | `Deprecated in the profile` | Profiles and glossary |
 | `suggested_operators` | `Suggested by the profile` | Profiles and glossary |
+| `suggested_operators_overlay` | `Suggested by the overlay` | Operators an overlay suggests |
 | `other_operators` | `Other operators` | Profiles and glossary |
 | `profile_values` | `Profile values(not specific to this operand)` | Profiles and glossary |
 | `datatype_placeholders` | a list of six pairs: integer, decimal, boolean, date, dateTime, duration | Profiles and glossary |
@@ -243,6 +244,10 @@ Keep the visible text of a button contained in its accessible name. A change of 
 | `kept_empty` | `"{typed}" is not in the profile;the field stays empty` | Strict validation |
 | `allowed_group` | `Allowed by the profile` | Strict validation |
 | `not_allowed_group` | `Not allowed by the profile` | Strict validation |
+| `allowed_group_overlay` | `Allowed by the overlay` | Strict validation, operators the overlay gave |
+| `not_allowed_group_overlay` | `Not allowed by the overlay` | Strict validation, operators the overlay gave |
+| `allowed_group_shapes` | `Allowed by the shapes` | Strict validation, operators the shapes gave |
+| `not_allowed_group_shapes` | `Not allowed by the shapes` | Strict validation, operators the shapes gave |
 | `not_allowed_option` | `{label}(not allowed)` | Strict validation |
 | `not_allowed_term` | `"{typed}" is not an allowed {field} in {profile}.` | Strict validation |
 | `did_you_mean` | `Did you mean {suggestion}?` | Strict validation |

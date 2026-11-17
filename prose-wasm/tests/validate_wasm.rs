@@ -445,3 +445,26 @@ fn validate_takes_overlays_as_its_last_argument() {
         .is_err()
     );
 }
+
+#[wasm_bindgen_test]
+async fn overlay_summaries_are_recomputed_when_the_profiles_change() {
+    let (_c, mut h) = mount(DX_POLICY).await;
+    let warnings = |h: &ProseHandle| -> Value {
+        serde_json::from_str::<Value>(&h.overlay_summaries()).unwrap()[0]["warnings"].clone()
+    };
+    assert_eq!(h.overlay_summaries(), "[]");
+    // No profile yet: every term the overlay names is undeclared.
+    let at_load: Value =
+        serde_json::from_str(&h.set_overlays(overlays(&[DX_OVERLAY])).unwrap()).unwrap();
+    assert!(
+        !at_load[0]["warnings"].as_array().unwrap().is_empty(),
+        "{at_load}"
+    );
+    assert_eq!(warnings(&h), at_load[0]["warnings"]);
+    // The profile declares them: the stale warnings are gone.
+    h.set_profiles(list(&[DX_PROFILE])).unwrap();
+    assert_eq!(warnings(&h), serde_json::json!([]));
+    // And back.
+    h.set_profiles(list(&[])).unwrap();
+    assert_eq!(warnings(&h), at_load[0]["warnings"]);
+}

@@ -45,6 +45,7 @@ function fake(bad = new Set(), scope = {}) {
         if (t.includes('bad overlay')) throw new Error('not an overlay');
         return JSON.stringify(t.map(() => ({ terms: 3, warnings: ['ignored <x>'] })));
       },
+      overlaySummaries: () => (calls.push(['overlaySummaries']), JSON.stringify([{ terms: 3, warnings: ['recomputed'] }])),
       setRefuseTerms: (on) => calls.push(['setRefuseTerms', on]),
       setTermInput: (m) => {
         calls.push(['setTermInput', m]);
@@ -493,6 +494,24 @@ test('overlays: handed over once, after the profiles and before the shapes, and 
   const again = s.apply(inputs({ texts: ['p'], overlays: ['O'], shapes: 'S', options: { strict: true } }), f.mount);
   assert.deepEqual(names(f.calls), ['report']);
   assert.equal(again.overlaysSummary, undefined);
+});
+
+test('overlays: new profiles recompute the summaries, since their warnings name terms the profiles do not declare', () => {
+  const s = new EditorSession();
+  const f = fake();
+  s.apply(inputs({ texts: ['p'], overlays: ['O'] }), f.mount);
+  f.calls.length = 0;
+  // Only the profiles change: the overlays are not handed over again, their summaries are read again.
+  const out = s.apply(inputs({ texts: ['q'], overlays: ['O'] }), f.mount);
+  assert.ok(!names(f.calls).includes('setOverlays'));
+  assert.ok(names(f.calls).includes('overlaySummaries'));
+  assert.deepEqual(out.overlaysSummary, [{ terms: 3, warnings: ['recomputed'] }]);
+  // Without overlays nothing is asked.
+  const s2 = new EditorSession();
+  const f2 = fake();
+  s2.apply(inputs({ texts: ['p'] }), f2.mount);
+  s2.apply(inputs({ texts: ['q'] }), f2.mount);
+  assert.ok(!names(f2.calls).includes('overlaySummaries'));
 });
 
 test('overlays: blank texts are dropped; none (null, undefined, [], blank) on a fresh mount needs no call; going back to none clears them', () => {

@@ -827,3 +827,42 @@ async fn unreadable_overlays_throw_and_keep_the_previous() {
         );
     }
 }
+
+#[wasm_bindgen_test]
+async fn overlay_summaries_are_recomputed_when_the_profile_changes() {
+    let ghost = r#"{"@context":{"prose":"https://ds-labs-org.github.io/ds-prose-rs/profile#"},"@id":"https://example.org/odrl/profile/research/fineTune","prose:closed":true}"#;
+    let (_c, mut h, _calls) = mount(ONE).await;
+    assert_eq!(h.overlay_summaries(), "[]");
+    let at_load = h.set_overlays(vec![ghost.to_string()]).unwrap();
+    assert!(at_load.contains("no loaded profile declares"), "{at_load}");
+    assert_eq!(h.overlay_summaries(), at_load);
+    // The research profile declares fineTune as an action, not a left
+    // operand: the warning changes with the profile.
+    h.set_profile(Some(RESEARCH.to_string())).unwrap();
+    let after = h.overlay_summaries();
+    assert_ne!(after, at_load);
+    assert!(after.contains("not a left operand"), "{after}");
+    assert!(!after.contains("no loaded profile declares"), "{after}");
+}
+
+#[wasm_bindgen_test]
+async fn with_refuse_terms_a_term_the_closed_profile_does_not_allow_is_not_committed() {
+    let (c, mut h, calls) = mount(FINE).await;
+    h.set_profile(Some(CLOSED.to_string())).expect("profile");
+    h.set_validation(js("{}")).expect("validation");
+    h.set_refuse_terms(true);
+    settle().await;
+    let action = "[data-slot=\"policy[0].permission[0].action[0]#name\"]";
+    // Not in the profile: nothing is sent and the document is as it was.
+    type_into(&c, action, "ex:nonsense").await;
+    assert!(
+        calls.borrow().is_empty(),
+        "a refused term is not an edit: {:?}",
+        calls.borrow()
+    );
+    assert!(!h.json().contains("ex:nonsense"), "{}", h.json());
+    // One it allows is committed.
+    type_into(&c, action, "ex:train").await;
+    assert_eq!(calls.borrow().len(), 1, "{}", c.inner_html());
+    assert!(calls.borrow()[0].0.contains("ex:train"));
+}

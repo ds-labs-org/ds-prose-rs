@@ -238,3 +238,30 @@ fn a_min_above_zero_or_no_max_is_not_a_scope() {
     });
     assert!(out_of_scope(&doc(), &r).is_empty());
 }
+
+#[test]
+fn a_policys_at_id_is_its_uid_since_odrls_context_maps_uid_to_it() {
+    let r = rules(|r| r.policy_uid = Limit::NONE);
+    let v = json!({
+        "@context": "http://www.w3.org/ns/odrl.jsonld",
+        "@type": "Set",
+        "@id": "urn:p:1",
+        "permission": [{ "@id": "urn:rule:1", "target": "urn:t", "action": "use" }]
+    });
+    // The policy's @id goes; a rule's @id is not a policy uid and stays.
+    assert_eq!(paths(&v, &r), ["@id"]);
+    let s = stripped(v, &r);
+    assert_eq!(
+        s,
+        json!({
+            "@context": "http://www.w3.org/ns/odrl.jsonld",
+            "@type": "Set",
+            "permission": [{ "@id": "urn:rule:1", "target": "urn:t", "action": "use" }]
+        })
+    );
+    assert!(out_of_scope(&s, &r).is_empty());
+    // Under the default limit it is in scope; a @graph wrapper's @id is the graph's.
+    assert!(out_of_scope(&doc(), &EditRules::default()).is_empty());
+    let g = json!({"@id": "urn:graph", "@graph": [{"@type": "Set", "@id": "urn:p:2"}]});
+    assert_eq!(paths(&g, &r), ["@graph[0].@id"]);
+}

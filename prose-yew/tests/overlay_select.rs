@@ -135,3 +135,40 @@ async fn a_stored_value_outside_the_overlay_list_stays_selected_and_noted() {
         "{right}"
     );
 }
+
+const OPERATOR: &str = "policy[0].permission[0].constraint[0]#operator";
+
+#[tokio::test]
+async fn the_operator_groups_name_the_overlay_when_it_gave_the_list() {
+    let html = ssr(doc(), config(true, true)).await;
+    let op = element(&html, OPERATOR);
+    assert!(
+        op.contains("<optgroup label=\"Allowed by the overlay\">"),
+        "{op}"
+    );
+    assert!(
+        op.contains("<optgroup label=\"Not allowed by the overlay\" disabled"),
+        "{op}"
+    );
+    assert!(!op.contains("by the profile"), "{op}");
+}
+
+#[tokio::test]
+async fn operators_an_open_overlay_only_suggests_are_grouped_as_the_overlay_suggests() {
+    let overlay = r#"{
+      "@context": {"prose": "https://ds-labs-org.github.io/ds-prose-rs/profile#",
+                   "odrl": "http://www.w3.org/ns/odrl/2/", "dx": "https://example.org/dataspace/"},
+      "@graph": [{"@id": "dx:purpose", "prose:operator": [{"@id": "odrl:eq"}]}]
+    }"#;
+    let w = Wording::new()
+        .with_profile(ProfileVocab::parse(&file("dataspace-profile.jsonld")).unwrap())
+        .with_overlay(Overlay::parse(overlay).unwrap());
+    let c = EditConfig::default().with_wording(Rc::new(w));
+    let html = ssr(doc(), c).await;
+    let op = element(&html, OPERATOR);
+    assert!(
+        op.contains("<optgroup label=\"Suggested by the overlay\">"),
+        "{op}"
+    );
+    assert!(!op.contains("Suggested by the profile"), "{op}");
+}

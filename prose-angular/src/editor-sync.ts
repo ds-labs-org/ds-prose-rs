@@ -34,6 +34,8 @@ export interface EditorHandleLike {
   setProfiles(texts: string[]): string;
   /** Operator overlays (one text each) or none (`[]`); returns the summaries as JSON text, one per overlay. */
   setOverlays(texts: string[]): string;
+  /** The loaded overlays' summaries as JSON text, recomputed against the profiles loaded now. */
+  overlaySummaries(): string;
   /** Companion SHACL shapes (text) or none; returns the summary as JSON text, `"null"` after clearing. */
   setShapes(text: string | null): string;
   setLimits(limits: EditLimits | null): void;
@@ -118,6 +120,8 @@ export class EditorSession<H extends EditorHandleLike = EditorHandleLike> {
   private readonly optionsChanged = tracker<ValidateOptions>();
   private readonly limitsChanged = tracker<EditLimits>();
   private readonly overlaysChanged = tracker<string[]>();
+  // Whether the handle holds overlays now (for their summaries to refresh).
+  private overlaysLoaded = false;
   private readonly shapesChanged = tracker<string>();
   /** The handle starts with `'show'`: `setOutOfScope` is called only for a change from it. */
   private outOfScope: OutOfScopeMode = 'show';
@@ -176,8 +180,10 @@ export class EditorSession<H extends EditorHandleLike = EditorHandleLike> {
       if (refused) out.jsonError = refused.error;
     }
     // The profiles go first, so the validation below uses them.
+    let profilesSet = false;
     if (this.profilesChanged(inputs.texts)) {
       try {
+        profilesSet = true;
         out.summaries = inputs.single
           ? [JSON.parse(handle.setProfile(inputs.texts?.[0] ?? null)) as ProfileSummary | null].filter((x) => x != null)
           : (JSON.parse(handle.setProfiles(inputs.texts ?? [])) as ProfileSummary[]);
@@ -196,7 +202,18 @@ export class EditorSession<H extends EditorHandleLike = EditorHandleLike> {
       } catch (error) {
         out.overlaysError = error;
       }
+    } else if (profilesSet && this.overlaysLoaded) {
+      // The warnings of an overlay name the terms no profile declares: new
+      // profiles make the ones reported before stale.
+      try {
+        const summary = JSON.parse(handle.overlaySummaries()) as OverlaySummary[];
+        if (summary.length > 0) out.overlaysSummary = summary;
+      } catch (error) {
+        out.overlaysError = error;
+      }
     }
+    if (overlays.length > 0 && out.overlaysError === undefined) this.overlaysLoaded = true;
+    else if (overlays.length === 0) this.overlaysLoaded = false;
     const shapes = inputs.shapes == null || inputs.shapes.trim() === '' ? null : inputs.shapes;
     if (this.shapesChanged(shapes)) {
       try {

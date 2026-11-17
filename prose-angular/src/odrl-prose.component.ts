@@ -191,7 +191,9 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
         report?: string | null;
       } = {};
       // The profiles go first, so the validation and the update below use them.
+      let profilesSet = false;
       if (this.profilesChanged(texts)) {
+        profilesSet = true;
         try {
           out.summaries = single
             ? [parseSummary(handle.setProfile(texts?.[0] ?? null))].filter((x) => x != null)
@@ -207,6 +209,15 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
           const summary = JSON.parse(handle.setOverlays(overlays)) as OverlaySummary[];
           if (summary.length > 0) out.overlaysSummary = summary;
           this.appliedOverlays = overlays;
+        } catch (error) {
+          out.overlaysError = error;
+        }
+      } else if (profilesSet && this.appliedOverlays.length > 0) {
+        // Their warnings name terms no profile declares: new profiles make
+        // the ones reported before stale.
+        try {
+          const summary = JSON.parse(handle.overlaySummaries()) as OverlaySummary[];
+          if (summary.length > 0) out.overlaysSummary = summary;
         } catch (error) {
           out.overlaysError = error;
         }

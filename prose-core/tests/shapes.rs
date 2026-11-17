@@ -277,18 +277,266 @@ fn what_is_not_in_the_subset_is_ignored_with_a_warning() {
 }
 
 #[test]
-fn a_literal_in_sh_in_ignores_the_whole_list_with_a_warning() {
+fn literals_in_sh_in_are_allowed_values_beside_the_iris() {
     let s = graph(json!([constraint_shape(
         "dx:purpose",
-        vec![right(json!({"sh:in": {"@list": ["a", "b"]}}))]
+        vec![right(
+            json!({"sh:in": {"@list": ["a", {"@id": "dx:research"}, "b"]}})
+        )]
     )]));
     assert!(
-        s.warnings().iter().any(|w| w.contains("literal")),
+        !s.warnings().iter().any(|w| w.contains("literal")),
+        "{:?}",
+        s.warnings()
+    );
+    let c = s.constraint(&format!("{DX}purpose")).unwrap();
+    assert_eq!(c.values, [format!("{DX}research")]);
+    assert_eq!(c.literals, ["a", "b"]);
+    let w = unshaped().with_shapes(s);
+    let h = hints(&w, "purpose");
+    assert!(h.closed);
+    assert_eq!(h.values, [format!("{DX}research")]);
+    assert_eq!(h.literal_values, ["a", "b"]);
+    assert_eq!(h.sources.values, HintSource::Shapes);
+}
+
+fn literal_list_wording(items: Value) -> Wording {
+    let s = graph(json!([constraint_shape(
+        "dx:purpose",
+        vec![right(json!({"sh:in": {"@list": items}}))]
+    )]));
+    unshaped().with_shapes(s)
+}
+
+fn purpose_value(value: Value) -> String {
+    policy(json!([
+        {"leftOperand": "dx:purpose", "operator": "eq", "rightOperand": value}
+    ]))
+}
+
+#[test]
+fn a_literal_member_conforms_and_any_other_value_is_not_allowed() {
+    let w = literal_list_wording(json!(["alpha", "beta"]));
+    assert_eq!(
+        run(&purpose_value(json!("alpha")), &w).verdict,
+        Verdict::Conforms
+    );
+    let r = run(&purpose_value(json!("gamma")), &w);
+    assert_eq!(
+        rules(&r),
+        [row(
+            "prose.value-not-allowed",
+            &format!("{C0}#rightOperand[0]")
+        )]
+    );
+    let e = r.findings[0].expected.as_ref().unwrap();
+    assert_eq!(e.source, Some(HintSource::Shapes));
+    assert!(e.values.contains(&"alpha".to_string()), "{:?}", e.values);
+    // An IRI is not a literal member.
+    let r = run(&purpose_value(json!({"@id": "dx:alpha"})), &w);
+    assert!(
+        rules(&r).contains(&row(
+            "prose.value-not-allowed",
+            &format!("{C0}#rightOperand[0]")
+        )),
+        "{:?}",
+        rules(&r)
+    );
+}
+
+#[test]
+fn numeric_and_typed_literal_members_compare_by_value() {
+    let w = literal_list_wording(json!([
+        5,
+        {"@value": "10", "@type": "xsd:integer"},
+        {"@value": "x", "@type": "xsd:string"}
+    ]));
+    for ok in [json!(5), json!("5"), json!(10), json!("5.0"), json!("x")] {
+        assert_eq!(
+            run(&purpose_value(ok.clone()), &w).verdict,
+            Verdict::Conforms,
+            "{ok}"
+        );
+    }
+    for bad in [json!(6), json!("y"), json!("05x")] {
+        assert!(
+            run(&purpose_value(bad.clone()), &w)
+                .findings
+                .iter()
+                .any(|f| f.rule == RuleId::ProseValueNotAllowed),
+            "{bad}"
+        );
+    }
+}
+
+#[test]
+fn a_mixed_list_allows_both_and_a_string_naming_an_iri_is_still_iri_expected() {
+    let w = literal_list_wording(json!(["alpha", {"@id": "dx:research"}]));
+    for ok in [json!("alpha"), json!({"@id": "dx:research"})] {
+        assert_eq!(run(&purpose_value(ok), &w).verdict, Verdict::Conforms);
+    }
+    let r = run(&purpose_value(json!("dx:research")), &w);
+    assert_eq!(
+        rules(&r),
+        [row("prose.iri-expected", &format!("{C0}#rightOperand[0]"))]
+    );
+}
+
+#[test]
+fn literals_in_the_operator_unit_action_and_operand_lists_are_still_ignored_with_a_warning() {
+    let s = graph(json!([constraint_shape(
+        "dx:purpose",
+        vec![
+            json!({"sh:path": {"@id": "odrl:operator"}, "sh:in": {"@list": ["eq"]}}),
+            json!({"sh:path": {"@id": "odrl:unit"}, "sh:in": {"@list": ["kg"]}}),
+        ]
+    )]));
+    let joined = s.warnings().join("\n");
+    assert!(joined.contains("literal"), "{joined}");
+    let w = unshaped().with_shapes(s);
+    assert!(hints(&w, "purpose").operators.is_empty());
+    assert!(hints(&w, "purpose").units.is_empty());
+}
+
+// --- limits ------------------------------------------------------------------
+
+#[test]
+fn shapes_past_max_bytes_are_refused_with_the_limit_named() {
+    let text = shapes_text("dataspace-shapes.jsonld");
+    let mut limits = prose_core::profile::ProfileLimits::default();
+    limits.max_bytes = 64;
+    match ShapesGraph::parse_with(&text, &limits) {
+        Err(prose_core::shapes::ShapesError::TooLarge { bytes, limit }) => {
+            assert_eq!((bytes, limit), (text.len(), 64));
+        }
+        other => panic!("{other:?}"),
+    }
+    let e = ShapesGraph::parse_with(&text, &limits).unwrap_err();
+    assert!(e.to_string().contains("max_bytes"), "{e}");
+}
+
+#[test]
+fn a_list_past_the_per_key_limit_closes_nothing_rather_than_closing_wrongly() {
+    let many: Vec<String> = (0..300).map(|i| format!("dx:v{i}")).collect();
+    let refs: Vec<&str> = many.iter().map(String::as_str).collect();
+    let s = graph(json!([constraint_shape(
+        "dx:purpose",
+        vec![right(json!({"sh:in": list(&refs)}))]
+    )]));
+    assert!(
+        s.warnings().iter().any(|w| w.contains("more values")),
         "{:?}",
         s.warnings()
     );
     let w = unshaped().with_shapes(s);
     assert!(!hints(&w, "purpose").closed);
+    // Literals count the same.
+    let lits: Vec<String> = (0..300).map(|i| format!("v{i}")).collect();
+    let s = graph(json!([constraint_shape(
+        "dx:purpose",
+        vec![right(json!({"sh:in": {"@list": lits}}))]
+    )]));
+    let w = unshaped().with_shapes(s);
+    assert!(!hints(&w, "purpose").closed);
+}
+
+#[test]
+fn a_list_just_under_the_limit_is_read_whole() {
+    let many: Vec<String> = (0..200).map(|i| format!("dx:v{i}")).collect();
+    let refs: Vec<&str> = many.iter().map(String::as_str).collect();
+    let s = graph(json!([constraint_shape(
+        "dx:purpose",
+        vec![right(json!({"sh:in": list(&refs)}))]
+    )]));
+    assert_eq!(
+        s.constraint(&format!("{DX}purpose")).unwrap().values.len(),
+        200
+    );
+}
+
+#[test]
+fn expanding_past_the_byte_budget_is_an_error_not_a_partial_read() {
+    let nodes: Vec<Value> = (0..400)
+        .map(|i| json!({"@id": format!("dx:S{i}"), "sh:property": {"sh:path": {"@id": "odrl:action"}, "sh:in": list(&["dx:a"])}}))
+        .collect();
+    let doc = json!({
+        "@context": {"sh": "http://www.w3.org/ns/shacl#", "odrl": "http://www.w3.org/ns/odrl/2/", "dx": DX},
+        "@graph": nodes
+    })
+    .to_string();
+    let mut limits = prose_core::profile::ProfileLimits::default();
+    limits.max_expanded_bytes = 2_000;
+    assert!(
+        matches!(
+            ShapesGraph::parse_with(&doc, &limits),
+            Err(prose_core::shapes::ShapesError::LimitExceeded(_))
+        ),
+        "{:?}",
+        ShapesGraph::parse_with(&doc, &limits).map(|s| s.warnings().to_vec())
+    );
+}
+
+#[test]
+fn a_pattern_that_compiles_to_too_much_is_ignored_with_a_warning() {
+    let s = graph(json!([constraint_shape(
+        "dx:code",
+        vec![right(json!({"sh:pattern": "(((a{200}){200}){200})"}))]
+    )]));
+    assert!(
+        s.warnings().iter().any(|w| w.contains("pattern")),
+        "{:?}",
+        s.warnings()
+    );
+    let w = unshaped().with_shapes(s);
+    assert_eq!(hints(&w, "code").pattern, None);
+}
+
+#[test]
+fn a_catastrophic_pattern_costs_time_proportional_to_the_text_not_exponential() {
+    let s = graph(json!([constraint_shape(
+        "dx:code",
+        vec![right(json!({"sh:pattern": "^(a+)+$"}))]
+    )]));
+    let w = unshaped().with_shapes(s);
+    let hostile = format!("{}!", "a".repeat(1_000));
+    let started = std::time::Instant::now();
+    let r = run(
+        &policy(json!([
+            {"leftOperand": "dx:code", "operator": "eq", "rightOperand": hostile}
+        ])),
+        &w,
+    );
+    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    assert!(
+        r.findings
+            .iter()
+            .any(|f| f.rule == RuleId::ProseValueNotAllowed),
+        "{:?}",
+        rules(&r)
+    );
+}
+
+#[test]
+fn a_value_past_the_pattern_text_limit_is_not_matched_and_says_nothing() {
+    let s = graph(json!([constraint_shape(
+        "dx:code",
+        vec![right(json!({"sh:pattern": "^[0-9]+$"}))]
+    )]));
+    let w = unshaped().with_shapes(s);
+    let long = "x".repeat(5_000);
+    let r = run(
+        &policy(json!([
+            {"leftOperand": "dx:code", "operator": "eq", "rightOperand": long}
+        ])),
+        &w,
+    );
+    assert!(
+        !r.findings
+            .iter()
+            .any(|f| f.rule == RuleId::ProseValueNotAllowed),
+        "{:?}",
+        rules(&r)
+    );
 }
 
 #[test]

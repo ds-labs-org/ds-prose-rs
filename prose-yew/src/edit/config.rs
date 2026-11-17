@@ -519,6 +519,8 @@ pub struct Labels {
     /// The operator select's two groups, when the profile suggests
     /// operators for the left operand.
     pub suggested_operators: AttrValue,
+    /// As `suggested_operators`, for operators the operator overlay suggests.
+    pub suggested_operators_overlay: AttrValue,
     pub other_operators: AttrValue,
     /// The heading of profile values offered for a left operand the profile
     /// suggests no values for.
@@ -538,8 +540,16 @@ pub struct Labels {
     /// As `kept_previous`, for a field that was empty.
     pub kept_empty: AttrValue,
     /// The operator select's groups under a closed left operand.
+    /// `allowed_group` and `not_allowed_group` name the profile; when the
+    /// operator list came from the operator overlay, or from the companion
+    /// shapes, the select's groups use these instead, so the label says who
+    /// is asking.
     pub allowed_group: AttrValue,
     pub not_allowed_group: AttrValue,
+    pub allowed_group_overlay: AttrValue,
+    pub not_allowed_group_overlay: AttrValue,
+    pub allowed_group_shapes: AttrValue,
+    pub not_allowed_group_shapes: AttrValue,
     /// The selected option when it is one the profile does not allow;
     /// `{label}` is its label.
     pub not_allowed_option: AttrValue,
@@ -611,6 +621,7 @@ impl Default for Labels {
             from_profile: a("From {profile}"),
             deprecated: a("Deprecated in the profile"),
             suggested_operators: a("Suggested by the profile"),
+            suggested_operators_overlay: a("Suggested by the overlay"),
             other_operators: a("Other operators"),
             profile_values: a("Profile values (not specific to this operand)"),
             datatype_placeholders: [
@@ -630,6 +641,10 @@ impl Default for Labels {
             kept_empty: a("\"{typed}\" is not in the profile; the field stays empty"),
             allowed_group: a("Allowed by the profile"),
             not_allowed_group: a("Not allowed by the profile"),
+            allowed_group_overlay: a("Allowed by the overlay"),
+            not_allowed_group_overlay: a("Not allowed by the overlay"),
+            allowed_group_shapes: a("Allowed by the shapes"),
+            not_allowed_group_shapes: a("Not allowed by the shapes"),
             not_allowed_option: a("{label} (not allowed)"),
             not_allowed_term: a("\"{typed}\" is not an allowed {field} in {profile}."),
             did_you_mean: a("Did you mean {suggestion}?"),

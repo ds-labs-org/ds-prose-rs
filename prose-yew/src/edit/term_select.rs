@@ -42,7 +42,12 @@ pub(crate) fn takes_select(env: &Env, slot: &Slot) -> bool {
             left_operand_hints(env, slot).is_some_and(|h| h.closed && !h.units.is_empty())
         }
         SlotKind::Literal if matches!(slot.path.field, Field::RightOperand(_)) => {
-            left_operand_hints(env, slot).is_some_and(|h| h.closed && !h.value_tree.is_empty())
+            left_operand_hints(env, slot)
+                // A list with literal members stays free text: a select of
+                // its IRIs alone could not pick them.
+                .is_some_and(|h| {
+                    h.closed && !h.value_tree.is_empty() && h.literal_values.is_empty()
+                })
         }
         _ => false,
     }

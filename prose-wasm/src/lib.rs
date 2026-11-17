@@ -278,8 +278,13 @@ impl ProseHandle {
         Ok(summary)
     }
 
-    /// The overlays' summaries against the profiles loaded now.
-    fn overlay_summaries(&self) -> String {
+    /// The summaries of the loaded overlays, as `setOverlays` returns them,
+    /// recomputed against the profiles loaded now: an overlay's `warnings`
+    /// name the terms no loaded profile declares, so they change when the
+    /// profiles do (`setOverlays` only reports the state at its own call).
+    /// `"[]"` without overlays.
+    #[wasm_bindgen(js_name = overlaySummaries)]
+    pub fn overlay_summaries(&self) -> String {
         let w = self
             .wording
             .as_ref()

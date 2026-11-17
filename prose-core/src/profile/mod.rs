@@ -468,6 +468,10 @@ pub struct OperandHints {
     pub operators: Vec<String>,
     /// `prose:rightOperand`: suggested values, as the profile lists them.
     pub values: Vec<String>,
+    /// The literal values companion shapes allow (`sh:in` with literal
+    /// members), as lexical forms. Never set by a profile; they sit beside
+    /// `values`, which are IRIs, and close the left operand with them.
+    pub literal_values: Vec<String>,
     /// `prose:datatype`: the first one given, an xsd IRI.
     pub datatype: Option<String>,
     /// `prose:unit`: suggested units.

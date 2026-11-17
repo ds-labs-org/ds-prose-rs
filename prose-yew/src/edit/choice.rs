@@ -8,6 +8,7 @@ use prose_core::edit::{
 use prose_core::wording;
 
 use prose_core::edit::EditDoc;
+use prose_core::profile::HintSource;
 use prose_core::validate::{Mode, Validator};
 
 use super::config::{Choice, cls, fill, written_form};
@@ -39,12 +40,20 @@ impl Opt {
 /// The operators the loaded profiles suggest for `left` (`prose:operator`),
 /// as expanded IRIs; empty without a profile or a hint.
 fn hinted_operators(env: &Env, left: &str) -> Vec<String> {
+    operator_hints(env, left).0
+}
+
+/// The operators hinted for `left` and the source that gave them.
+fn operator_hints(env: &Env, left: &str) -> (Vec<String>, HintSource) {
     let w = &env.cfg.wording;
     if w.is_empty() || left.is_empty() {
-        return Vec::new();
+        return (Vec::new(), HintSource::Profile);
     }
     w.lookup_written(&env.prefixes, left)
-        .map(|(t, _)| w.operand_hints(t).operators.clone())
+        .map(|(t, _)| {
+            let h = w.operand_hints(t);
+            (h.operators.clone(), h.sources.operators)
+        })
         .unwrap_or_default()
 }
 
@@ -311,6 +320,25 @@ pub(crate) fn choice_select(props: &ChoiceSelectProps) -> Html {
     let closed = c.kind == ChoiceKind::Operator
         && strict(&env).is_some()
         && closes_operators(&env, &c.left_operand);
+    // The groups name who gave the operators: profile, overlay or shapes.
+    let source = operator_hints(&env, &c.left_operand).1;
+    let (allowed_label, not_allowed_label, suggested_label) = match source {
+        HintSource::Overlay => (
+            cfg.labels.allowed_group_overlay.clone(),
+            cfg.labels.not_allowed_group_overlay.clone(),
+            cfg.labels.suggested_operators_overlay.clone(),
+        ),
+        HintSource::Shapes => (
+            cfg.labels.allowed_group_shapes.clone(),
+            cfg.labels.not_allowed_group_shapes.clone(),
+            cfg.labels.suggested_operators.clone(),
+        ),
+        _ => (
+            cfg.labels.allowed_group.clone(),
+            cfg.labels.not_allowed_group.clone(),
+            cfg.labels.suggested_operators.clone(),
+        ),
+    };
     html! {
         <select
             key={format!("{}:{:?}", c.owner.0, c.path.field)}
@@ -330,18 +358,18 @@ pub(crate) fn choice_select(props: &ChoiceSelectProps) -> Html {
                 // The profile closes the operand: what it allows, and, still
                 // listed, what it does not.
                 { for opts.iter().filter(|o| o.extra).map(|o| option(o, &selected)) }
-                <optgroup label={cfg.labels.allowed_group.clone()}>
+                <optgroup label={allowed_label}>
                     { for opts.iter().filter(|o| !o.extra && !o.blocked).map(|o| option(o, &selected)) }
                 </optgroup>
                 if opts.iter().any(|o| !o.extra && o.blocked) {
-                    <optgroup label={cfg.labels.not_allowed_group.clone()} disabled=true>
+                    <optgroup label={not_allowed_label} disabled=true>
                         { for opts.iter().filter(|o| !o.extra && o.blocked).map(|o| option(o, &selected)) }
                     </optgroup>
                 }
             } else if opts.iter().any(|o| o.suggested) {
                 // The profile's suggestions first, never hiding the rest.
                 { for opts.iter().filter(|o| o.extra).map(|o| option(o, &selected)) }
-                <optgroup label={cfg.labels.suggested_operators.clone()}>
+                <optgroup label={suggested_label}>
                     { for opts.iter().filter(|o| o.suggested).map(|o| option(o, &selected)) }
                 </optgroup>
                 // Only when something is left for it: an empty group is

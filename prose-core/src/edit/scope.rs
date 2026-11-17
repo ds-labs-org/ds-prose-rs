@@ -153,10 +153,22 @@ impl Walk<'_> {
         let mut drop: Vec<String> = Vec::new();
         let keys: Vec<String> = o.keys().cloned().collect();
         for key in keys {
+            let at = join(path, &key);
+            // ODRL's context maps `uid` to `@id`, so a policy's `@id` is its
+            // uid. A rule's `@id`, and the bare key `id` (ODRL does not
+            // define it), are not read as one here.
+            if key == "@id" && owner == Owner::Policy && none(self.rules.policy_uid) {
+                self.hits.push(OutOfScope {
+                    path: at,
+                    key: key.clone(),
+                    limit: "policyUid",
+                });
+                drop.push(key);
+                continue;
+            }
             let Some(term) = self.term(&key) else {
                 continue;
             };
-            let at = join(path, &key);
             if let Some(limit) = self.banned(owner, &term) {
                 self.hits.push(OutOfScope {
                     path: at,

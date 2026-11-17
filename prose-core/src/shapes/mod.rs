@@ -8,15 +8,21 @@
 //! - A property shape on `odrl:rightOperand` inside a constraint shape
 //!   selected by `odrl:leftOperand sh:hasValue X` (directly, under `sh:or` /
 //!   `sh:and`, or under `sh:qualifiedValueShape`): `sh:in` is the closed list
-//!   of values (IRIs only), `sh:class` and `sh:node` name a class whose
+//!   of values (IRIs and literals; a literal member is matched on its
+//!   lexical form, and a number by value, whatever its datatype),
+//!   `sh:class` and `sh:node` name a class whose
 //!   members in the loaded profiles, with their `skos:broader` descendants,
 //!   are the allowed values, `sh:datatype` is the datatype, and `sh:pattern`
 //!   (with `sh:flags`), `sh:minInclusive` and `sh:maxInclusive` are lexical
 //!   checks.
 //! - `sh:in` on `odrl:operator` and `odrl:unit` in the same constraint
-//!   shape: the operators and units of that left operand.
+//!   shape: the operators and units of that left operand (IRIs only: a
+//!   literal in one of these lists ignores the list, with a warning).
 //! - `sh:in` on `odrl:action` or `odrl:leftOperand` (the latter without
-//!   `sh:hasValue`) closes the term list for the whole policy.
+//!   `sh:hasValue`) closes the term list for the whole policy (IRIs only).
+//!   The validator binds on these two lists in strict mode only, as it does
+//!   for every unknown term; the editor offers the closed action and left
+//!   operand lists only when strict validation is on.
 //!
 //! Several shapes for one left operand (alternatives under `sh:or`) are
 //! read as a union of their lists. A shape under `sh:not` or `sh:xone` is
@@ -69,8 +75,12 @@ pub(crate) use pattern::Pattern;
 #[non_exhaustive]
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ConstraintShape {
-    /// `sh:in` on `odrl:rightOperand`: the allowed values, as IRIs.
+    /// `sh:in` on `odrl:rightOperand`: the allowed values that are IRIs.
     pub values: Vec<String>,
+    /// `sh:in` on `odrl:rightOperand`: the allowed values that are
+    /// literals, as their lexical forms (the datatype is not kept: a value
+    /// is matched on its text, and numbers by value).
+    pub literals: Vec<String>,
     /// `sh:class` and `sh:node` on `odrl:rightOperand`.
     pub classes: Vec<String>,
     /// `sh:datatype`.
@@ -97,6 +107,7 @@ impl ConstraintShape {
         };
         ConstraintShape {
             values: sorted(&self.values),
+            literals: sorted(&self.literals),
             classes: sorted(&self.classes),
             operators: sorted(&self.operators),
             units: sorted(&self.units),

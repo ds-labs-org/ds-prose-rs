@@ -141,3 +141,20 @@ async fn a_stored_value_outside_the_shapes_list_stays_selected_and_noted() {
         "{right}"
     );
 }
+
+const OPERATOR: &str = "policy[0].permission[0].constraint[0]#operator";
+
+#[tokio::test]
+async fn the_operator_groups_name_the_shapes_when_they_gave_the_list() {
+    let html = ssr(doc(), config(true, true)).await;
+    let op = element(&html, OPERATOR);
+    assert!(
+        op.contains("<optgroup label=\"Allowed by the shapes\">"),
+        "{op}"
+    );
+    assert!(
+        op.contains("<optgroup label=\"Not allowed by the shapes\" disabled"),
+        "{op}"
+    );
+    assert!(!op.contains("by the profile"), "{op}");
+}

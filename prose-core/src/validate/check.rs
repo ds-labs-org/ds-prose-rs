@@ -1879,19 +1879,22 @@ impl<'a> Checker<'a> {
     /// only to say so; on a closed one every value must be allowed, and a
     /// string naming an allowed IRI should be that IRI.
     fn hint_values(&mut self, path: &NodePath, a: &AtomicConstraint, h: &OperandHints) {
-        if h.value_tree.is_empty() {
+        if h.value_tree.is_empty() && h.literal_values.is_empty() {
             return;
         }
         let allowed: HashSet<&str> = h.value_tree.iter().map(|(v, _)| v.as_str()).collect();
+        let total = h.value_tree.len() + h.literal_values.len();
         let expected = || Expected {
             values: h
                 .value_tree
                 .iter()
+                .map(|(v, _)| v)
+                .chain(&h.literal_values)
                 .take(MAX_EXPECTED_VALUES)
-                .map(|(v, _)| v.clone())
+                .cloned()
                 .collect(),
-            values_total: if h.value_tree.len() > MAX_EXPECTED_VALUES {
-                h.value_tree.len()
+            values_total: if total > MAX_EXPECTED_VALUES {
+                total
             } else {
                 0
             },
@@ -1921,7 +1924,12 @@ impl<'a> Checker<'a> {
                 if allowed.contains(self.expand(&raw).as_str()) {
                     continue;
                 }
-            } else if !h.closed {
+            } else if !h.closed
+                || h.literal_values
+                    .iter()
+                    .any(|member| same_literal(member, &raw))
+            {
+                // An open operand only suggests; a literal member is allowed.
                 continue;
             } else if allowed.contains(self.expand(&raw).as_str()) {
                 let msg = format!(
@@ -2199,5 +2207,17 @@ impl<'a> Checker<'a> {
                 msg,
             );
         }
+    }
+}
+
+/// Whether a literal value is the shape's literal member: the same text, or
+/// two numbers of the same value (`5` and `5.0`).
+fn same_literal(member: &str, value: &str) -> bool {
+    if member == value {
+        return true;
+    }
+    match (member.trim().parse::<f64>(), value.trim().parse::<f64>()) {
+        (Ok(a), Ok(b)) => a.is_finite() && b.is_finite() && a == b,
+        _ => false,
     }
 }

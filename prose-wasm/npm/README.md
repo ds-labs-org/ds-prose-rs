@@ -141,7 +141,9 @@ hints (`prose:operator`, `prose:rightOperand`, `prose:unit`, `prose:closed` ...)
 about terms the profiles declare: it merges onto them and never adds or relabels
 one, and a term no profile declares is ignored with a warning. It throws on a text
 that is not a readable overlay and keeps the previous overlays. Overlays survive a
-later `setProfile`. Precedence per facet: profile < overlay < shapes; a finding an
+later `setProfile`, and `overlaySummaries()` on `ProseHandle` and `ProseEditorHandle`
+returns the summaries again, recomputed against the profiles loaded now (an overlay's
+`warnings` name terms no profile declares, so they change with the profiles). Precedence per facet: profile < overlay < shapes; a finding an
 overlay closed has `expected.source` `"overlay"`. `validate(policyJson, profiles,
 options?, shapes?, overlays?)` takes the overlay texts as its last argument.
 
