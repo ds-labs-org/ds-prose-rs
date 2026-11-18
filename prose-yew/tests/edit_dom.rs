@@ -76,6 +76,23 @@ async fn settle() {
     TimeoutFuture::new(0).await;
 }
 
+/// Waits (at most about two seconds) for the focus to leave <body>. The panel
+/// hands the focus to its heading from a Yew effect that runs after the
+/// render; on a loaded machine that lands later than two zero-delay timers,
+/// so the check below must not read the focus on the first settle. It still
+/// fails when the focus never leaves the page.
+async fn settle_until_focus_is_not_on_the_page() {
+    for _ in 0..200 {
+        if document()
+            .active_element()
+            .is_some_and(|a| a.tag_name() != "BODY")
+        {
+            return;
+        }
+        TimeoutFuture::new(10).await;
+    }
+}
+
 async fn mount(json: &str) -> (Element, Log) {
     let container = document().create_element("div").unwrap();
     document().body().unwrap().append_child(&container).unwrap();
@@ -2387,6 +2404,7 @@ async fn ux3_focus_stays_in_the_panel_after_a_fix_removes_its_button() {
     );
     fix.click();
     settle().await;
+    settle_until_focus_is_not_on_the_page().await;
     assert_eq!(state_attr(&c, "data-verdict"), "Conforms");
     let active = document().active_element().expect("an active element");
     assert_ne!(active.tag_name(), "BODY", "focus fell to the page");
@@ -2413,6 +2431,7 @@ async fn ux3_focus_does_not_fall_when_an_advisory_panel_goes() {
     fix.focus().unwrap();
     fix.click();
     settle().await;
+    settle_until_focus_is_not_on_the_page().await;
     assert!(
         c.query_selector(".prose-problems").unwrap().is_none(),
         "the panel is gone"
