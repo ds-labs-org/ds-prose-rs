@@ -33,7 +33,7 @@
 //! Shapes only add hints to terms the loaded profiles declare, through
 //! [`crate::profile::Wording::with_shapes`]; they never add a term or
 //! relabel one. Every syntax goes through the same private triple list as
-//! a profile's, and so does its [`ProfileLimits`](crate::profile::ProfileLimits).
+//! a profile's, and so does its [`ProfileLimits`].
 //!
 //! ```
 //! use prose_core::profile::{ProfileVocab, Wording};
