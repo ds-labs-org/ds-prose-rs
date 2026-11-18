@@ -398,6 +398,7 @@ that makes this finding, and only under `StrictEdit::RefuseTerms`.
 | <a id="rule-odrl-set-operator-cardinality"></a>`odrl.set-operator-cardinality` | several right operand values with a comparison operator (eq, neq, gt, gteq, lt, lteq); isA, hasPart, isPartOf, isAnyOf, isAllOf and isNoneOf are set-based in ODRL22.ttl and take a list (IM §2.5.1) | off, error | standard | no |
 | <a id="rule-odrl-consequence-nesting"></a>`odrl.consequence-nesting` | a consequence on a consequence, or a remedy that has a consequence (IM §2.6.3, §2.6.7) | off, error | standard | no |
 | <a id="rule-odrl-inheritance-cycle"></a>`odrl.inheritance-cycle` | policies in the document that inherit from each other in a circle (IM §2.9) | off, error | standard | no |
+| <a id="rule-odrl-constraint-incomplete"></a>`odrl.constraint-incomplete` | a constraint left unfinished: no left operand, no operator, no right operand, or an empty right operand value (IM §2.5.1). On in strict mode without `structural`; when `odrl.constraint-shape` is on and reports a missing part, the constraint is not reported twice (ruleset 2) | off, error | standard | no |
 | <a id="rule-prose-operator-not-allowed"></a>`prose.operator-not-allowed` | an operator outside the left operand's `prose:operator` | info, info; closed: error | convention | closed only |
 | <a id="rule-prose-value-not-allowed"></a>`prose.value-not-allowed` | an IRI value outside `prose:rightOperand` and the values narrower than it | off, info; closed: error | convention | no |
 | <a id="rule-prose-iri-expected"></a>`prose.iri-expected` | a plain string that names an allowed value where an IRI is expected | off, off; closed: error | convention | no (a fix is offered) |
@@ -409,13 +410,18 @@ that makes this finding, and only under `StrictEdit::RefuseTerms`.
 | <a id="rule-input-unchecked"></a>`input.unchecked` | something the validator could not check; a gap (an error with `fail_closed`) | off, warning | input | no |
 | <a id="rule-input-reader-note"></a>`input.reader-note` | a note the reader made while reading | off, info | input | no |
 | <a id="rule-heuristic-ordered-on-unordered"></a>`heuristic.ordered-on-unordered` | `gt`, `gteq`, `lt` or `lteq` on an IRI or boolean value; the IM states no requirement | off, off | heuristic | no |
+| <a id="rule-heuristic-single-child-group"></a>`heuristic.single-child-group` | an `and`, `or` or `xone` group that holds one condition; the fix "Ungroup" replaces it by that condition (ruleset 2) | off, off | heuristic | no |
+| <a id="rule-heuristic-duplicate-action"></a>`heuristic.duplicate-action` | the same action listed twice in one rule, in any spelling of its IRI; the fix removes the second, and is offered only when both carry the same refinements (a refined copy is reported without a fix) (ruleset 2) | off, off | heuristic | no |
 
 Tiers. Strict turns on `profile.*`, `prose.*` and `input.*`. The `odrl.*`
 tier (the IM's own structural requirements) is **off by default**, even in
 strict, and `Options::structural(true)` switches it on: a Dataspace Protocol
 catalog offer is often written without the assigner or target the IM asks
-for, so the tier must not block a profile user by default. The heuristic rule
-is switched on only with `Options::level`. `Options::level(rule, level)`
+for, so the tier must not block a profile user by default. The one exception is
+`odrl.constraint-incomplete`: a constraint with no left operand, no operator or
+no (or an empty) right operand is an error in strict mode, structural or not,
+so a Save path can check it through the report. The heuristic rules are
+switched on only with `Options::level`. `Options::level(rule, level)`
 sets any rule's level, over everything else (`input.unreadable` stays an
 error); `fail_closed(true)` makes `input.unchecked` an error and
 `deny_deprecated(true)` does the same for `profile.deprecated-term`.
@@ -425,7 +431,9 @@ the rule is newer than the pinned ruleset; off if it is an `odrl.*` rule and
 `structural` is not set; the catalogue's level for the mode; for `prose.*`,
 the closed column when the left operand is closed.
 
-**Ruleset pinning.** `RULESET` is the ruleset this build implements (1), and
+**Ruleset pinning.** `RULESET` is the ruleset this build implements (2: ruleset 2 added
+`odrl.constraint-incomplete`, `heuristic.single-child-group` and
+`heuristic.duplicate-action`), and
 each rule records `since_ruleset`. `Options::ruleset(n)` checks only the rules
 of ruleset `n` and earlier, so a CI that pins `n` does not turn red when a
 later release adds a rule to a policy that did not change. Rule ids are never
@@ -451,6 +459,11 @@ are errors there. On an operand that is not closed, the same rules stay at
 the informational level they have in advisory mode. This is a ds-prose
 convention. ODRL has no such marker, and other tools ignore the triple.
 
+With a declared profile that is not loaded, an IRI outside a closed list is not an error when
+the list is a profile's own or an `sh:class` (the missing profile may add a narrower value),
+but it is when the list is exact: an overlay's `prose:rightOperand`, a shape's `sh:in`, or a
+host's.
+
 ### The report
 
 `Report::to_json` is `ds-prose/validation-report@1`, the same bytes from the
@@ -462,8 +475,8 @@ order. A change to `@1` may only add keys; removing or renaming one is `@2`.
 { "schema": "ds-prose/validation-report@1",
   "tool": {"name": "ds-prose-rs", "version": "0.8.0"},
   "mode": "strict",
-  "tiers": ["profile", "prose", "input"],
-  "ruleset": 1,
+  "tiers": ["profile", "odrl", "prose", "input"],
+  "ruleset": 2,
   "verdict": "violations",
   "vocabulary": {"odrl": "common",
                  "profiles": [{"iri": "...", "title": "...", "version": "..."}]},
@@ -650,7 +663,7 @@ The enums that grow as the editor learns more of ODRL are `#[non_exhaustive]`,
 so adding a variant is a minor release, not a breaking one. In `prose-core`:
 `EditEvent`, `EditError`, `NewItem`, `FocusTarget`, `ListKind`, `Field`, `Step`,
 `NodeRef`, `Segment`, `SlotKind`, `ChoiceKind`, `EmptyText`, `IssueTarget`,
-`profile::TermKind`, `profile::ProfileError`, `StrictEdit`, `wording::ValueShape` (also `edit::ValueShape`) and, in `validate`, `Mode`, `Verdict`, `Tier`, `Basis`, `RuleId` and `RuleInfo`. In `prose-yew`: `FocusKind`
+`profile::TermKind`, `profile::ProfileError`, `StrictEdit`, `wording::ValueShape` (also `edit::ValueShape`) and, in `validate`, `Mode`, `Verdict`, `Tier`, `Basis`, `RuleId` and `RuleInfo`; unreleased also `profile::{HintSource, OverlayError}`, `shapes::ShapesError` and `edit::OutOfScope` (a struct). In `prose-yew`: `FocusKind`
 and `DecorationAt`. Outside the defining crate a `match` on one of them needs
 a wildcard arm with a sensible fallback. Units,
 `rightOperandReference` and `partOf` can be edited but not added today (see
@@ -668,6 +681,99 @@ The profile types can grow too: `ProfileVocab`, `Wording`, `Prefixes` and
 `PolicyGlossary` and `Gloss` are `#[non_exhaustive]` structs: read their
 fields, and start from `ProfileLimits::default()` to change a limit. So is
 `edit::ChoiceSlot`: build one with `ChoiceSlot::new` and set its fields.
+
+**Unreleased (after 0.8.0), at a glance.** This section is the release notes for the next
+version; the paragraphs after it give the detail. Nothing here is released or versioned yet.
+
+Added:
+
+- `shapesSummary()` on `ProseHandle` and `ProseEditorHandle`, and the `warnings` of
+  `setShapes` / `shapesLoaded` now include what the profiles make unusable (an `sh:class` cut
+  by the limits); the Angular components emit the summary again when only the profiles change.
+  A shapes list past 256 values warns once, naming 256. `sh:pattern`'s `\d` is every Unicode
+  decimal digit (`\w` is unchanged, with `_`).
+- `outOfScope` (`'show'` | `'strip'` | `'reject'`): a `max: 0` limit can be the scope of an
+  incoming document (#72).
+  A policy's `@id` is its uid, as ODRL's context maps `uid` to `@id`, so the scope drops both
+  under `policyUid: { max: 0 }`; a rule's `@id` and the bare key `id` are not read as one by
+  the scope.
+  A key is ODRL's when the document's `@context` expands it into the ODRL namespace: an alias
+  (`"giver": "odrl:assigner"`) counts, and a document that rebinds `odrl` to another IRI is
+  read with that binding. `logicalDepth: { max: 0 }` (no groups) and
+  `rightOperandValues: { max: 0 }` (no values) are a scope too: the group keys and
+  `rightOperand` go; any other value of those two is not a scope, as a document keeps deeper
+  groups and more values than the editor adds. A policy's own `constraint` is walked like a
+  rule's.
+- Ruleset 2 and the dataspace preset: `odrl.constraint-incomplete`,
+  `heuristic.single-child-group` (with an "Ungroup" fix), `heuristic.duplicate-action`,
+  `EditRules::logical_depth`, `StrictEdit::RefuseTerms` (`setRefuseTerms`) and
+  `preset="dataspace"` (#76 D and E).
+- Companion SHACL shapes (`ShapesGraph`, `setShapes`, `[shapes]`), operator overlays
+  (`Overlay`, `setOverlays`, `[overlays]`) and runtime host value sources
+  (`ValueSources`, `setValueSource(s)`, `[valueSources]`), which narrow operands, units
+  and terms, and which the editor shows as selects (#76 A, B and C). See the sections
+  "Companion SHACL shapes", "Operator overlay" and "Runtime value sources".
+
+Breaking, or needing a change in a caller:
+
+- `Labels` gained fields (`not_in_source` and the `*_overlay` / `*_shapes` group labels) and
+  `EditConfig` gained `strict_edit` and `value_sources`: a struct literal of either needs
+  `..Default::default()`.
+- `EditRules` (not `#[non_exhaustive]`) gained `logical_depth`: a struct literal needs it
+  (use `..Default::default()`).
+- `OperandHints`, `Term` and `Expected` gained fields; they are `#[non_exhaustive]`, so read
+  them by field and build them with the constructors.
+- The wasm `validate(json, profiles, options)` and `ProseValidatorService.validate` take
+  three more trailing positional arguments, `shapes`, `overlays` and `valueSources`. They
+  are optional (`options?`, `shapes?`, `overlays?` and `valueSources?` in the declarations,
+  so `validate(json, profiles)` and `validate(json, profiles, { strict: true })` compile), so
+  a call that omits them is unchanged; a host that wraps `validate` with its own fixed
+  signature should pass them on.
+- On `<ds-odrl-prose-editor>`, `strict` and `termInput` default to `undefined` instead of
+  `false` and `'free'`, so that a `preset` can set them. With no preset the behaviour is
+  unchanged, but a host that read the input's default value now sees `undefined`.
+- `RULESET` is 2. The strict reports and the stored report goldens say `"ruleset": 2`, and
+  strict mode now reports `odrl.constraint-incomplete`; pin `Options::ruleset(1)` (or
+  `--ruleset 1`) to keep the old verdicts.
+- New variants of the `#[non_exhaustive]` enums (`RuleId`, `HintSource`, ...) need the
+  wildcard arm a match on them already needs.
+
+Unreleased: a limit of `max: 0` can be the scope of the incoming document, not
+only of the add buttons. `setOutOfScope('strip')` on `ProseEditorHandle` (and
+`[outOfScope]="'strip'"` on `<ds-odrl-prose-editor>`) drops every section held in
+such a list when a document loads, in the bare, prefixed and full-IRI
+spellings of the key, and `removed()` (`(outOfScopeRemoved)`) reports it;
+`'reject'` fails the load with the offending paths (`OutOfScopeError`,
+`jsonError`). The default, `'show'`, is unchanged. In Rust,
+`edit::out_of_scope` and `edit::strip_out_of_scope` do the same on a
+`serde_json::Value`, with an `EditRules`.
+
+Unreleased: for a dataspace that wants members to write only policies it can
+evaluate. Ruleset 2 adds `odrl.constraint-incomplete` (an error in strict mode:
+a constraint with no left operand, operator or right operand, or an empty
+value), and the lints `heuristic.single-child-group` (with an "Ungroup" fix)
+and `heuristic.duplicate-action`. `EditRules::logical_depth` (`logicalDepth` in
+`EditLimits`) caps how deep groups nest. `EditConfig::strict_edit` and
+`setRefuseTerms(true)` on `ProseEditorHandle` make the editor refuse a term the
+validator does not allow. `preset="dataspace"` on `<ds-odrl-prose-editor>`
+turns on strict and structural validation, `termInput="select"`, refusing
+terms, `logicalDepth` 2 and the two lints in one input, each still overridable.
+
+Added with the runtime value sources: `HintSource::Host`, `OperandHints::source_values`,
+`profile::{SourceValue, ValueSource, ValueSources}`, `Wording::{with_value_sources,
+value_sources, role_source, value_source_warnings}` and `EditConfig::{value_sources,
+with_value_sources}`, and `OperandHints::{values_only, binds_other_facets}` (a closed host source binds the
+values alone); `Labels` gained `not_in_source` and `EditConfig` gained `value_sources`, so a
+struct literal of either needs them (use `..Default::default()`).
+
+Added with the operator overlay: `HintSource::Overlay`, `profile::{Overlay, OverlayError}` and
+`Wording::{with_overlay, overlays, overlay_warnings}`; both are `#[non_exhaustive]`.
+
+Added with the shapes support: `HintSource`, `ShapesError` and `shapes::{ShapesGraph,
+ConstraintShape}`; `OperandHints` gained `pattern`, `pattern_flags`, `min_inclusive`,
+`max_inclusive` and `sources`, `Term` gained `types`, and `Expected` gained `source`,
+`pattern`, `min_inclusive` and `max_inclusive`. All are `#[non_exhaustive]`, so build
+them with the existing constructors and read them by field.
 
 Changed in 0.8.0: the editor can show its term slots as dropdowns of the loaded
 profiles' terms instead of free text: `EditConfig::term_input =
@@ -829,6 +935,141 @@ Changed in 0.3 (breaking, after the tagged 0.2.0; a consumer pinned to the
   holds as a string is written as a string. Moving policies keeps empty
   `@graph` wrappers, and nested `@graph` wrappers inside a top-level `@graph`
   object keep their `@context`.
+
+### Companion SHACL shapes
+
+A dataspace often publishes SHACL shapes beside its profile. `Wording::with_shapes(ShapesGraph)`
+lays them over the profiles (`ShapesGraph::parse` reads JSON-LD, or Turtle with the
+`turtle` feature; the order of `with_profile` and `with_shapes` does not matter).
+This is not a SHACL engine. Only this subset is read:
+
+- a property shape on `odrl:rightOperand` in a constraint shape selected by
+  `odrl:leftOperand sh:hasValue X`, directly or through `sh:or` or
+  `sh:qualifiedValueShape`: `sh:in` (closed values: IRIs, and literals, which
+  match on their text, a number by value; `ConstraintShape::literals` and
+  `OperandHints::literal_values`), `sh:class` and `sh:node`
+  (the IRIs of that class in the profile, with `skos:broader` descendants),
+  `sh:datatype`, and `sh:pattern`, `sh:minInclusive`, `sh:maxInclusive` (lexical
+  checks; the pattern is a small regular expression subset, at most 2048
+  characters and bounded in size, with `.` and `\s` as in XSD, `\d` every Unicode decimal digit
+  (`\p{Nd}`, Unicode 16) and `\w` alphanumeric or `_` (XSD's `\w` leaves `_` out; kept so
+  `[\w-]+` takes identifiers); class subtraction `[a-z-[aeiou]]` and a bare `{n}` are refused
+  with a warning). Lists are read once and capped at `max_terms` values per left
+  operand, with a warning past it. A JSON-LD list holds at most `max_values_per_key`
+  (256) values, exactly 256 included; one more is ignored with exactly one warning (it names 256), as is an empty
+  list (`sh:in ()` in Turtle, `{"@list": []}` in JSON-LD), which adds no constraint. An
+  `sh:class` with more members than `max_terms` (or nested deeper than `max_depth`)
+  closes nothing: `Wording::shapes_warnings()` says so, and so do the `warnings` of the
+  `setShapes` summary (the wasm handles' `shapesSummary()` gives them again after the profiles
+  change);
+- `sh:in` on `odrl:operator` and `odrl:unit` there (IRIs; a string written as an absolute IRI,
+  `"http://www.w3.org/ns/odrl/2/eq"`, is read as that IRI, and any other string, a curie
+  included, ignores the list with a warning);
+- `sh:in` on `odrl:action` or `odrl:leftOperand`, which closes those lists for the
+  whole policy (`profile.unknown-term` under strict validation). Like any unknown
+  term this binds in strict mode only, and the editor narrows its action and left
+  operand selects to the lists only while strict validation is on.
+
+Everything else is ignored, and `ShapesGraph::warnings()` says what. Shapes only
+add hints to terms the loaded profiles declare and never relabel a term. The hints
+are layered: `Wording::operand_hints` returns a shape's facet in place of the
+profile's for that facet only, and `OperandHints::sources` records which source
+(`HintSource::Profile`, `Overlay` or `Shapes`) gave each facet. A finding that a shape closed
+carries `expected.source: "shapes"` and says "the shapes allow". The same hints
+drive the select in the editor with `TermInput::Select`. On npm: `setShapes(text)` on
+the wasm handles, `validate(..., shapes)`, and `[shapes]` on the Angular components.
+
+### Operator overlay
+
+When the dataspace publishes no SHACL, its governance can publish an overlay next to the
+profile: a small annotation-only graph of `prose:` triples (`prose:operator`,
+`prose:rightOperand`, `prose:unit`, `prose:datatype`, `prose:closed`, `prose:plural`) about
+terms the profiles declare. `Wording::with_overlay(Overlay)` merges it onto them
+(`Overlay::parse` reads JSON-LD, or Turtle with the `turtle` feature; the order of
+`with_profile` and `with_overlay` does not matter). Where a second profile naming the same
+IRI is a "declared by both" conflict, an overlay never adds or relabels a term. A triple
+about an IRI no loaded profile declares as a left operand is ignored, and so is a label or a
+type; `Overlay::warnings()` and `Wording::overlay_warnings(&overlay)` say what.
+
+An overlay lists exactly the values it means, as `sh:in` does (no descendants). Without
+`prose:closed true` its hints are suggestions; with it they are binding in strict
+validation, and the right operand is a select with `TermInput::Select`. Precedence, per
+facet (operators, values, units, datatype): profile < overlay < shapes, and a later overlay
+replaces an earlier one. A layer that closes the values alone (a shape's `sh:in` on the
+right operand, over a base that only suggested operators, units or a datatype) leaves those
+suggestions as they were, still suggestions (`OperandHints::values_only`); a shape that also
+gives an operator, unit, datatype or lexical check makes binding only what it says, and drops
+the suggestions it does not give. An overlay with `prose:closed true` closes the whole
+operand. A finding an overlay closed carries `expected.source: "overlay"`
+and says "the overlay allows". An overlay and a shape that say the same give equal
+`OperandHints` apart from `sources`. An overlay cannot say what only shapes can: `sh:class`,
+patterns, bounds and the closed lists of actions and left operands. Use shapes when the
+connector already checks SHACL, an overlay when it does not, and both when you have both
+(see the site's "Running in a dataspace" page). On npm: `setOverlays(texts)` on the wasm
+handles (`[]` clears), `validate(..., shapes, overlays)`, and `[overlays]` on the Angular
+components, with `overlaysLoaded` and `overlaysError`. An overlay's `warnings` name the
+terms no loaded profile declares, so they depend on the profiles: `overlaySummaries()` on
+`ProseHandle` and `ProseEditorHandle` recomputes them, and the Angular components emit
+`overlaysLoaded` again when only the profiles change.
+
+### Runtime value sources
+
+Some values come from the dataspace's registry or catalog and change daily: participant
+DIDs, membership or credential types, asset ids, purposes. The host fetches and caches
+them, and passes them to the editor; the editor never fetches. `ValueSources` holds them
+per left operand (by IRI) and per party role (`EntityRole::Assigner`, `Assignee`,
+`Target`); each is a `ValueSource`, a list of `SourceValue`s (a value, with an optional
+label and group) that is closed or only suggests. `Wording::with_value_sources` lays them on
+top of the hints (profile < overlay < shapes < host), for the values facet alone, and
+`EditConfig::with_value_sources` does it for the Yew editor.
+
+```rust
+let mut sources = ValueSources::new();
+sources.set_operand(
+    "https://example.org/dataspace/participantType",
+    ValueSource::new(
+        vec![
+            SourceValue::new("did:web:alpha.example").with_label("Alpha Corp").with_group("Members"),
+            SourceValue::new("did:web:gamma.example").with_group("Observers"),
+        ],
+        true, // closed: binding in strict validation
+    ),
+);
+let wording = Wording::new().with_profile(profile).with_value_sources(sources);
+```
+
+A closed source makes the right operand a select with `TermInput::Select`, its values
+under `<optgroup>` headings for their groups and with their labels as the text; any other
+value is `prose.value-not-allowed`, with `expected.source: "host"` and "the host allows" in
+the message. A source that only suggests leaves the slot free text with those suggestions,
+flags nothing as an error, and never loosens an operand a profile, an overlay or shapes
+closed; over a closed list it still gives its labels and groups to the values both list
+(`OperandHints::source_values`). A closed source wins for the values it lists, so it can
+allow a value the shapes or an overlay did not: `Wording::value_source_warnings` says so,
+naming the first one. A closed source binds the values alone: over a base that only suggested, the base's
+operators, units and datatype stay as suggestions (`OperandHints::values_only`;
+`binds_other_facets()` is false), while a base that was already closed keeps its facets
+binding. A policy may write a listed value as an IRI or as a string; either is that value. A listed value with no label of the host's own takes the label a loaded profile gives that term, else shows as written.
+An empty source is no source, so a registry fetch that failed does not flag every value.
+
+A value the source no longer lists is never dropped: it stays in the document, the select
+shows it as an extra first option with the `not_in_source` note, and a closed source
+flags it. A source for a party role (`Wording::role_source`) feeds the suggestions of the
+assigner, assignee and target slots. A closed one makes each of them a select of its values
+(with `TermInput::Select`), keeps a party or asset it does not list as an extra first option,
+and flags it. A source for a left operand no loaded profile declares is ignored
+(`Wording::value_source_warnings`). On npm: `setValueSource(key, values, { closed })` and
+`setValueSources(map)` on the wasm handles, `validate(..., shapes, overlays,
+valueSources)`, and `[valueSources]` on the Angular components, with `valueSourcesLoaded` and
+`valueSourcesError`. See the site's "Running in a dataspace" page for which source to use
+when.
+
+Changed in the shapes and overlay release: `Labels` gained `allowed_group_overlay`,
+`not_allowed_group_overlay`, `allowed_group_shapes`, `not_allowed_group_shapes` and
+`suggested_operators_overlay`, so a struct literal of it needs them (use `..Labels::default()`).
+The operator select's group headings name who gave the list: "Allowed by the profile",
+"... by the overlay", "... by the shapes". `OperandHints` and `ConstraintShape` (both
+`#[non_exhaustive]`) gained `literal_values` and `literals`.
 
 ### Using it from Yew
 

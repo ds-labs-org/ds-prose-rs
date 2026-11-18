@@ -2,13 +2,21 @@
 // or skip, which inputs to hand over, what a change does), against a fake handle.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { EditorSession } from '../src/editor-sync.ts';
+import { DATASPACE_PRESET, EditorSession, resolvePreset } from '../src/editor-sync.ts';
 
 const A = '{"@type":"Set","uid":"a"}';
 const B = '{"@type":"Set","uid":"b"}';
 
+/** What the wasm handle throws for a document its scope refuses. */
+function outOfScope(paths) {
+  const e = new Error(`the document holds sections out of scope: ${paths.join(', ')}`);
+  e.name = 'OutOfScopeError';
+  e.paths = paths;
+  return e;
+}
+
 /** A handle that records its calls; `bad` makes the constructor or `update` throw for that text. */
-function fake(bad = new Set()) {
+function fake(bad = new Set(), scope = {}) {
   const calls = [];
   const made = [];
   const mount = (json, cls, onChange) => {
@@ -22,11 +30,44 @@ function fake(bad = new Set()) {
       },
       setProfile: (t) => (calls.push(['setProfile', t]), t == null ? 'null' : '{"name":"P","terms":1}'),
       setProfiles: (t) => (calls.push(['setProfiles', t]), '[]'),
-      setLimits: (l) => calls.push(['setLimits', l]),
+      setLimits: (l) => {
+        calls.push(['setLimits', l]);
+        if (scope.refuseLimits) throw outOfScope(['permission[0].assignee']);
+      },
       setValidation: (o) => calls.push(['setValidation', o]),
+      setShapes: (t) => {
+        calls.push(['setShapes', t]);
+        if (t === 'bad shapes') throw new Error('not shapes');
+        return t == null ? 'null' : '{"constraints":2,"actions":null,"leftOperands":null,"warnings":["ignored sh:minCount"]}';
+      },
+      shapesSummary: () => (calls.push(['shapesSummary']), '{"constraints":2,"actions":null,"leftOperands":null,"warnings":["recomputed"]}'),
+      setOverlays: (t) => {
+        calls.push(['setOverlays', t]);
+        if (t.includes('bad overlay')) throw new Error('not an overlay');
+        return JSON.stringify(t.map(() => ({ terms: 3, warnings: ['ignored <x>'] })));
+      },
+      overlaySummaries: () => (calls.push(['overlaySummaries']), JSON.stringify([{ terms: 3, warnings: ['recomputed'] }])),
+      setValueSources: (v) => {
+        calls.push(['setValueSources', v]);
+        if (v != null && 'bad' in v) throw new Error('not value sources');
+        return JSON.stringify(Object.fromEntries(Object.keys(v ?? {}).map((k) => [k, { values: 2, closed: true, warnings: [] }])));
+      },
+      valueSourceSummaries: () => (calls.push(['valueSourceSummaries']), JSON.stringify({ k: { values: 2, closed: true, warnings: ['recomputed'] } })),
+      setRefuseTerms: (on) => calls.push(['setRefuseTerms', on]),
       setTermInput: (m) => {
         calls.push(['setTermInput', m]);
         if (m !== 'free' && m !== 'select') throw new Error(`termInput ${m}`);
+      },
+      // `scope.refuse` names what `setLimits` / `update` refuse as out of scope; `scope.removed` is what the next load took out.
+      setOutOfScope: (m) => {
+        calls.push(['setOutOfScope', m]);
+        if (scope.refuseMode) throw outOfScope(['assigner']);
+      },
+      removed: () => {
+        calls.push(['removed']);
+        const r = scope.removed ?? [];
+        scope.removed = [];
+        return JSON.stringify(r);
       },
       report: () => (calls.push(['report']), null),
       destroy: () => calls.push(['destroy']),
@@ -186,4 +227,531 @@ test('termInput: a mode the handle refuses keeps the previous one and is tried a
   } finally {
     console.error = error;
   }
+});
+
+const GONE = [{ path: 'assigner', key: 'assigner', limit: 'policyAssigner' }];
+
+test('outOfScope: show (the default) is never handed over and removed() is never read', () => {
+  const s = new EditorSession();
+  const f = fake();
+  const out = s.apply(inputs({ limits: { policyAssigner: { max: 0 } } }), f.mount);
+  assert.ok(!names(f.calls).includes('setOutOfScope'));
+  assert.ok(!names(f.calls).includes('removed'));
+  assert.equal(out.removed, undefined);
+});
+
+test('outOfScope: strip is handed over once, before the limits, and what it removed is reported', () => {
+  const s = new EditorSession();
+  const scope = { removed: [] };
+  const f = fake(new Set(), scope);
+  const lim = { policyAssigner: { max: 0 } };
+  // The limits are what strips: the handle reports it after setLimits.
+  f.mount0 = f.mount;
+  const mount = (...a) => {
+    const h = f.mount0(...a);
+    const setLimits = h.setLimits;
+    h.setLimits = (l) => {
+      setLimits(l);
+      scope.removed = GONE;
+    };
+    return h;
+  };
+  const out = s.apply(inputs({ outOfScope: 'strip', limits: lim }), mount);
+  const order = names(f.calls);
+  assert.ok(order.indexOf('setOutOfScope') < order.indexOf('setLimits'), order.join());
+  assert.deepEqual(f.calls.find((c) => c[0] === 'setOutOfScope'), ['setOutOfScope', 'strip']);
+  assert.deepEqual(out.removed, GONE);
+  assert.equal(out.jsonError, undefined);
+  f.calls.length = 0;
+  const again = s.apply(inputs({ outOfScope: 'strip', limits: lim }), mount);
+  assert.ok(!names(f.calls).includes('setOutOfScope'), 'once');
+  assert.equal(again.removed, undefined, 'nothing new was removed');
+});
+
+test('outOfScope: a later json that loses sections reports them', () => {
+  const s = new EditorSession();
+  const scope = { removed: [] };
+  const f = fake(new Set(), scope);
+  s.apply(inputs({ outOfScope: 'strip' }), f.mount);
+  scope.removed = GONE;
+  const out = s.apply(inputs({ outOfScope: 'strip', json: B }), f.mount);
+  assert.deepEqual(f.calls.find((c) => c[0] === 'update'), ['update', B, null]);
+  assert.deepEqual(out.removed, GONE);
+});
+
+test('outOfScope: reject, a json the handle refuses is a jsonError and the document stays', () => {
+  const s = new EditorSession();
+  const f = fake(new Set([B]));
+  s.apply(inputs({ outOfScope: 'reject' }), f.mount);
+  const out = s.apply(inputs({ outOfScope: 'reject', json: B }), f.mount);
+  assert.match(String(out.jsonError), /unreadable/);
+  assert.equal(s.lastJson, A);
+});
+
+test('outOfScope: reject, limits the first document breaks fail the mount as a jsonError', () => {
+  const s = new EditorSession();
+  const scope = { refuseLimits: true };
+  const f = fake(new Set(), scope);
+  const lim = { policyAssigner: { max: 0 } };
+  const out = s.apply(inputs({ outOfScope: 'reject', limits: lim }), f.mount);
+  assert.equal(out.jsonError.name, 'OutOfScopeError');
+  assert.deepEqual(out.jsonError.paths, ['permission[0].assignee']);
+  assert.equal(s.handle, undefined, 'nothing stays mounted');
+  assert.deepEqual(names(f.calls).filter((n) => n === 'destroy' || n === 'free'), ['destroy', 'free']);
+  assert.equal(s.lastJson, undefined);
+  // The next change of an input tries again, with the same limits and mode.
+  scope.refuseLimits = false;
+  f.calls.length = 0;
+  const out2 = s.apply(inputs({ json: B, outOfScope: 'reject', limits: lim }), f.mount);
+  assert.equal(out2.jsonError, undefined);
+  assert.equal(s.handle, f.made[1]);
+  assert.deepEqual(f.calls.filter((c) => c[0] === 'setOutOfScope'), [['setOutOfScope', 'reject']]);
+  assert.ok(names(f.calls).includes('setLimits'));
+});
+
+test('outOfScope: reject, limits a later document breaks are a jsonError, the handle stays and the limits are tried again', () => {
+  const s = new EditorSession();
+  const scope = {};
+  const f = fake(new Set(), scope);
+  s.apply(inputs({ outOfScope: 'reject' }), f.mount);
+  scope.refuseLimits = true;
+  const lim = { ruleAssigner: { max: 0 } };
+  const out = s.apply(inputs({ outOfScope: 'reject', limits: lim }), f.mount);
+  assert.equal(out.jsonError.name, 'OutOfScopeError');
+  assert.equal(s.handle, f.made[0]);
+  assert.ok(!names(f.calls).includes('destroy'));
+  scope.refuseLimits = false;
+  f.calls.length = 0;
+  s.apply(inputs({ outOfScope: 'reject', limits: lim }), f.mount);
+  assert.deepEqual(f.calls.filter((c) => c[0] === 'setLimits'), [['setLimits', lim]]);
+});
+
+test('outOfScope: a mode the handle refuses for another reason keeps the previous mode and is tried again', () => {
+  const s = new EditorSession();
+  const f = fake();
+  const error = console.error;
+  console.error = () => {};
+  try {
+    s.apply(inputs(), f.mount);
+    f.made[0].setOutOfScope = (m) => {
+      f.calls.push(['setOutOfScope', m]);
+      throw new Error('outOfScope bogus');
+    };
+    const out = s.apply(inputs({ outOfScope: 'bogus' }), f.mount);
+    assert.equal(out.jsonError, undefined);
+    f.calls.length = 0;
+    s.apply(inputs({ outOfScope: 'bogus' }), f.mount);
+    assert.deepEqual(f.calls.filter((c) => c[0] === 'setOutOfScope'), [['setOutOfScope', 'bogus']]);
+  } finally {
+    console.error = error;
+  }
+});
+
+// --- the preset ----------------------------------------------------------------
+
+const none = { strict: undefined, validation: null, termInput: undefined, limits: null, refuseTerms: undefined };
+
+test('no preset leaves every input as the host gave it', () => {
+  assert.deepEqual(resolvePreset(null, none), {
+    options: null, termInput: 'free', limits: null, refuseTerms: false,
+  });
+  assert.deepEqual(resolvePreset(undefined, { ...none, strict: true, termInput: 'select', limits: { policies: { max: 1 } } }), {
+    options: { strict: true }, termInput: 'select', limits: { policies: { max: 1 } }, refuseTerms: false,
+  });
+});
+
+test("preset 'dataspace' is strict, structural, select, refusing, two groups deep, with the heuristic lints on", () => {
+  const r = resolvePreset('dataspace', none);
+  assert.deepEqual(r, {
+    options: {
+      strict: true,
+      structural: true,
+      rules: { 'heuristic.single-child-group': 'warning', 'heuristic.duplicate-action': 'warning' },
+    },
+    termInput: 'select',
+    limits: { logicalDepth: { max: 2 } },
+    refuseTerms: true,
+  });
+  assert.deepEqual(r, {
+    options: DATASPACE_PRESET.validation, termInput: DATASPACE_PRESET.termInput,
+    limits: DATASPACE_PRESET.limits, refuseTerms: DATASPACE_PRESET.refuseTerms,
+  });
+});
+
+test('every input overrides the one thing the preset sets', () => {
+  // The preset is not changed by what is resolved from it.
+  const before = JSON.stringify(DATASPACE_PRESET);
+  assert.equal(resolvePreset('dataspace', { ...none, strict: false }).options.strict, false);
+  assert.equal(resolvePreset('dataspace', { ...none, strict: false }).options.structural, true);
+  assert.equal(resolvePreset('dataspace', { ...none, termInput: 'free' }).termInput, 'free');
+  assert.equal(resolvePreset('dataspace', { ...none, refuseTerms: false }).refuseTerms, false);
+  assert.deepEqual(resolvePreset('dataspace', { ...none, limits: { logicalDepth: { max: 4 }, policies: { max: 1 } } }).limits, {
+    logicalDepth: { max: 4 }, policies: { max: 1 },
+  });
+  assert.deepEqual(resolvePreset('dataspace', { ...none, limits: { policies: { max: 1 } } }).limits, {
+    logicalDepth: { max: 2 }, policies: { max: 1 },
+  });
+  // `validation` wins key by key, and its rules are added to the preset's.
+  const o = resolvePreset('dataspace', {
+    ...none, validation: { structural: false, rules: { 'heuristic.duplicate-action': 'off', 'prose.value-not-allowed': 'error' } },
+  }).options;
+  assert.deepEqual(o, {
+    strict: true,
+    structural: false,
+    rules: { 'heuristic.single-child-group': 'warning', 'heuristic.duplicate-action': 'off', 'prose.value-not-allowed': 'error' },
+  });
+  assert.equal(JSON.stringify(DATASPACE_PRESET), before);
+  // What is resolved is a copy.
+  const a = resolvePreset('dataspace', none);
+  a.options.rules['x'] = 'off';
+  a.limits.logicalDepth.max = 9;
+  assert.equal(JSON.stringify(DATASPACE_PRESET), before);
+});
+
+test('an unknown preset throws and names the presets', () => {
+  assert.throws(() => resolvePreset('nope', none), /dataspace/);
+});
+
+test('refuseTerms is handed over once, and only a change from the default', () => {
+  const s = new EditorSession();
+  const f = fake();
+  s.apply(inputs(), f.mount);
+  assert.ok(!names(f.calls).includes('setRefuseTerms'));
+  s.apply(inputs({ refuseTerms: true }), f.mount);
+  assert.deepEqual(f.calls.filter((c) => c[0] === 'setRefuseTerms'), [['setRefuseTerms', true]]);
+  f.calls.length = 0;
+  s.apply(inputs({ refuseTerms: true }), f.mount);
+  assert.ok(!names(f.calls).includes('setRefuseTerms'));
+  s.apply(inputs({ refuseTerms: false }), f.mount);
+  assert.deepEqual(f.calls.filter((c) => c[0] === 'setRefuseTerms'), [['setRefuseTerms', false]]);
+});
+
+test('a first apply with the preset hands everything over once', () => {
+  const s = new EditorSession();
+  const f = fake();
+  const r = resolvePreset('dataspace', none);
+  s.apply(inputs({ options: r.options, limits: r.limits, termInput: r.termInput, refuseTerms: r.refuseTerms }), f.mount);
+  assert.deepEqual(names(f.calls), ['new', 'setLimits', 'setTermInput', 'setRefuseTerms', 'setValidation', 'report']);
+});
+
+test('shapes: handed over once, after the profiles and before the validation, and reported', () => {
+  const s = new EditorSession();
+  const f = fake();
+  const out = s.apply(inputs({ texts: ['p'], shapes: 'S', options: { strict: true } }), f.mount);
+  assert.deepEqual(names(f.calls), ['new', 'setProfile', 'setShapes', 'setValidation', 'report']);
+  assert.deepEqual(f.calls.find((c) => c[0] === 'setShapes'), ['setShapes', 'S']);
+  assert.deepEqual(out.shapesSummary, { constraints: 2, actions: null, leftOperands: null, warnings: ['ignored sh:minCount'] });
+  assert.equal(out.shapesError, undefined);
+  // The same shapes again: nothing is handed over twice.
+  f.calls.length = 0;
+  const again = s.apply(inputs({ texts: ['p'], shapes: 'S', options: { strict: true } }), f.mount);
+  assert.deepEqual(names(f.calls), ['report']);
+  assert.equal(again.shapesSummary, undefined);
+});
+
+test('shapes: new profiles recompute the summary, since what the shapes say about a profile terms (a class cut) changes with the profiles', () => {
+  const s = new EditorSession();
+  const f = fake();
+  s.apply(inputs({ texts: ['p'], shapes: 'S' }), f.mount);
+  f.calls.length = 0;
+  // Only the profiles change: the shapes are not handed over again, their summary is read again.
+  const out = s.apply(inputs({ texts: ['q'], shapes: 'S' }), f.mount);
+  assert.ok(!names(f.calls).includes('setShapes'));
+  assert.ok(names(f.calls).includes('shapesSummary'));
+  assert.deepEqual(out.shapesSummary, { constraints: 2, actions: null, leftOperands: null, warnings: ['recomputed'] });
+  // Without shapes nothing is asked.
+  const s2 = new EditorSession();
+  const f2 = fake();
+  s2.apply(inputs({ texts: ['p'] }), f2.mount);
+  s2.apply(inputs({ texts: ['q'] }), f2.mount);
+  assert.ok(!names(f2.calls).includes('shapesSummary'));
+  // New profiles together with new shapes: one summary, from setShapes.
+  const f3 = fake();
+  const s3 = new EditorSession();
+  s3.apply(inputs({ texts: ['p'], shapes: 'S' }), f3.mount);
+  f3.calls.length = 0;
+  const both = s3.apply(inputs({ texts: ['q'], shapes: 'T' }), f3.mount);
+  assert.ok(!names(f3.calls).includes('shapesSummary'));
+  assert.equal(both.shapesSummary.warnings[0], 'ignored sh:minCount');
+});
+
+test('shapes: none (null, undefined, blank) on a fresh mount needs no call; going back to none clears them', () => {
+  const s = new EditorSession();
+  const f = fake();
+  s.apply(inputs(), f.mount);
+  s.apply(inputs({ shapes: null }), f.mount);
+  s.apply(inputs({ shapes: '  \n' }), f.mount);
+  assert.ok(!names(f.calls).includes('setShapes'));
+  s.apply(inputs({ shapes: 'S' }), f.mount);
+  f.calls.length = 0;
+  const out = s.apply(inputs({ shapes: '' }), f.mount);
+  assert.deepEqual(f.calls.filter((c) => c[0] === 'setShapes'), [['setShapes', null]]);
+  assert.equal(out.shapesSummary, undefined, 'clearing reports no summary');
+  assert.equal(out.shapesError, undefined);
+});
+
+test('shapes: a text the handle refuses is reported once, not retried until it changes', () => {
+  const s = new EditorSession();
+  const f = fake();
+  const out = s.apply(inputs({ shapes: 'bad shapes' }), f.mount);
+  assert.match(String(out.shapesError), /not shapes/);
+  assert.equal(out.shapesSummary, undefined);
+  f.calls.length = 0;
+  const again = s.apply(inputs({ shapes: 'bad shapes' }), f.mount);
+  assert.deepEqual(names(f.calls), ['report']);
+  assert.equal(again.shapesError, undefined);
+  const fixed = s.apply(inputs({ shapes: 'S' }), f.mount);
+  assert.equal(fixed.shapesError, undefined);
+  assert.equal(fixed.shapesSummary.constraints, 2);
+});
+
+test('shapes: a failed first mount keeps them unspent for the retry', () => {
+  const s = new EditorSession();
+  const f = fake(new Set([A]));
+  s.apply(inputs({ shapes: 'S' }), f.mount);
+  assert.ok(!names(f.calls).includes('setShapes'), 'nothing else was handed over');
+  s.apply(inputs({ json: B, shapes: 'S' }), f.mount);
+  assert.deepEqual(f.calls.filter((c) => c[0] === 'setShapes'), [['setShapes', 'S']]);
+});
+
+test('overlays: handed over once, after the profiles and before the shapes, and reported', () => {
+  const s = new EditorSession();
+  const f = fake();
+  const out = s.apply(inputs({ texts: ['p'], overlays: ['O'], shapes: 'S', options: { strict: true } }), f.mount);
+  assert.deepEqual(names(f.calls), ['new', 'setProfile', 'setOverlays', 'setShapes', 'setValidation', 'report']);
+  assert.deepEqual(f.calls.find((c) => c[0] === 'setOverlays'), ['setOverlays', ['O']]);
+  assert.deepEqual(out.overlaysSummary, [{ terms: 3, warnings: ['ignored <x>'] }]);
+  assert.equal(out.overlaysError, undefined);
+  // The same overlays again: nothing is handed over twice.
+  f.calls.length = 0;
+  const again = s.apply(inputs({ texts: ['p'], overlays: ['O'], shapes: 'S', options: { strict: true } }), f.mount);
+  assert.deepEqual(names(f.calls), ['report']);
+  assert.equal(again.overlaysSummary, undefined);
+});
+
+test('overlays: new profiles recompute the summaries, since their warnings name terms the profiles do not declare', () => {
+  const s = new EditorSession();
+  const f = fake();
+  s.apply(inputs({ texts: ['p'], overlays: ['O'] }), f.mount);
+  f.calls.length = 0;
+  // Only the profiles change: the overlays are not handed over again, their summaries are read again.
+  const out = s.apply(inputs({ texts: ['q'], overlays: ['O'] }), f.mount);
+  assert.ok(!names(f.calls).includes('setOverlays'));
+  assert.ok(names(f.calls).includes('overlaySummaries'));
+  assert.deepEqual(out.overlaysSummary, [{ terms: 3, warnings: ['recomputed'] }]);
+  // Without overlays nothing is asked.
+  const s2 = new EditorSession();
+  const f2 = fake();
+  s2.apply(inputs({ texts: ['p'] }), f2.mount);
+  s2.apply(inputs({ texts: ['q'] }), f2.mount);
+  assert.ok(!names(f2.calls).includes('overlaySummaries'));
+});
+
+test('overlays: blank texts are dropped; none (null, undefined, [], blank) on a fresh mount needs no call; going back to none clears them', () => {
+  const s = new EditorSession();
+  const f = fake();
+  s.apply(inputs(), f.mount);
+  s.apply(inputs({ overlays: null }), f.mount);
+  s.apply(inputs({ overlays: [] }), f.mount);
+  s.apply(inputs({ overlays: ['  \n', ''] }), f.mount);
+  assert.ok(!names(f.calls).includes('setOverlays'));
+  s.apply(inputs({ overlays: ['O', ' '] }), f.mount);
+  assert.deepEqual(f.calls.filter((c) => c[0] === 'setOverlays'), [['setOverlays', ['O']]]);
+  f.calls.length = 0;
+  const out = s.apply(inputs({ overlays: [] }), f.mount);
+  assert.deepEqual(f.calls.filter((c) => c[0] === 'setOverlays'), [['setOverlays', []]]);
+  assert.equal(out.overlaysSummary, undefined, 'clearing reports no summary');
+  assert.equal(out.overlaysError, undefined);
+});
+
+test('overlays: a list the handle refuses is reported once, not retried until it changes', () => {
+  const s = new EditorSession();
+  const f = fake();
+  const out = s.apply(inputs({ overlays: ['bad overlay'] }), f.mount);
+  assert.match(String(out.overlaysError), /not an overlay/);
+  assert.equal(out.overlaysSummary, undefined);
+  f.calls.length = 0;
+  const again = s.apply(inputs({ overlays: ['bad overlay'] }), f.mount);
+  assert.deepEqual(names(f.calls), ['report']);
+  assert.equal(again.overlaysError, undefined);
+  const fixed = s.apply(inputs({ overlays: ['O'] }), f.mount);
+  assert.equal(fixed.overlaysError, undefined);
+  assert.equal(fixed.overlaysSummary[0].terms, 3);
+});
+
+test('overlays: a failed first mount keeps them unspent for the retry', () => {
+  const s = new EditorSession();
+  const f = fake(new Set([A]));
+  s.apply(inputs({ overlays: ['O'] }), f.mount);
+  assert.ok(!names(f.calls).includes('setOverlays'), 'nothing else was handed over');
+  s.apply(inputs({ json: B, overlays: ['O'] }), f.mount);
+  assert.deepEqual(f.calls.filter((c) => c[0] === 'setOverlays'), [['setOverlays', ['O']]]);
+});
+
+const SOURCES = { 'https://example.org/dataspace/purpose': { values: ['a', { value: 'b', label: 'B', group: 'G' }], closed: true }, assignee: ['did:web:x'] };
+
+test('valueSources: handed over once, after the overlays and the shapes and before the validation, and reported', () => {
+  const s = new EditorSession();
+  const f = fake();
+  const out = s.apply(inputs({ texts: ['p'], overlays: ['O'], shapes: 'S', valueSources: SOURCES, options: { strict: true } }), f.mount);
+  assert.deepEqual(names(f.calls), ['new', 'setProfile', 'setOverlays', 'setShapes', 'setValueSources', 'setValidation', 'report']);
+  assert.deepEqual(f.calls.find((c) => c[0] === 'setValueSources'), ['setValueSources', SOURCES]);
+  assert.deepEqual(Object.keys(out.valueSourcesSummary), Object.keys(SOURCES));
+  assert.equal(out.valueSourcesError, undefined);
+  // The same sources again (even as another object): nothing is handed over twice.
+  f.calls.length = 0;
+  const again = s.apply(inputs({ texts: ['p'], overlays: ['O'], shapes: 'S', valueSources: structuredClone(SOURCES), options: { strict: true } }), f.mount);
+  assert.deepEqual(names(f.calls), ['report']);
+  assert.equal(again.valueSourcesSummary, undefined);
+});
+
+test('valueSources: none (null, undefined, {}) on a fresh mount needs no call; going back to none clears them', () => {
+  const s = new EditorSession();
+  const f = fake();
+  s.apply(inputs(), f.mount);
+  s.apply(inputs({ valueSources: null }), f.mount);
+  s.apply(inputs({ valueSources: {} }), f.mount);
+  assert.ok(!names(f.calls).includes('setValueSources'));
+  s.apply(inputs({ valueSources: SOURCES }), f.mount);
+  f.calls.length = 0;
+  const out = s.apply(inputs({ valueSources: {} }), f.mount);
+  assert.deepEqual(f.calls.filter((c) => c[0] === 'setValueSources'), [['setValueSources', null]]);
+  assert.equal(out.valueSourcesSummary, undefined, 'clearing reports no summary');
+  assert.equal(out.valueSourcesError, undefined);
+});
+
+test('valueSources: sources the handle refuses are reported once, not retried until they change', () => {
+  const s = new EditorSession();
+  const f = fake();
+  const out = s.apply(inputs({ valueSources: { bad: [] } }), f.mount);
+  assert.match(String(out.valueSourcesError), /not value sources/);
+  assert.equal(out.valueSourcesSummary, undefined);
+  f.calls.length = 0;
+  const again = s.apply(inputs({ valueSources: { bad: [] } }), f.mount);
+  assert.deepEqual(names(f.calls), ['report']);
+  assert.equal(again.valueSourcesError, undefined);
+  const fixed = s.apply(inputs({ valueSources: SOURCES }), f.mount);
+  assert.equal(fixed.valueSourcesError, undefined);
+  assert.ok(fixed.valueSourcesSummary.assignee);
+});
+
+test('valueSources: new profiles recompute the summaries, since their warnings name terms the profiles do not declare', () => {
+  const s = new EditorSession();
+  const f = fake();
+  s.apply(inputs({ texts: ['p'], valueSources: SOURCES }), f.mount);
+  f.calls.length = 0;
+  const out = s.apply(inputs({ texts: ['q'], valueSources: SOURCES }), f.mount);
+  assert.ok(!names(f.calls).includes('setValueSources'));
+  assert.ok(names(f.calls).includes('valueSourceSummaries'));
+  assert.deepEqual(out.valueSourcesSummary, { k: { values: 2, closed: true, warnings: ['recomputed'] } });
+  const s2 = new EditorSession();
+  const f2 = fake();
+  s2.apply(inputs({ texts: ['p'] }), f2.mount);
+  s2.apply(inputs({ texts: ['q'] }), f2.mount);
+  assert.ok(!names(f2.calls).includes('valueSourceSummaries'));
+});
+
+test('valueSources: a failed first mount keeps them unspent for the retry', () => {
+  const s = new EditorSession();
+  const f = fake(new Set([A]));
+  s.apply(inputs({ valueSources: SOURCES }), f.mount);
+  assert.ok(!names(f.calls).includes('setValueSources'), 'nothing else was handed over');
+  s.apply(inputs({ json: B, valueSources: SOURCES }), f.mount);
+  assert.deepEqual(f.calls.filter((c) => c[0] === 'setValueSources'), [['setValueSources', SOURCES]]);
+});
+
+/** A handle that holds a document and enforces the scope as the wasm one does: under 'reject', a document with an assigner and a cap on the assigner refuse each other. */
+function scoped() {
+  const state = { text: '', mode: 'show', capped: false, calls: [] };
+  const refuses = (text, capped, mode) => mode === 'reject' && capped && text.includes('assigner');
+  const handle = {
+    update: (j) => {
+      state.calls.push('update');
+      if (refuses(j, state.capped, state.mode)) throw outOfScope(['assigner']);
+      state.text = j;
+    },
+    setOutOfScope: (m) => {
+      state.calls.push('setOutOfScope');
+      if (refuses(state.text, state.capped, m)) throw outOfScope(['assigner']);
+      state.mode = m;
+    },
+    setLimits: (l) => {
+      state.calls.push('setLimits');
+      const capped = !!l?.policyAssigner && l.policyAssigner.max === 0;
+      if (refuses(state.text, capped, state.mode)) throw outOfScope(['assigner']);
+      state.capped = capped;
+      if (state.mode === 'strip' && capped) state.text = state.text.replace(',"assigner":"x"', '');
+    },
+    removed: () => {
+      const r = state.removed ?? [];
+      state.removed = [];
+      return JSON.stringify(r);
+    },
+    json: () => state.text,
+    setProfile: () => 'null', setProfiles: () => '[]', setOverlays: () => '[]', overlaySummaries: () => '[]',
+    setValueSources: () => '{}', valueSourceSummaries: () => '{}', setShapes: () => 'null',
+    setValidation() {}, setTermInput() {}, setRefuseTerms() {}, report: () => null, destroy() {}, free() {},
+  };
+  const mount = (json) => {
+    state.text = json;
+    return handle;
+  };
+  return { state, mount };
+}
+
+test('outOfScope: strip reports the document the handle holds after it, for the host to bind back', () => {
+  const s = new EditorSession();
+  const f = scoped();
+  const withAssigner = '{"uid":"a","assigner":"x"}';
+  f.state.removed = [{ path: 'assigner', key: 'assigner', limit: 'policyAssigner' }];
+  const out = s.apply(inputs({ json: withAssigner, outOfScope: 'strip', limits: { policyAssigner: { max: 0 } } }), f.mount);
+  assert.equal(out.removed.length, 1);
+  assert.equal(out.strippedJson, '{"uid":"a"}');
+  // Nothing stripped, nothing to bind back.
+  const again = s.apply(inputs({ json: '{"uid":"a"}', outOfScope: 'strip', limits: { policyAssigner: { max: 0 } } }), f.mount);
+  assert.equal(again.strippedJson, undefined);
+});
+
+test('outOfScope: reject, a new document and the limits that refuse it never leave the refused document on screen', () => {
+  const s = new EditorSession();
+  const f = scoped();
+  const base = { outOfScope: 'reject' };
+  s.apply(inputs({ ...base, json: '{"uid":"a"}' }), f.mount);
+  const out = s.apply(inputs({ ...base, json: '{"uid":"b","assigner":"x"}', limits: { policyAssigner: { max: 0 } } }), f.mount);
+  assert.equal(out.jsonError.name, 'OutOfScopeError');
+  assert.equal(f.state.text, '{"uid":"a"}', 'the refused document is not on screen');
+  assert.equal(s.lastJson, '{"uid":"a"}');
+});
+
+test('outOfScope: reject, a new document that fixes what the new limits refuse in the old one is shown', () => {
+  const s = new EditorSession();
+  const f = scoped();
+  const base = { outOfScope: 'reject' };
+  s.apply(inputs({ ...base, json: '{"uid":"a","assigner":"x"}' }), f.mount);
+  const out = s.apply(inputs({ ...base, json: '{"uid":"b"}', limits: { policyAssigner: { max: 0 } } }), f.mount);
+  assert.equal(out.jsonError, undefined);
+  assert.equal(f.state.text, '{"uid":"b"}');
+  assert.equal(f.state.capped, true, 'the limits are in force once the new document is');
+});
+
+test('outOfScope: strip, the host binding the stripped document back does not reload it', () => {
+  const s = new EditorSession();
+  const f = scoped();
+  const inp = { outOfScope: 'strip', limits: { policyAssigner: { max: 0 } } };
+  f.state.removed = [{ path: 'assigner', key: 'assigner', limit: 'policyAssigner' }];
+  const out = s.apply(inputs({ ...inp, json: '{"uid":"a","assigner":"x"}' }), f.mount);
+  f.state.calls.length = 0;
+  s.apply(inputs({ ...inp, json: out.strippedJson }), f.mount);
+  assert.deepEqual(f.state.calls.filter((c) => c === 'update'), [], 'the handle already holds it');
+});
+
+test('outOfScope: strip, limits that change later strip the document on screen and report it', () => {
+  const s = new EditorSession();
+  const f = scoped();
+  const doc = '{"uid":"a","assigner":"x"}';
+  s.apply(inputs({ json: doc, outOfScope: 'strip' }), f.mount);
+  f.state.removed = [{ path: 'assigner', key: 'assigner', limit: 'policyAssigner' }];
+  const out = s.apply(inputs({ json: doc, outOfScope: 'strip', limits: { policyAssigner: { max: 0 } } }), f.mount);
+  assert.equal(out.removed.length, 1);
+  assert.equal(out.strippedJson, '{"uid":"a"}');
 });

@@ -1,0 +1,27 @@
+{
+  "@context": {
+    "prose": "https://ds-labs-org.github.io/ds-prose-rs/profile#",
+    "odrl": "http://www.w3.org/ns/odrl/2/",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "dx": "https://example.org/dataspace/"
+  },
+  "@graph": [
+    {
+      "@id": "dx:purpose",
+      "prose:closed": true,
+      "prose:operator": [{ "@id": "odrl:eq" }, { "@id": "odrl:isAnyOf" }],
+      "prose:rightOperand": [{ "@id": "dx:research" }, { "@id": "dx:marketing" }]
+    },
+    {
+      "@id": "dx:region",
+      "prose:closed": true,
+      "prose:rightOperand": [{ "@id": "dx:eu" }, { "@id": "dx:us" }]
+    },
+    {
+      "@id": "dx:count",
+      "prose:closed": true,
+      "prose:datatype": { "@id": "xsd:integer" },
+      "prose:unit": { "@id": "dx:people" }
+    }
+  ]
+}

@@ -20,8 +20,8 @@ use prose_core::validate::{Level, RuleId};
 use super::choice::use_select_in_step;
 use super::config::{Suggestion, TermInput, cls, merge_styles};
 use super::slot::{
-    Closure, allowed_options, holds_iri, left_operand_term, options_for, placeholder,
-    profile_suggestion, set_text, strict,
+    Closure, allowed_options, closed_role_source, holds_iri, host_values, left_operand_hints,
+    literal_members, options_for, picks_iri, placeholder, profile_suggestion, set_text, strict,
 };
 use super::{Env, EnvRef, FocusKind, SlotFocus};
 
@@ -31,18 +31,23 @@ use super::{Env, EnvRef, FocusKind, SlotFocus};
 /// and lists units, or values, for it: an open left operand's units and
 /// values are suggestions, so the slot stays free text with them. Any other
 /// right operand is a literal (a date, a number, an identifier) and stays
-/// free text.
+/// free text. A party or an asset when the host's source for its role is
+/// closed.
 pub(crate) fn takes_select(env: &Env, slot: &Slot) -> bool {
     if env.cfg.term_input != TermInput::Select {
         return false;
     }
     match slot.kind {
         SlotKind::Action | SlotKind::LeftOperand | SlotKind::PolicyKind => true,
-        SlotKind::Unit => left_operand_term(env, slot)
-            .is_some_and(|t| t.hints.closed && !t.hints.units.is_empty()),
+        // A party or an asset the host's source for the role closes.
+        SlotKind::Party | SlotKind::Asset => closed_role_source(env, slot),
+        SlotKind::Unit => left_operand_hints(env, slot)
+            .is_some_and(|h| h.binds_other_facets() && !h.units.is_empty()),
         SlotKind::Literal if matches!(slot.path.field, Field::RightOperand(_)) => {
-            left_operand_term(env, slot)
-                .is_some_and(|t| t.hints.closed && !t.hints.value_tree.is_empty())
+            // The values may be IRIs, or literals a shape's `sh:in` lists.
+            left_operand_hints(env, slot).is_some_and(|h| {
+                h.closed && (!h.value_tree.is_empty() || !h.literal_values.is_empty())
+            })
         }
         _ => false,
     }
@@ -219,6 +224,11 @@ pub(crate) fn term_select(props: &TermSelectProps) -> Html {
     let pick_as_iri = slot.kind == SlotKind::Literal
         && matches!(slot.path.field, Field::RightOperand(_))
         && !holds_iri(&env.doc, &slot.path);
+    // A host lists values as text: only one that looks like an IRI is sent as one.
+    let role = closed_role_source(&env, slot);
+    let host = host_values(&env, slot);
+    // A literal member of the list is written as text, whatever it looks like.
+    let literals = literal_members(&env, slot);
 
     // Every value an option offers, for what a change may send.
     let listed: HashSet<AttrValue> = all.iter().map(|o| o.value.clone()).collect();
@@ -248,19 +258,21 @@ pub(crate) fn term_select(props: &TermSelectProps) -> Html {
                 && !value.is_empty()
                 && !refused(&value)
             {
-                onedit.emit(if pick_as_iri {
-                    EditEvent::SetIri {
-                        slot: slot.path.clone(),
-                        expect: slot.owner,
-                        value,
-                    }
-                } else {
-                    EditEvent::SetText {
-                        slot: slot.path.clone(),
-                        expect: slot.owner,
-                        value,
-                    }
-                });
+                onedit.emit(
+                    if pick_as_iri && picks_iri(host, &value) && !literals.contains(&value) {
+                        EditEvent::SetIri {
+                            slot: slot.path.clone(),
+                            expect: slot.owner,
+                            value,
+                        }
+                    } else {
+                        EditEvent::SetText {
+                            slot: slot.path.clone(),
+                            expect: slot.owner,
+                            value,
+                        }
+                    },
+                );
             }
             // Render again so the select shows what the document says,
             // whatever the host decided.
@@ -306,7 +318,9 @@ pub(crate) fn term_select(props: &TermSelectProps) -> Html {
         _ => {}
     }
     let style = merge_styles(&styles);
-    let note = if cfg.wording.is_empty() {
+    let note = if host || role {
+        cfg.labels.not_in_source.clone()
+    } else if cfg.wording.is_empty() {
         cfg.labels.not_in_list.clone()
     } else {
         cfg.labels.not_in_profile.clone()

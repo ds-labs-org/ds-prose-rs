@@ -620,7 +620,7 @@ fn add(
     if index > len {
         return Err(no_list(list));
     }
-    if let Some(why) = rules.add_refusal(doc, list) {
+    if let Some(why) = rules.add_item_refusal(doc, list, item) {
         return Err(EditError::NotAllowed(why));
     }
     let new = new_node(doc, rules, list.kind, item)?;
@@ -756,6 +756,9 @@ fn wrap(
     check_node(doc, path, expect, false)?;
     if !rules.allow_logical {
         return Err(EditError::NotAllowed("logical groups are disabled".into()));
+    }
+    if let Some(why) = rules.wrap_refusal(doc, path) {
+        return Err(EditError::NotAllowed(why));
     }
     let id = doc.fresh_id();
     match resolve_mut(doc, path) {

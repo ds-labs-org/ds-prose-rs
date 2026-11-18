@@ -14,9 +14,9 @@ use std::collections::{HashMap, HashSet};
 
 use prose_core::edit::{
     ConstraintNode, EditDoc, EditEvent, Field, IssueTarget, Literal, NodeRef, RightOperand,
-    Severity, Slot, SlotKind, SlotPath, left_operand_at,
+    Severity, Slot, SlotKind, SlotPath, Step, left_operand_at,
 };
-use prose_core::profile::{Term, TermKind};
+use prose_core::profile::{HintSource, OperandHints, SourceValue, Term, TermKind};
 use prose_core::validate::{Level, Mode, RuleId, Validator};
 use prose_core::wording;
 
@@ -217,8 +217,9 @@ fn closure(env: &Env, slot: &Slot) -> Option<Closure> {
                 Level::Error
             );
             let closed_values = binding
-                && left_operand_term(env, slot)
-                    .is_some_and(|t| t.hints.closed && !t.hints.value_tree.is_empty());
+                && left_operand_hints(env, slot).is_some_and(|h| {
+                    h.closed && (!h.value_tree.is_empty() || !h.literal_values.is_empty())
+                });
             closed_values.then_some(Closure::Values)
         }
         _ => None,
@@ -341,8 +342,11 @@ pub(crate) fn options_for(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<A
         SlotKind::Action => flat(written(&v.actions)),
         SlotKind::LeftOperand => flat(written(&v.left_operands)),
         SlotKind::PolicyKind => flat(written(&v.policy_kinds)),
-        SlotKind::Party => flat(v.parties.clone()),
-        SlotKind::Asset => flat(v.assets.clone()),
+        SlotKind::Party | SlotKind::Asset => flat(match role_source_list(env, slot) {
+            Some(list) => list,
+            None if slot.kind == SlotKind::Party => v.parties.clone(),
+            None => v.assets.clone(),
+        }),
         SlotKind::PolicyRef => flat(
             env.policy_uids
                 .iter()
@@ -359,10 +363,9 @@ pub(crate) fn options_for(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<A
             profile_values(env, slot)
         }
         SlotKind::Unit => flat(
-            left_operand_term(env, slot)
-                .map(|t| {
-                    t.hints
-                        .units
+            left_operand_hints(env, slot)
+                .map(|h| {
+                    h.units
                         .iter()
                         .map(|u| profile_suggestion(env, u, None))
                         .collect()
@@ -373,6 +376,88 @@ pub(crate) fn options_for(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<A
     }
 }
 
+/// The host's value source for the slot's party (or asset) role, when it
+/// gave one.
+fn role_source<'e>(env: &'e Env, slot: &Slot) -> Option<&'e prose_core::profile::ValueSource> {
+    if !matches!(slot.kind, SlotKind::Party | SlotKind::Asset) {
+        return None;
+    }
+    let Some(Step::Entity(role, _)) = slot.path.node.steps.last() else {
+        return None;
+    };
+    env.cfg.wording.role_source(*role)
+}
+
+/// Whether the host closes the values of the slot's party role: the slot is
+/// a select of them, with a value the source no longer lists kept.
+pub(crate) fn closed_role_source(env: &Env, slot: &Slot) -> bool {
+    role_source(env, slot).is_some_and(|s| s.is_closed())
+}
+
+/// The label of a host's value: the one the host gave, else the label a
+/// loaded profile gives the term the value names, else the value itself.
+fn host_label(env: &Env, v: &SourceValue) -> AttrValue {
+    if let Some(label) = v.label() {
+        return label.to_string().into();
+    }
+    let w = &env.cfg.wording;
+    if !w.is_empty()
+        && let Some((term, _)) = w.lookup_written(&env.prefixes, v.value())
+    {
+        return term.display_label(w.languages()).into();
+    }
+    v.value().to_string().into()
+}
+
+/// The suggestions the host's value source for the slot's party role gives,
+/// when it gave one: its values with their labels and groups.
+fn role_source_list(env: &Env, slot: &Slot) -> Option<Vec<Suggestion>> {
+    let source = role_source(env, slot)?;
+    Some(
+        source
+            .values()
+            .iter()
+            .map(|v| Suggestion {
+                value: v.value().to_string().into(),
+                label: host_label(env, v),
+                hint: None,
+                group: v.group().map(|g| g.to_string().into()),
+            })
+            .collect(),
+    )
+}
+
+/// Whether the right operand's values come from the host's value source,
+/// which lists them as text: a DID, an asset id.
+pub(crate) fn host_values(env: &Env, slot: &Slot) -> bool {
+    left_operand_hints(env, slot).is_some_and(|h| h.sources.values == HintSource::Host)
+}
+
+/// The literal members a shape's `sh:in` lists for the slot's left operand:
+/// a pick of one is written as text, never as an IRI.
+pub(crate) fn literal_members(env: &Env, slot: &Slot) -> Vec<String> {
+    left_operand_hints(env, slot)
+        .map(|h| h.literal_values.clone())
+        .unwrap_or_default()
+}
+
+/// Whether a value a pick writes is an IRI. A right operand's profile
+/// values are IRIs; a host's are text, an IRI only when it looks like one
+/// (`scheme:rest`), as a DID does.
+pub(crate) fn picks_iri(host: bool, value: &str) -> bool {
+    !host
+        || value.split_once(':').is_some_and(|(scheme, rest)| {
+            !rest.is_empty()
+                && scheme
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphabetic())
+                && scheme
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c))
+        })
+}
+
 /// The loaded term the slot's constraint names as its left operand.
 pub(crate) fn left_operand_term<'e>(env: &'e Env, slot: &Slot) -> Option<&'e Term> {
     let w = &env.cfg.wording;
@@ -381,6 +466,12 @@ pub(crate) fn left_operand_term<'e>(env: &'e Env, slot: &Slot) -> Option<&'e Ter
     }
     let left = left_operand_at(&env.doc, &slot.path)?;
     w.lookup_written(&env.prefixes, left).map(|(t, _)| t)
+}
+
+/// The hints for the slot's left operand: the loaded profile's, with the
+/// companion shapes laid over them.
+pub(crate) fn left_operand_hints<'e>(env: &'e Env, slot: &Slot) -> Option<&'e OperandHints> {
+    left_operand_term(env, slot).map(|t| env.cfg.wording.operand_hints(t))
 }
 
 /// A suggestion for the IRI `iri`: the loaded term's label and definition
@@ -412,27 +503,64 @@ fn profile_values(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<AttrValue
     if w.is_empty() {
         return (vec![], HashMap::new());
     }
-    let left = left_operand_term(env, slot);
-    if let Some(t) = left
-        && !t.hints.value_tree.is_empty()
+    let left = left_operand_hints(env, slot);
+    // The host's own list: its values as it wrote them, with the labels and
+    // the groups it gave.
+    if let Some(h) = left
+        && h.sources.values == HintSource::Host
+        && !h.source_values.is_empty()
+    {
+        let list = h
+            .source_values
+            .iter()
+            .map(|v| Suggestion {
+                value: v.value().to_string().into(),
+                label: host_label(env, v),
+                hint: None,
+                group: v.group().map(|g| g.to_string().into()),
+            })
+            .collect();
+        return (list, HashMap::new());
+    }
+    if let Some(h) = left
+        && (!h.value_tree.is_empty() || !h.literal_values.is_empty())
     {
         let mut depth = HashMap::new();
-        let list = t
-            .hints
+        // A host's open source over a closed list: its labels and groups for
+        // the values both list.
+        let named: HashMap<&str, &SourceValue> =
+            h.source_values.iter().map(|v| (v.value(), v)).collect();
+        let mut list: Vec<Suggestion> = h
             .value_tree
             .iter()
             .map(|(iri, d)| {
-                let s = profile_suggestion(env, iri, None);
+                let mut s = profile_suggestion(env, iri, None);
+                if let Some(v) = named.get(iri.as_str()) {
+                    if let Some(label) = v.label() {
+                        s.label = label.to_string().into();
+                    }
+                    if let Some(group) = v.group() {
+                        s.group = Some(group.to_string().into());
+                    }
+                }
                 if *d > 0 {
                     depth.insert(s.value.clone(), *d);
                 }
                 s
             })
             .collect();
+        // The literal members of a shape's `sh:in`: listed as written, after
+        // the IRIs.
+        list.extend(h.literal_values.iter().map(|l| Suggestion {
+            value: l.clone().into(),
+            label: l.clone().into(),
+            hint: None,
+            group: None,
+        }));
         return (list, depth);
     }
     if left
-        .and_then(|t| t.hints.datatype.as_deref())
+        .and_then(|h| h.datatype.as_deref())
         .is_some_and(|d| d != ANY_URI)
     {
         return (vec![], HashMap::new());
@@ -463,7 +591,7 @@ pub(crate) fn holds_iri(doc: &EditDoc, path: &SlotPath) -> bool {
 
 pub(crate) fn placeholder(env: &Env, slot: &Slot) -> AttrValue {
     if slot.kind == SlotKind::Literal
-        && let Some(dt) = left_operand_term(env, slot).and_then(|t| t.hints.datatype.as_deref())
+        && let Some(dt) = left_operand_hints(env, slot).and_then(|h| h.datatype.as_deref())
         && let Some((_, p)) = env
             .cfg
             .labels
@@ -605,6 +733,9 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
     let pick_as_iri = slot.kind == SlotKind::Literal
         && matches!(slot.path.field, Field::RightOperand(_))
         && !holds_iri(&env.doc, &slot.path);
+    let host = host_values(&env, slot);
+    // A literal member of the list is text, not an IRI.
+    let literals = literal_members(&env, slot);
 
     let commit: Callback<How> = {
         let node_ref = node_ref.clone();
@@ -617,6 +748,7 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         let env = env.clone();
         let slot = slot.clone();
         let options = closed.map(|_| options.clone());
+        let literals = literals.clone();
         let invalid = invalid.clone();
         let announce = announce.clone();
         let open = open.clone();
@@ -652,8 +784,11 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                 let allowed = allowed_options(&env, &slot, closure, options);
                 match resolve(&env, &slot, closure, &allowed, &value, how == How::Enter) {
                     Some(v) => {
+                        as_iri = closure == Closure::Values
+                            && pick_as_iri
+                            && picks_iri(host, &v)
+                            && !literals.contains(&v);
                         value = v;
-                        as_iri = closure == Closure::Values && pick_as_iri;
                     }
                     None if how == How::Blur => {
                         // Given up: back to the value, and say so.
@@ -723,13 +858,14 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
         let onedit = env.onedit.clone();
         let path = slot.path.clone();
         let owner = slot.owner;
+        let literals = literals.clone();
         Callback::from(move |value: AttrValue| {
             if let Some(el) = node_ref.cast::<web_sys::Element>() {
                 el.set_text_content(Some(&value));
             }
             *refocus.borrow_mut() = true;
             open.set(false);
-            if pick_as_iri {
+            if pick_as_iri && picks_iri(host, &value) && !literals.iter().any(|l| *l == *value) {
                 *dirty.borrow_mut() = false;
                 onedit.emit(EditEvent::SetIri {
                     slot: path.clone(),
@@ -1130,7 +1266,9 @@ pub(crate) fn slot_editor(props: &SlotEditorProps) -> Html {
                 </span>
             </span>
             if not_in_profile {
-                <small id={note_id} class="prose-slot-note">{ cfg.labels.not_in_profile.clone() }</small>
+                <small id={note_id} class="prose-slot-note">{
+                    if host { cfg.labels.not_in_source.clone() } else { cfg.labels.not_in_profile.clone() }
+                }</small>
             }
             if let Some(message) = &*invalid {
                 <span

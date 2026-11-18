@@ -2,8 +2,10 @@
 //! [`EditRules`]), wording, class names, inline styles, vocabularies and
 //! button looks. Nothing here is specific to a host; the defaults are the
 //! ODRL JSON-LD preset.
-use prose_core::edit::{EditRules, EmptyText, Field, ListKind, ListPath, NodePath, RuleList, Step};
-use prose_core::profile::{Prefixes, ProfileVocab, Term, TermKind, Wording};
+use prose_core::edit::{
+    EditRules, EmptyText, Field, ListKind, ListPath, NodePath, RuleList, Step, StrictEdit,
+};
+use prose_core::profile::{Prefixes, ProfileVocab, Term, TermKind, ValueSources, Wording};
 use prose_core::validate::{Options, Validator};
 use prose_core::wording;
 use std::collections::{HashMap, HashSet};
@@ -517,6 +519,8 @@ pub struct Labels {
     /// The operator select's two groups, when the profile suggests
     /// operators for the left operand.
     pub suggested_operators: AttrValue,
+    /// As `suggested_operators`, for operators the operator overlay suggests.
+    pub suggested_operators_overlay: AttrValue,
     pub other_operators: AttrValue,
     /// The heading of profile values offered for a left operand the profile
     /// suggests no values for.
@@ -530,14 +534,25 @@ pub struct Labels {
     /// `TermInput::Select` with no profile loaded: the note under a select
     /// whose value is none of its options.
     pub not_in_list: AttrValue,
+    /// The note under a select, or a closed field, whose value the host's
+    /// value source no longer lists.
+    pub not_in_source: AttrValue,
     /// Announced when a closed field is left with text it does not take and
     /// goes back to its value: `{kept}` is that value, `{typed}` the text.
     pub kept_previous: AttrValue,
     /// As `kept_previous`, for a field that was empty.
     pub kept_empty: AttrValue,
     /// The operator select's groups under a closed left operand.
+    /// `allowed_group` and `not_allowed_group` name the profile; when the
+    /// operator list came from the operator overlay, or from the companion
+    /// shapes, the select's groups use these instead, so the label says who
+    /// is asking.
     pub allowed_group: AttrValue,
     pub not_allowed_group: AttrValue,
+    pub allowed_group_overlay: AttrValue,
+    pub not_allowed_group_overlay: AttrValue,
+    pub allowed_group_shapes: AttrValue,
+    pub not_allowed_group_shapes: AttrValue,
     /// The selected option when it is one the profile does not allow;
     /// `{label}` is its label.
     pub not_allowed_option: AttrValue,
@@ -609,6 +624,7 @@ impl Default for Labels {
             from_profile: a("From {profile}"),
             deprecated: a("Deprecated in the profile"),
             suggested_operators: a("Suggested by the profile"),
+            suggested_operators_overlay: a("Suggested by the overlay"),
             other_operators: a("Other operators"),
             profile_values: a("Profile values (not specific to this operand)"),
             datatype_placeholders: [
@@ -624,10 +640,15 @@ impl Default for Labels {
             .collect(),
             not_in_profile: a("(not in the profile)"),
             not_in_list: a("(not in the list)"),
+            not_in_source: a("(not in the host's list)"),
             kept_previous: a("Kept \"{kept}\"; \"{typed}\" is not in the profile"),
             kept_empty: a("\"{typed}\" is not in the profile; the field stays empty"),
             allowed_group: a("Allowed by the profile"),
             not_allowed_group: a("Not allowed by the profile"),
+            allowed_group_overlay: a("Allowed by the overlay"),
+            not_allowed_group_overlay: a("Not allowed by the overlay"),
+            allowed_group_shapes: a("Allowed by the shapes"),
+            not_allowed_group_shapes: a("Not allowed by the shapes"),
             not_allowed_option: a("{label} (not allowed)"),
             not_allowed_term: a("\"{typed}\" is not an allowed {field} in {profile}."),
             did_you_mean: a("Did you mean {suggestion}?"),
@@ -920,10 +941,21 @@ pub struct EditConfig {
     /// (the default), or a `<select>` of the terms the vocabulary and the
     /// loaded profiles define. See [`TermInput`].
     pub term_input: TermInput,
+    /// What the editor does with an edit that writes a term the validator
+    /// (see [`EditConfig::with_strict`]) does not allow: [`StrictEdit::Flag`]
+    /// (the default) commits it and the report marks it;
+    /// [`StrictEdit::RefuseTerms`] refuses it. Without a validator it does nothing.
+    pub strict_edit: StrictEdit,
     /// The loaded profiles: their labels in the sentences, their terms in
     /// the suggestions and selects. Set it with [`EditConfig::with_wording`],
     /// which also extends `vocab`.
     pub wording: Rc<Wording>,
+    /// The values the host took from its registry or catalog (participant
+    /// DIDs, credential types, asset ids, purposes), per left operand and
+    /// per party role. Set it with [`EditConfig::with_value_sources`]; it
+    /// survives a later [`EditConfig::with_wording`]. The editor never
+    /// fetches: the host does, and caches.
+    pub value_sources: ValueSources,
     /// Validation of the document against `wording`, when the host asks
     /// for it. Set it with [`EditConfig::with_strict`]; `None` (the
     /// default) validates nothing.
@@ -937,7 +969,28 @@ impl EditConfig {
     /// set before are not taken out.
     pub fn with_wording(mut self, w: Rc<Wording>) -> EditConfig {
         self.vocab = self.vocab.with_profiles_in(&w, &self.labels.group_profile);
-        self.wording = w;
+        self.wording = match self.value_sources.is_empty() {
+            true => w,
+            false => Rc::new((*w).clone().with_value_sources(self.value_sources.clone())),
+        };
+        match self.validator.take() {
+            Some(v) => self.with_strict(v.options().clone()),
+            None => self,
+        }
+    }
+
+    /// Uses the host's runtime value sources (see [`ValueSources`]), replacing
+    /// those set before; an empty set clears them. They are laid over the
+    /// hints of `wording` (profile < overlay < shapes < host), so a right
+    /// operand a closed source lists is a select of those values (with
+    /// [`TermInput::Select`]), listed with their labels under their groups;
+    /// a value the source no longer lists stays, selected and flagged;
+    /// a party role's source feeds the suggestions of those slots. Works
+    /// before or after [`EditConfig::with_wording`]; a validator already
+    /// set is rebuilt over the new hints.
+    pub fn with_value_sources(mut self, sources: ValueSources) -> EditConfig {
+        self.wording = Rc::new((*self.wording).clone().with_value_sources(sources.clone()));
+        self.value_sources = sources;
         match self.validator.take() {
             Some(v) => self.with_strict(v.options().clone()),
             None => self,
@@ -1073,7 +1126,9 @@ impl Default for EditConfig {
             max_suggestions: 8,
             host_plans_operator_switches: false,
             term_input: TermInput::Free,
+            strict_edit: StrictEdit::Flag,
             wording: Rc::new(Wording::default()),
+            value_sources: ValueSources::default(),
             validator: None,
         }
     }
@@ -1541,6 +1596,13 @@ mod tests {
         assert!(EditConfig::default().validator.is_none());
         let cfg = EditConfig::default().with_wording(Rc::new(research_closed()));
         assert!(cfg.validator.is_none());
+    }
+
+    #[test]
+    fn strict_edit_flags_by_default_and_the_rules_nest_without_a_limit() {
+        let c = EditConfig::default();
+        assert_eq!(c.strict_edit, StrictEdit::Flag);
+        assert_eq!(c.rules.logical_depth, prose_core::edit::Limit::ANY);
     }
 
     #[test]

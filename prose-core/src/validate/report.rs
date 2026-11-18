@@ -4,7 +4,7 @@
 //! renaming one is `@2`.
 use super::{Basis, Expected, Finding, Level, Mode, Options, RULES, Report, RuleId, Tier, Verdict};
 use crate::edit::{IssueTarget, Severity};
-use crate::profile::{OdrlVocab, TermKind};
+use crate::profile::{HintSource, OdrlVocab, TermKind};
 use serde_json::{Value, json};
 use std::collections::HashSet;
 
@@ -228,6 +228,20 @@ fn expected(e: &Expected) -> Value {
     // reads as before.
     if e.values_total > 0 {
         v["valuesTotal"] = json!(e.values_total);
+    }
+    // Added keys, each only when it applies: a report on a profile's hints
+    // reads as before.
+    if let Some(source) = e.source.filter(|s| *s != HintSource::Profile) {
+        v["source"] = json!(source.as_str());
+    }
+    if let Some(p) = &e.pattern {
+        v["pattern"] = json!(p);
+    }
+    if let Some(m) = &e.min_inclusive {
+        v["minInclusive"] = json!(m);
+    }
+    if let Some(m) = &e.max_inclusive {
+        v["maxInclusive"] = json!(m);
     }
     v
 }

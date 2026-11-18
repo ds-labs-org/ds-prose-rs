@@ -5,10 +5,11 @@ use super::lexical::lexical;
 use super::{Expected, Finding, Fix, Level, MAX_EXPECTED_VALUES, Mode, Options, RuleId, TermRef};
 use crate::edit::*;
 use crate::profile::{
-    OdrlVocab, OperandHints, Prefixes, ProfileVocab, Term, TermKind, Wording, is_odrl_context,
-    odrl_spelling, odrl_term,
+    HintSource, OdrlVocab, OperandHints, Prefixes, ProfileVocab, Term, TermKind, Wording,
+    is_odrl_context, odrl_spelling, odrl_term,
 };
 use crate::read::{join_with, node_prefixes, policy_nodes};
+use crate::shapes::{Bound, Pattern, outside_bounds};
 use crate::words::local_name;
 use crate::words_ctx::{namespace, profile_name};
 use std::collections::{HashMap, HashSet};
@@ -24,6 +25,26 @@ fn odrl_owned(iri: &str, vocab: OdrlVocab) -> bool {
     iri.starts_with(ODRL) || odrl_term(odrl_spelling(iri), vocab).is_some()
 }
 const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
+
+/// "the profile allows", "the overlay allows" or "the shapes allow": `verb`
+/// is the singular form, as the profile takes it.
+fn the(source: HintSource, verb: &str) -> String {
+    match source {
+        HintSource::Profile | HintSource::Overlay | HintSource::Host => {
+            format!("{} {verb}", source.noun())
+        }
+        _ => {
+            let (first, rest) = verb.split_once(' ').unwrap_or((verb, ""));
+            let plural = first.strip_suffix('s').unwrap_or(first);
+            let tail = if rest.is_empty() {
+                String::new()
+            } else {
+                format!(" {rest}")
+            };
+            format!("{} {plural}{tail}", source.noun())
+        }
+    }
+}
 
 /// The most profiles that are not loaded one policy's findings name; one
 /// more finding counts the rest.
@@ -208,7 +229,7 @@ pub(crate) fn admissible_values(
                 && let Some(h) = c
                     .resolve(&a.left)
                     .filter(|(t, _)| t.kinds.contains(&TermKind::LeftOperand))
-                    .map(|(t, _)| &t.hints)
+                    .map(|(t, _)| w.operand_hints(t))
             {
                 let mut written = a.clone();
                 if pos == Pos::Operator {
@@ -251,6 +272,9 @@ struct Checker<'a> {
     /// imported or nested), which may bind any prefix or term: no policy's
     /// terms read as they would in JSON-LD for certain.
     context_unread: bool,
+    /// The ODRL property keys the reader skipped (see `Checker::unread_keys`):
+    /// a constraint whose own object holds one may keep its parts under it.
+    unread: HashSet<String>,
     /// Per policy: on an inheritance cycle within the document. Empty when
     /// the structural tier is off.
     cycles: Vec<bool>,
@@ -564,6 +588,7 @@ impl<'a> Checker<'a> {
             cur: None,
             unsure: false,
             context_unread: false,
+            unread: doc.unread.iter().cloned().collect(),
             cycles: Vec::new(),
             remote: Vec::new(),
             inherited: Vec::new(),
@@ -835,6 +860,9 @@ impl<'a> Checker<'a> {
             }
             return;
         }
+        if self.closed_out(node, id, field, written, pos, &iri) {
+            return;
+        }
         match resolved {
             Some((t, p)) => {
                 // A profile's term: the policy must name a profile that
@@ -883,6 +911,59 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+    }
+
+    /// A term the companion shapes close the list to (`sh:in` on
+    /// `odrl:action` or `odrl:leftOperand`) and `iri` is not in. Silent while
+    /// an `@context` was not read: it may rebind the prefix, so the term may
+    /// not be the one the list names.
+    fn closed_out(
+        &mut self,
+        node: &NodePath,
+        id: NodeId,
+        field: Field,
+        written: &str,
+        pos: Pos,
+        iri: &str,
+    ) -> bool {
+        let Some(kind) = pos.kind() else {
+            return false;
+        };
+        let Some(allowed) = self.w.closed_terms(kind) else {
+            return false;
+        };
+        if self.context_unread || allowed.iter().any(|a| a == iri) {
+            return false;
+        }
+        let msg = format!(
+            "the {} \"{written}\" is not one {} for this policy",
+            pos.noun(),
+            the(HintSource::Shapes, "allows")
+        );
+        let allowed: Vec<String> = allowed.to_vec();
+        if let Some(f) = self.emit_term(
+            RuleId::ProfileUnknownTerm,
+            false,
+            node,
+            id,
+            field,
+            written,
+            msg,
+        ) {
+            f.expected = Some(Expected {
+                kinds: vec![kind],
+                values_total: if allowed.len() > MAX_EXPECTED_VALUES {
+                    allowed.len()
+                } else {
+                    0
+                },
+                values: allowed.into_iter().take(MAX_EXPECTED_VALUES).collect(),
+                closed: true,
+                source: Some(HintSource::Shapes),
+                ..Expected::default()
+            });
+        }
+        true
     }
 
     fn not_a_conflict_strategy(&mut self, node: &NodePath, id: NodeId, written: &str) {
@@ -1353,10 +1434,15 @@ impl<'a> Checker<'a> {
 
     /// An atomic constraint's shape (IM 2.5.1).
     fn constraint_structure(&mut self, path: &NodePath, a: &AtomicConstraint) {
-        if self.options.level_of(RuleId::OdrlConstraintShape, false) == Level::Off
+        let shape = self.options.level_of(RuleId::OdrlConstraintShape, false) != Level::Off;
+        if !shape
             && self
                 .options
                 .level_of(RuleId::OdrlSetOperatorCardinality, false)
+                == Level::Off
+            && self
+                .options
+                .level_of(RuleId::OdrlConstraintIncomplete, false)
                 == Level::Off
         {
             return;
@@ -1378,11 +1464,17 @@ impl<'a> Checker<'a> {
         } else if a.right == RightOperand::Missing {
             missing.push("no right operand");
         }
-        if !missing.is_empty() {
+        // A part that is missing is `odrl.constraint-shape`'s when that rule
+        // is on; the constraint is not reported twice.
+        let said = shape && !missing.is_empty();
+        if said {
             let msg = format!("this constraint has {}", missing.join(" and "));
             if let Some(f) = self.emit(RuleId::OdrlConstraintShape, false, node(), msg) {
                 f.node = Some(a.id);
             }
+        }
+        if !said {
+            self.unfinished(path, a);
         }
         if let RightOperand::Values(values) = &a.right
             && values.len() > 1
@@ -1403,6 +1495,86 @@ impl<'a> Checker<'a> {
                     f.node = Some(a.id);
                 }
             }
+        }
+    }
+
+    /// Whether the constraint's own object held a key the reader skipped
+    /// (see `doc.unread`): only then is it unsafe to call it unfinished.
+    fn constraint_unread(&self, a: &AtomicConstraint) -> bool {
+        if self.unread.is_empty() {
+            return false;
+        }
+        let Some(origin) = &a.origin else {
+            return false;
+        };
+        let mut stack = vec![(origin.value(), 0usize)];
+        while let Some((v, depth)) = stack.pop() {
+            if depth > 16 {
+                continue;
+            }
+            match v {
+                serde_json::Value::Array(xs) => stack.extend(xs.iter().map(|x| (x, depth + 1))),
+                serde_json::Value::Object(o) => {
+                    for (k, x) in o {
+                        if self.unread.contains(k) {
+                            return true;
+                        }
+                        stack.push((x, depth + 1));
+                    }
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
+    /// A constraint left unfinished: no left operand, no operator, no right
+    /// operand, or a right operand that is an empty string.
+    fn unfinished(&mut self, path: &NodePath, a: &AtomicConstraint) {
+        if self.constraint_unread(a)
+            || self
+                .options
+                .level_of(RuleId::OdrlConstraintIncomplete, false)
+                == Level::Off
+        {
+            return;
+        }
+        let blank = |s: &str| s.trim().is_empty();
+        let mut lacks: Vec<&str> = Vec::new();
+        if blank(&a.left) {
+            lacks.push("no left operand");
+        }
+        if blank(&a.operator) {
+            lacks.push("no operator");
+        }
+        match &a.right {
+            RightOperand::Missing => lacks.push("no right operand"),
+            RightOperand::Reference(r) if blank(r) => lacks.push("no right operand"),
+            RightOperand::Values(v) if v.is_empty() => lacks.push("no right operand"),
+            RightOperand::Values(v)
+                if v.iter().any(|l| matches!(l, Literal::Str(s) if blank(s))) =>
+            {
+                lacks.push("an empty right operand");
+            }
+            _ => {}
+        }
+        if lacks.is_empty() {
+            return;
+        }
+        let last = lacks.pop().unwrap_or_default();
+        let what = if lacks.is_empty() {
+            last.to_string()
+        } else {
+            format!("{} and {last}", lacks.join(", "))
+        };
+        let msg = format!("this constraint is not finished: it has {what}");
+        if let Some(f) = self.emit(
+            RuleId::OdrlConstraintIncomplete,
+            false,
+            IssueTarget::Node(path.clone()),
+            msg,
+        ) {
+            f.node = Some(a.id);
         }
     }
 
@@ -1473,7 +1645,10 @@ impl<'a> Checker<'a> {
             for (i, e) in list.iter().enumerate() {
                 let path = owner.child(Step::Entity(role, i));
                 match &e.locked {
-                    None => self.constraints(&path, Step::Refinement, &e.refinement),
+                    None => {
+                        self.host_party(&path, e, role);
+                        self.constraints(&path, Step::Refinement, &e.refinement);
+                    }
                     Some(reason) => {
                         let noun = match role {
                             EntityRole::Target => "asset",
@@ -1484,6 +1659,65 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+        }
+    }
+
+    /// A party or an asset, against the host's closed source for its role. A
+    /// value the source no longer lists is flagged and kept; a source that
+    /// only suggests flags nothing.
+    fn host_party(&mut self, path: &NodePath, e: &Entity, role: EntityRole) {
+        let Some(source) = self.w.role_source(role).filter(|s| s.is_closed()) else {
+            return;
+        };
+        let Some(iri) = e.iri.as_deref().filter(|i| !i.is_empty()) else {
+            return;
+        };
+        let here = self.expand(iri);
+        if source
+            .values()
+            .iter()
+            .any(|v| v.value() == iri || self.expand(v.value()) == here)
+        {
+            return;
+        }
+        let noun = match role {
+            EntityRole::Target => "an asset",
+            _ => "a party",
+        };
+        let msg = format!(
+            "\"{iri}\" is not {noun} {} as the {}",
+            the(HintSource::Host, "allows"),
+            role.as_str()
+        );
+        let total = source.values().len();
+        let expected = Expected {
+            values: source
+                .values()
+                .iter()
+                .take(MAX_EXPECTED_VALUES)
+                .map(|v| v.value().to_string())
+                .collect(),
+            values_total: if total > MAX_EXPECTED_VALUES {
+                total
+            } else {
+                0
+            },
+            closed: true,
+            source: Some(HintSource::Host),
+            ..Expected::default()
+        };
+        if let Some(f) = self.emit(
+            RuleId::ProseValueNotAllowed,
+            true,
+            slot(path, Field::Iri),
+            msg,
+        ) {
+            f.node = Some(e.id);
+            f.term = Some(TermRef {
+                written: iri.to_string(),
+                iri: here,
+            });
+            f.expected = Some(expected);
         }
     }
 
@@ -1498,6 +1732,95 @@ impl<'a> Checker<'a> {
             self.term(&path, a.id, Field::Name, &a.name, Pos::Action);
             self.constraints(&path, Step::Refinement, &a.refinement);
         }
+        self.duplicate_actions(owner, actions);
+    }
+
+    /// An action listed again in the same rule (or policy), in any
+    /// spelling of the same IRI.
+    fn duplicate_actions(&mut self, owner: &NodePath, actions: &[ActionNode]) {
+        if self
+            .options
+            .level_of(RuleId::HeuristicDuplicateAction, false)
+            == Level::Off
+        {
+            return;
+        }
+        // Refinements of the actions seen so far under each name, ids and
+        // origins dropped, so that equal ones compare equal.
+        let mut seen: HashMap<String, Vec<Vec<ConstraintNode>>> = HashMap::new();
+        for (i, a) in actions.iter().enumerate() {
+            if a.locked.is_some() || a.name.is_empty() {
+                continue;
+            }
+            let mut plain = a.clone();
+            crate::edit::normalize_action(&mut plain);
+            let earlier = seen.entry(self.expand(&a.name)).or_default();
+            // Only a copy with the same refinements is removable unchanged: a
+            // refined action grants or forbids less than a bare one.
+            let same = earlier.contains(&plain.refinement);
+            let first = earlier.is_empty();
+            earlier.push(plain.refinement);
+            if first {
+                continue;
+            }
+            let msg = format!("the action \"{}\" is listed twice in this rule", a.name);
+            let list = ListPath::of(owner, ListKind::Actions);
+            let remove = EditEvent::Remove {
+                list,
+                index: i,
+                expect: a.id,
+            };
+            let path = owner.child(Step::Action(i));
+            if let Some(f) = self.emit_term(
+                RuleId::HeuristicDuplicateAction,
+                false,
+                &path,
+                a.id,
+                Field::Name,
+                &a.name,
+                msg,
+            ) && same
+            {
+                f.fixes.push(Fix {
+                    label: "Remove the duplicate".into(),
+                    safe: true,
+                    replacement: String::new(),
+                    events: vec![remove],
+                });
+            }
+        }
+    }
+
+    /// An `and`, `or` or `xone` group around one condition.
+    fn single_child_group(&mut self, path: &NodePath, l: &LogicalConstraint) {
+        if l.children.len() != 1
+            || self
+                .options
+                .level_of(RuleId::HeuristicSingleChildGroup, false)
+                == Level::Off
+        {
+            return;
+        }
+        let op = l.op.as_str();
+        let msg = format!("this \"{op}\" group holds one condition; the group adds nothing");
+        let unwrap = EditEvent::Unwrap {
+            constraint: path.clone(),
+            expect: l.id,
+        };
+        if let Some(f) = self.emit(
+            RuleId::HeuristicSingleChildGroup,
+            false,
+            IssueTarget::Node(path.clone()),
+            msg,
+        ) {
+            f.node = Some(l.id);
+            f.fixes.push(Fix {
+                label: "Ungroup".into(),
+                safe: true,
+                replacement: String::new(),
+                events: vec![unwrap],
+            });
+        }
     }
 
     fn constraints(&mut self, owner: &NodePath, step: fn(usize) -> Step, list: &[ConstraintNode]) {
@@ -1505,7 +1828,10 @@ impl<'a> Checker<'a> {
             let path = owner.child(step(i));
             match c {
                 ConstraintNode::Atomic(a) => self.atomic(&path, a),
-                ConstraintNode::Logical(l) => self.constraints(&path, Step::Child, &l.children),
+                ConstraintNode::Logical(l) => {
+                    self.single_child_group(&path, l);
+                    self.constraints(&path, Step::Child, &l.children);
+                }
                 ConstraintNode::Reference { id, iri, .. } => {
                     let msg = format!(
                         "the constraint <{iri}> is only referenced, so it could not be checked"
@@ -1544,7 +1870,7 @@ impl<'a> Checker<'a> {
         let hints = self
             .resolve(&a.left)
             .filter(|(t, _)| t.kinds.contains(&TermKind::LeftOperand))
-            .map(|(t, _)| &t.hints)
+            .map(|(t, _)| self.w.operand_hints(t))
             .filter(|h| !(strict && h.closed && self.context_unread));
         if let Some(h) = hints {
             self.hint_operator(path, a, h);
@@ -1554,6 +1880,7 @@ impl<'a> Checker<'a> {
         // switches a rule on.
         if let Some(h) = hints {
             self.hint_values(path, a, h);
+            self.hint_lexical(path, a, h);
             self.hint_unit(path, a, h);
             self.datatype_conflict(path, a, h);
         }
@@ -1562,7 +1889,7 @@ impl<'a> Checker<'a> {
         let hinted = hints
             .filter(|h| {
                 self.options
-                    .level_of(RuleId::ProseDatatypeLexical, h.closed)
+                    .level_of(RuleId::ProseDatatypeLexical, h.binds_other_facets())
                     >= self.options.level_of(RuleId::ProseIllTypedLiteral, false)
             })
             .and_then(|h| h.datatype.as_deref());
@@ -1583,16 +1910,19 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|o| local_name(o).to_string())
             .collect();
-        let binding = h.closed && self.options.mode() == Mode::Strict;
+        let binding = h.binds_other_facets() && self.options.mode() == Mode::Strict;
         let msg = format!(
-            "the profile {} the operators {} for \"{}\"",
-            if binding { "allows only" } else { "suggests" },
+            "{} the operators {} for \"{}\"",
+            the(
+                h.sources.operators,
+                if binding { "allows only" } else { "suggests" }
+            ),
             join_with(&names, "or"),
             a.left
         );
         if let Some(f) = self.emit_term(
             RuleId::ProseOperatorNotAllowed,
-            h.closed,
+            h.binds_other_facets(),
             path,
             a.id,
             Field::Operator,
@@ -1601,7 +1931,8 @@ impl<'a> Checker<'a> {
         ) {
             f.expected = Some(Expected {
                 operators: h.operators.clone(),
-                closed: h.closed,
+                closed: h.binds_other_facets(),
+                source: Some(h.sources.operators),
                 ..Expected::default()
             });
         }
@@ -1627,18 +1958,20 @@ impl<'a> Checker<'a> {
             let raw = l.raw();
             if !fits(&raw) {
                 let msg = format!(
-                    "\"{raw}\" is not {noun}, which the profile expects for \"{}\"",
+                    "\"{raw}\" is not {noun}, which {} for \"{}\"",
+                    the(h.sources.datatype, "expects"),
                     a.left
                 );
                 if let Some(f) = self.emit(
                     RuleId::ProseDatatypeLexical,
-                    h.closed,
+                    h.binds_other_facets(),
                     slot(path, Field::RightOperand(k)),
                     msg,
                 ) {
                     f.expected = Some(Expected {
                         datatype: h.datatype.clone(),
-                        closed: h.closed,
+                        closed: h.binds_other_facets(),
+                        source: Some(h.sources.datatype),
                         ..Expected::default()
                     });
                 }
@@ -1651,30 +1984,35 @@ impl<'a> Checker<'a> {
     /// only to say so; on a closed one every value must be allowed, and a
     /// string naming an allowed IRI should be that IRI.
     fn hint_values(&mut self, path: &NodePath, a: &AtomicConstraint, h: &OperandHints) {
-        if h.value_tree.is_empty() {
+        if h.value_tree.is_empty() && h.literal_values.is_empty() {
             return;
         }
         let allowed: HashSet<&str> = h.value_tree.iter().map(|(v, _)| v.as_str()).collect();
+        let total = h.value_tree.len() + h.literal_values.len();
         let expected = || Expected {
             values: h
                 .value_tree
                 .iter()
+                .map(|(v, _)| v)
+                .chain(&h.literal_values)
                 .take(MAX_EXPECTED_VALUES)
-                .map(|(v, _)| v.clone())
+                .cloned()
                 .collect(),
-            values_total: if h.value_tree.len() > MAX_EXPECTED_VALUES {
-                h.value_tree.len()
+            values_total: if total > MAX_EXPECTED_VALUES {
+                total
             } else {
                 0
             },
             closed: h.closed,
+            source: Some(h.sources.values),
             ..Expected::default()
         };
         let values = match &a.right {
             RightOperand::Values(v) => v,
             RightOperand::Reference(_) => {
                 let msg = format!(
-                    "the right operand is only referenced (rightOperandReference), so the values the profile allows for \"{}\" could not be checked",
+                    "the right operand is only referenced (rightOperandReference), so the values {} for \"{}\" could not be checked",
+                    the(h.sources.values, "allows"),
                     a.left
                 );
                 if h.closed {
@@ -1684,18 +2022,32 @@ impl<'a> Checker<'a> {
             }
             RightOperand::Missing => return,
         };
+        // A host lists values as text (DIDs, asset ids): a policy may write a
+        // listed value as an IRI or as a string, and either is the value.
+        let host = h.sources.values == HintSource::Host;
         for (k, l) in values.iter().enumerate() {
             let raw = l.raw();
             let field = Field::RightOperand(k);
+            if host
+                && (allowed.contains(raw.as_str()) || allowed.contains(self.expand(&raw).as_str()))
+            {
+                continue;
+            }
             if let Literal::Iri(_) = l {
                 if allowed.contains(self.expand(&raw).as_str()) {
                     continue;
                 }
-            } else if !h.closed {
+            } else if !h.closed
+                || h.literal_values
+                    .iter()
+                    .any(|member| same_literal(member, &raw))
+            {
+                // An open operand only suggests; a literal member is allowed.
                 continue;
             } else if allowed.contains(self.expand(&raw).as_str()) {
                 let msg = format!(
-                    "\"{raw}\" names a value the profile allows for \"{}\", but as a plain string; write it as an IRI ({{\"@id\": \"{raw}\"}})",
+                    "\"{raw}\" names a value {} for \"{}\", but as a plain string; write it as an IRI ({{\"@id\": \"{raw}\"}})",
+                    the(h.sources.values, "allows"),
                     a.left
                 );
                 let fix = fix_slot(
@@ -1719,15 +2071,19 @@ impl<'a> Checker<'a> {
             if h.closed
                 && matches!(l, Literal::Iri(_))
                 && self.options.mode() == Mode::Strict
+                && !host
+                && !h.values_exact
                 && self.incomplete()
             {
                 // A profile that is not loaded may add an IRI narrower than
                 // an allowed one: not a violation until it is read. It
-                // cannot add a literal, so a literal stays an error.
+                // cannot add a literal, so a literal stays an error, nor
+                // widen an exact list (an overlay's, a shape's `sh:in`).
                 continue;
             }
             let msg = format!(
-                "\"{raw}\" is not a value the profile allows for \"{}\"",
+                "\"{raw}\" is not a value {} for \"{}\"",
+                the(h.sources.values, "allows"),
                 a.left
             );
             if let Some(f) = self.emit_term(
@@ -1744,6 +2100,71 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Each literal value, against the lexical checks of the companion
+    /// shapes: `sh:pattern`, `sh:minInclusive` and `sh:maxInclusive`.
+    fn hint_lexical(&mut self, path: &NodePath, a: &AtomicConstraint, h: &OperandHints) {
+        if h.pattern.is_none() && h.min_inclusive.is_none() && h.max_inclusive.is_none() {
+            return;
+        }
+        let RightOperand::Values(values) = &a.right else {
+            return;
+        };
+        let pattern = h
+            .pattern
+            .as_deref()
+            .and_then(|p| Pattern::cached(p, &h.pattern_flags).ok());
+        let source = h.sources.lexical;
+        for (k, l) in values.iter().enumerate() {
+            if matches!(l, Literal::Iri(_)) {
+                continue;
+            }
+            let raw = l.raw();
+            let broken = if let Some(p) = &pattern
+                && p.is_match(&raw) == Some(false)
+            {
+                Some(format!(
+                    "\"{raw}\" does not match the pattern \"{}\" {} for \"{}\"",
+                    p.source(),
+                    the(source, "requires"),
+                    a.left
+                ))
+            } else {
+                outside_bounds(&raw, h.min_inclusive.as_deref(), h.max_inclusive.as_deref()).map(
+                    |bound| {
+                        let (which, limit) = match bound {
+                            Bound::Below => ("below the least", h.min_inclusive.as_deref()),
+                            Bound::Above => ("above the greatest", h.max_inclusive.as_deref()),
+                        };
+                        format!(
+                            "\"{raw}\" is {which} value {} for \"{}\" ({})",
+                            the(source, "allows"),
+                            a.left,
+                            limit.unwrap_or_default()
+                        )
+                    },
+                )
+            };
+            let Some(msg) = broken else {
+                continue;
+            };
+            if let Some(f) = self.emit(
+                RuleId::ProseValueNotAllowed,
+                h.closed,
+                slot(path, Field::RightOperand(k)),
+                msg,
+            ) {
+                f.expected = Some(Expected {
+                    closed: h.closed,
+                    source: Some(source),
+                    pattern: h.pattern.clone(),
+                    min_inclusive: h.min_inclusive.clone(),
+                    max_inclusive: h.max_inclusive.clone(),
+                    ..Expected::default()
+                });
+            }
+        }
+    }
+
     /// The unit, against `prose:unit`.
     fn hint_unit(&mut self, path: &NodePath, a: &AtomicConstraint, h: &OperandHints) {
         let Some(u) = a.unit.as_deref().filter(|u| !u.is_empty()) else {
@@ -1753,16 +2174,19 @@ impl<'a> Checker<'a> {
             return;
         }
         let names: Vec<String> = h.units.iter().map(|u| local_name(u).to_string()).collect();
-        let binding = h.closed && self.options.mode() == Mode::Strict;
+        let binding = h.binds_other_facets() && self.options.mode() == Mode::Strict;
         let msg = format!(
-            "the profile {} the units {} for \"{}\"",
-            if binding { "allows only" } else { "suggests" },
+            "{} the units {} for \"{}\"",
+            the(
+                h.sources.units,
+                if binding { "allows only" } else { "suggests" }
+            ),
             join_with(&names, "or"),
             a.left
         );
         if let Some(f) = self.emit_term(
             RuleId::ProseUnitNotAllowed,
-            h.closed,
+            h.binds_other_facets(),
             path,
             a.id,
             Field::Unit,
@@ -1771,7 +2195,8 @@ impl<'a> Checker<'a> {
         ) {
             f.expected = Some(Expected {
                 units: h.units.clone(),
-                closed: h.closed,
+                closed: h.binds_other_facets(),
+                source: Some(h.sources.units),
                 ..Expected::default()
             });
         }
@@ -1785,7 +2210,8 @@ impl<'a> Checker<'a> {
         };
         let expected = || Expected {
             datatype: Some(want.to_string()),
-            closed: h.closed,
+            closed: h.binds_other_facets(),
+            source: Some(h.sources.datatype),
             ..Expected::default()
         };
         if let RightOperand::Values(values) = &a.right {
@@ -1796,12 +2222,13 @@ impl<'a> Checker<'a> {
                 let got = self.expand(datatype);
                 if got != want {
                     let msg = format!(
-                        "\"{value}\" is typed <{got}>, but the profile gives \"{}\" the datatype <{want}>",
+                        "\"{value}\" is typed <{got}>, but {} \"{}\" the datatype <{want}>",
+                        the(h.sources.datatype, "gives"),
                         a.left
                     );
                     if let Some(f) = self.emit(
                         RuleId::ProseDatatypeConflict,
-                        h.closed,
+                        h.binds_other_facets(),
                         slot(path, Field::RightOperand(k)),
                         msg,
                     ) {
@@ -1819,12 +2246,13 @@ impl<'a> Checker<'a> {
             let got = self.expand(own);
             if got != want {
                 let msg = format!(
-                    "the constraint's dataType is <{got}>, but the profile gives \"{}\" the datatype <{want}>",
+                    "the constraint's dataType is <{got}>, but {} \"{}\" the datatype <{want}>",
+                    the(h.sources.datatype, "gives"),
                     a.left
                 );
                 if let Some(f) = self.emit(
                     RuleId::ProseDatatypeConflict,
-                    h.closed,
+                    h.binds_other_facets(),
                     IssueTarget::Node(path.clone()),
                     msg,
                 ) {
@@ -1895,5 +2323,17 @@ impl<'a> Checker<'a> {
                 msg,
             );
         }
+    }
+}
+
+/// Whether a literal value is the shape's literal member: the same text, or
+/// two numbers of the same value (`5` and `5.0`).
+fn same_literal(member: &str, value: &str) -> bool {
+    if member == value {
+        return true;
+    }
+    match (member.trim().parse::<f64>(), value.trim().parse::<f64>()) {
+        (Ok(a), Ok(b)) => a.is_finite() && b.is_finite() && a == b,
+        _ => false,
     }
 }

@@ -63,6 +63,21 @@ the term slots (action, left operand, policy type, and a unit or right
 operand the profile lists entries for) into dropdowns of the loaded
 profiles' terms; `'free'`, the default, keeps typed text with suggestions. A
 stored value outside the list stays selected and flagged.
+`setOutOfScope('show' | 'strip' | 'reject')` makes the limits the scope of the
+document: with `'strip'`, a section in a list limited to `max: 0` (the
+assigner of a policy definition, in the bare, prefixed or full-IRI spelling of
+its key) is dropped when a document is loaded or the limits change, and
+`removed()` returns what went as JSON text (`[{ path, key, limit }]`); with
+`'reject'`, `update` and `setLimits` throw an `OutOfScopeError` whose `paths`
+name the sections. `'show'`, the default, keeps them. `setOutOfScope('reject')` on a
+mounted document that already holds such a section (kept under `'show'`) throws the
+same error and changes nothing: the mode stays `'show'` and the document, and
+`removed()`, are as they were.
+`setRefuseTerms(true)` makes the editor refuse, under validation, an edit that
+writes a term the loaded profiles do not define into a vocabulary slot, rather
+than commit and flag it. `setLimits({ logicalDepth: { max: 2 } })` caps how
+deep `and`/`or`/`xone` groups nest: the buttons that would go deeper are
+hidden and the editor refuses the edit; a document already deeper is kept.
 
 ## Documentation
 
@@ -108,6 +123,53 @@ strict validation does when a left operand is marked `prose:closed true`
 
 `setProfiles([text, ...])` loads several at once and returns the summaries as
 the JSON text of a list (it replaces what `setProfile` loaded; `[]` clears).
+
+`setShapes(text | null)` loads the dataspace's companion SHACL shapes (JSON-LD,
+or Turtle in the Turtle build) on `ProseHandle`, `ProseEditorHandle` and
+`ProseValidator`, and returns a summary as JSON text (`ShapesSummary`:
+`constraints`, `actions`, `leftOperands`, `warnings`; `"null"` after clearing).
+It throws on text that is not readable shapes and keeps the previous shapes.
+Shapes add hints to the terms the profiles declare and survive a later
+`setProfile`. `sh:in` on a right operand selected by `odrl:leftOperand
+sh:hasValue X` makes it a dropdown (`setTermInput('select')`) and any other
+value an error whose `expected.source` is `"shapes"`. Only a subset of SHACL is
+read; the rest is listed in `warnings`, with what the loaded profiles make
+unusable (an `sh:class` with more members than the limits keep closes
+nothing). That part changes with the profiles, so `shapesSummary()` on
+`ProseHandle` and `ProseEditorHandle` returns the summary again for the
+profiles loaded now. `validate(policyJson, profiles,
+options?, shapes?)` takes the shapes text as its last argument.
+
+`setOverlays(texts)` loads the dataspace's operator overlays (JSON-LD, or Turtle in
+the Turtle build; `[]` clears) on `ProseHandle`, `ProseEditorHandle` and
+`ProseValidator`, and returns one summary per overlay as the JSON text of a list
+(`OverlaySummary`: `terms`, `warnings`). An overlay is a small graph of `prose:`
+hints (`prose:operator`, `prose:rightOperand`, `prose:unit`, `prose:closed` ...)
+about terms the profiles declare: it merges onto them and never adds or relabels
+one, and a term no profile declares is ignored with a warning. It throws on a text
+that is not a readable overlay and keeps the previous overlays. Overlays survive a
+later `setProfile`, and `overlaySummaries()` on `ProseHandle` and `ProseEditorHandle`
+returns the summaries again, recomputed against the profiles loaded now (an overlay's
+`warnings` name terms no profile declares, so they change with the profiles). Precedence per facet: profile < overlay < shapes; a finding an
+overlay closed has `expected.source` `"overlay"`. `validate(policyJson, profiles,
+options?, shapes?, overlays?)` takes the overlay texts as its last argument.
+
+`setValueSource(key, values, { closed }?)` and `setValueSources(map)` give the editor and
+the validators the values the host took from its registry or catalog (participant DIDs,
+credential types, asset ids, purposes); the editor never fetches. `key` is a left
+operand's IRI, or `"assigner"`, `"assignee"` or `"target"` (the assets) for a party role;
+`values` is a list of strings or `{ value, label?, group? }`, and `null` clears the
+source (an empty list is no source). With `{ closed: true }` a right operand is a select
+of exactly those values (with `setTermInput("select")`), with the labels under
+`<optgroup>` headings for the groups, and any other value is an error whose
+`expected.source` is `"host"`; without it the list only suggests. A value the source no
+longer lists is kept in the document, selected, noted and flagged (never dropped), and
+loading a source is not an edit. Both return summaries as JSON text (`ValueSourceSummary`:
+`values`, `closed`, `warnings`); `valueSourceSummaries()` recomputes them against the
+profiles loaded now. They throw on what they cannot read and keep the previous sources,
+and sources survive a later `setProfile`. Precedence per facet: profile < overlay <
+shapes < host. `validate(policyJson, profiles, options?, shapes?, overlays?, valueSources?)`
+takes the map as its last argument.
 
 ## Validation
 

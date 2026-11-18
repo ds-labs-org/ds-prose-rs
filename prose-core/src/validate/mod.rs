@@ -170,7 +170,13 @@ impl Options {
         match self.mode {
             Mode::Advisory => info.advisory,
             Mode::Strict => {
-                if info.tier == Tier::Odrl && !self.structural {
+                // `odrl.constraint-incomplete` is the one structural rule that
+                // is on in strict mode alone: a half-written constraint is
+                // not a catalog offer missing its assigner.
+                if info.tier == Tier::Odrl
+                    && !self.structural
+                    && rule != RuleId::OdrlConstraintIncomplete
+                {
                     return Level::Off;
                 }
                 match rule {
@@ -314,8 +320,18 @@ pub struct Expected {
     pub values_total: usize,
     pub units: Vec<String>,
     pub datatype: Option<String>,
-    /// The left operand is closed by its profile.
+    /// The left operand is closed by its profile or its shapes.
     pub closed: bool,
+    /// What gave the hint the finding is about: the loaded profile, an
+    /// operator overlay, the companion shapes, or a value source the host
+    /// passed at run time. `None` when the finding is not about a hint.
+    pub source: Option<crate::profile::HintSource>,
+    /// `sh:pattern`, when the finding is about a value that does not match.
+    pub pattern: Option<String>,
+    /// `sh:minInclusive`, when the finding is about a bound.
+    pub min_inclusive: Option<String>,
+    /// `sh:maxInclusive`, when the finding is about a bound.
+    pub max_inclusive: Option<String>,
 }
 
 /// A change that would clear a finding.
@@ -485,5 +501,41 @@ mod tests {
         }
         let _ = v.clone().validate(&doc);
         assert_eq!(check::index_builds(), before + 1);
+    }
+
+    /// The lexical check of a hint pattern compiles it once per thread, not
+    /// once per constraint and run.
+    #[test]
+    fn hint_pattern_is_compiled_once_across_runs() {
+        use crate::profile::{ProfileVocab, Wording};
+        use crate::shapes::ShapesGraph;
+        let profile =
+            ProfileVocab::parse(include_str!("../../tests/shapes/dataspace-profile.jsonld"))
+                .unwrap();
+        let shapes =
+            ShapesGraph::parse(include_str!("../../tests/shapes/dataspace-shapes.jsonld")).unwrap();
+        let w = Wording::new().with_profile(profile).with_shapes(shapes);
+        let doc = read_model(
+            r#"{"@type": "Set", "uid": "urn:p",
+                "permission": [{"target": "urn:a", "action": "use",
+                  "constraint": [
+                    {"leftOperand": "https://example.org/dataspace/code", "operator": "eq", "rightOperand": "bad"},
+                    {"leftOperand": "https://example.org/dataspace/code", "operator": "eq", "rightOperand": "worse"}]}]}"#,
+        )
+        .unwrap();
+        let v = Validator::new(Arc::new(w), Options::strict());
+        let first = v.validate(&doc);
+        assert!(
+            first
+                .findings
+                .iter()
+                .any(|f| f.message.contains("does not match the pattern")),
+            "the pattern is read: {first:?}"
+        );
+        let before = crate::shapes::pattern_compiles();
+        for _ in 0..3 {
+            let _ = v.validate(&doc);
+        }
+        assert_eq!(crate::shapes::pattern_compiles(), before);
     }
 }

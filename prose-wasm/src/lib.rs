@@ -21,7 +21,8 @@
 pub mod editor;
 pub mod validation;
 pub use editor::ProseEditorHandle;
-use prose_core::profile::{ProfileError, ProfileVocab, Wording};
+use prose_core::profile::{Overlay, ProfileError, ProfileVocab, ValueSources, Wording};
+use prose_core::shapes::ShapesGraph;
 use prose_core::validate::{Options, Validator};
 use prose_yew::{OdrlProse, OdrlProseProps, SharedWording};
 use serde_json::{Value, json};
@@ -103,6 +104,55 @@ pub fn read_profile(text: Option<&str>) -> Result<Option<SharedWording>, Profile
     }
 }
 
+/// `wording` (the profiles) with the operator overlays laid over it, then the
+/// companion shapes (profile < overlay < shapes); the profiles alone when
+/// there are neither.
+pub(crate) fn shaped(
+    wording: Option<&SharedWording>,
+    shapes: Option<&ShapesGraph>,
+    overlays: &[Overlay],
+    sources: &ValueSources,
+) -> Option<SharedWording> {
+    if shapes.is_none() && overlays.is_empty() && sources.is_empty() {
+        return wording.cloned();
+    }
+    let base = wording.map_or_else(Wording::new, |w| (*w.0).clone());
+    let w = validation::with_overlays(base, overlays);
+    let w = validation::with_shapes(w, shapes);
+    Some(SharedWording::from(validation::with_value_sources(
+        w, sources,
+    )))
+}
+
+/// `current` with the source for `key` set to `values` (a list, or `null`
+/// to clear) and `options` (`{closed?}`); `current` is left as it is. The
+/// error is for the host to read.
+pub(crate) fn next_sources(
+    current: &ValueSources,
+    key: &str,
+    values: &JsValue,
+    options: Option<&JsValue>,
+) -> Result<ValueSources, String> {
+    let values = to_json(values, "values")?.unwrap_or(Value::Null);
+    let options = match options {
+        Some(o) => to_json(o, "options")?,
+        None => None,
+    };
+    let closed = validation::source_closed(options.as_ref())?;
+    let mut next = current.clone();
+    validation::set_value_source(&mut next, key, &values, closed)?;
+    Ok(next)
+}
+
+/// The sources of the map a host passes to `setValueSources`; `null` and
+/// `undefined` are none.
+pub(crate) fn all_sources(map: &JsValue) -> Result<ValueSources, String> {
+    match to_json(map, "valueSources")? {
+        None | Some(Value::Null) => Ok(ValueSources::new()),
+        Some(v) => validation::value_sources(&v),
+    }
+}
+
 /// What `setProfile` returns for a loaded profile, as JSON text: `iri`,
 /// `title` and `version` (each `null` when the profile does not say),
 /// `terms`, `counts` (only the kinds present, keyed in camelCase) and
@@ -148,6 +198,12 @@ pub struct ProseHandle {
     // profiles whenever either changes.
     options: Option<Options>,
     validator: Option<Validator>,
+    // Set by `setShapes`; laid over the profiles whenever either changes.
+    shapes: Option<ShapesGraph>,
+    // Set by `setOverlays`; laid over the profiles, under the shapes.
+    overlays: Vec<Overlay>,
+    // Set by `setValueSource(s)`; laid over everything else.
+    sources: ValueSources,
 }
 
 #[wasm_bindgen]
@@ -167,6 +223,9 @@ impl ProseHandle {
             wording: None,
             options: None,
             validator: None,
+            shapes: None,
+            overlays: Vec::new(),
+            sources: ValueSources::new(),
         }
     }
 
@@ -212,6 +271,139 @@ impl ProseHandle {
         let wording = (!w.is_empty()).then(|| SharedWording::from(w));
         self.set_wording(wording);
         Ok(format!("[{}]", summaries.join(",")))
+    }
+
+    /// Load companion SHACL shapes (JSON-LD or Turtle text), or none for
+    /// `null`: they add hints to the terms the loaded profiles declare, so
+    /// the validation closes a right operand to the values a shape lists, and
+    /// a finding names `"shapes"` as its source. Only a subset of SHACL is
+    /// read; see `ShapesSummary`. Returns the summary as JSON text (`"null"`
+    /// after clearing). Throws when the text is not readable shapes; the
+    /// previous shapes then stay. Kept when the profiles change.
+    #[wasm_bindgen(js_name = setShapes)]
+    pub fn set_shapes(&mut self, text: Option<String>) -> Result<String, JsError> {
+        let shapes = text
+            .as_deref()
+            .map(validation::shapes)
+            .transpose()
+            .map_err(throw)?;
+        let summary = self.summary_of(shapes.as_ref());
+        self.shapes = shapes;
+        self.refresh();
+        self.render();
+        Ok(summary)
+    }
+
+    /// Load operator overlays (JSON-LD or Turtle text each), or none for `[]`:
+    /// annotation-only graphs of `prose:` hints about terms the loaded
+    /// profiles declare. They merge onto those terms and never add or relabel
+    /// one; the shapes, when loaded, win over them. A finding names
+    /// `"overlay"` as its source. Returns one summary per overlay as the JSON
+    /// text of a list (`OverlaySummary`). Throws when a text is not a
+    /// readable overlay (the message names which); the previous overlays then
+    /// stay. Kept when the profiles change.
+    #[wasm_bindgen(js_name = setOverlays)]
+    pub fn set_overlays(&mut self, texts: Vec<String>) -> Result<String, JsError> {
+        let overlays = validation::overlays(&texts).map_err(throw)?;
+        self.overlays = overlays;
+        let summary = self.overlay_summaries();
+        self.refresh();
+        self.render();
+        Ok(summary)
+    }
+
+    /// The summaries of the loaded overlays, as `setOverlays` returns them,
+    /// recomputed against the profiles loaded now: an overlay's `warnings`
+    /// name the terms no loaded profile declares, so they change when the
+    /// profiles do (`setOverlays` only reports the state at its own call).
+    /// `"[]"` without overlays.
+    #[wasm_bindgen(js_name = overlaySummaries)]
+    pub fn overlay_summaries(&self) -> String {
+        let w = self
+            .wording
+            .as_ref()
+            .map_or_else(Wording::new, |w| (*w.0).clone());
+        let w = validation::with_overlays(w, &self.overlays);
+        validation::overlay_summaries_json(&w, &self.overlays)
+    }
+
+    /// The summary of the loaded shapes, as `setShapes` returns it,
+    /// recomputed against the profiles loaded now: what the shapes say that
+    /// the profiles make unusable (an `sh:class` with more members than the
+    /// limits keep) is in its `warnings`, so it changes when the profiles
+    /// do (`setShapes` only reports the state at its own call). `"null"`
+    /// without shapes.
+    #[wasm_bindgen(js_name = shapesSummary)]
+    pub fn shapes_summary(&self) -> String {
+        self.summary_of(self.shapes.as_ref())
+    }
+
+    /// Gives the values the host took from its registry or catalog for one
+    /// left operand (`key` is its IRI) or one party role (`"assigner"`,
+    /// `"assignee"`, `"target"`): a list of strings or
+    /// `{value, label?, group?}`, which fills the select of a right operand
+    /// (with `setTermInput("select")`) and the suggestions of a party slot.
+    /// `options.closed` makes the list binding in strict validation; without
+    /// it the list only suggests. `null` clears the source, and an empty list
+    /// is no source. The values sit on top of the profile, the overlays and
+    /// the shapes, for the values alone, and a finding names `"host"` as its
+    /// source. A value the source no longer lists stays in the document and
+    /// is flagged; it is never dropped. Returns the summary as JSON text
+    /// (`ValueSourceSummary`, `"null"` after clearing). Throws when the
+    /// values or the options cannot be read; the previous source then
+    /// stays. Kept when the profiles change.
+    #[wasm_bindgen(js_name = setValueSource)]
+    pub fn set_value_source(
+        &mut self,
+        key: &str,
+        #[wasm_bindgen(unchecked_param_type = "ValueSourceValue[] | null")] values: JsValue,
+        #[wasm_bindgen(unchecked_optional_param_type = "{ closed?: boolean }")] options: Option<
+            JsValue,
+        >,
+    ) -> Result<String, JsError> {
+        self.sources =
+            next_sources(&self.sources, key, &values, options.as_ref()).map_err(throw)?;
+        let summary = self.value_source_summary(key);
+        self.refresh();
+        self.render();
+        Ok(summary)
+    }
+
+    /// Replaces every value source at once: an object keyed by left operand
+    /// IRI or party role, each a list (suggestions) or `{values, closed?}`;
+    /// `null` or `{}` clears them. Returns one summary per key as the JSON
+    /// text of an object. Throws when it cannot be read; the previous sources
+    /// then stay.
+    #[wasm_bindgen(js_name = setValueSources)]
+    pub fn set_value_sources(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "ValueSources | null")] sources: JsValue,
+    ) -> Result<String, JsError> {
+        self.sources = all_sources(&sources).map_err(throw)?;
+        let summary = self.value_source_summaries();
+        self.refresh();
+        self.render();
+        Ok(summary)
+    }
+
+    /// The summaries of the value sources, as `setValueSources` returns them,
+    /// recomputed against the profiles loaded now: a source for a left
+    /// operand no loaded profile declares is ignored, with a warning.
+    #[wasm_bindgen(js_name = valueSourceSummaries)]
+    pub fn value_source_summaries(&self) -> String {
+        let w = self
+            .wording
+            .as_ref()
+            .map_or_else(Wording::new, |w| (*w.0).clone());
+        validation::value_source_summaries_json(&w, &self.sources)
+    }
+
+    fn value_source_summary(&self, key: &str) -> String {
+        let w = self
+            .wording
+            .as_ref()
+            .map_or_else(Wording::new, |w| (*w.0).clone());
+        validation::value_source_summary_json(&w, &self.sources, key)
     }
 
     /// Turn validation on with `options` (see `ValidateOptions`; `{}` is
@@ -261,12 +453,31 @@ impl ProseHandle {
     }
 
     /// Rebuilds the validator from the options and the profiles.
+    /// The summary JSON of `shapes` laid over what is loaded now.
+    fn summary_of(&self, shapes: Option<&ShapesGraph>) -> String {
+        shapes.map_or_else(
+            || "null".to_string(),
+            |s| {
+                let w = shaped(
+                    self.wording.as_ref(),
+                    Some(s),
+                    &self.overlays,
+                    &self.sources,
+                );
+                validation::shapes_summary_json(s, w.as_ref().map(|w| &*w.0))
+            },
+        )
+    }
+
     fn refresh(&mut self) {
         self.validator = self.options.clone().map(|o| {
-            let w = self
-                .wording
-                .as_ref()
-                .map_or_else(Wording::new, |w| (*w.0).clone());
+            let w = shaped(
+                self.wording.as_ref(),
+                self.shapes.as_ref(),
+                &self.overlays,
+                &self.sources,
+            )
+            .map_or_else(Wording::new, |w| (*w.0).clone());
             Validator::new(Arc::new(w), o)
         });
     }
@@ -276,7 +487,12 @@ impl ProseHandle {
             app.update(props(
                 &self.json,
                 self.class.clone(),
-                self.wording.clone(),
+                shaped(
+                    self.wording.as_ref(),
+                    self.shapes.as_ref(),
+                    &self.overlays,
+                    &self.sources,
+                ),
                 self.validator.clone(),
             ));
         }
@@ -286,20 +502,44 @@ impl ProseHandle {
 /// Validates the policy `json` against the profiles (one text, a list of
 /// texts, or `null`) and returns the report as JSON text
 /// (`ds-prose/validation-report@1`). Strict unless `options.strict` is
-/// `false`. Needs no DOM. Throws on options or profiles it cannot read; a
-/// problem in the policy is never thrown, it is a finding.
+/// `false`. `shapes` is the text of companion SHACL shapes (see
+/// `ProseHandle.setShapes`), if any, and `overlays` the texts of operator
+/// overlays (see `ProseHandle.setOverlays`), and `valueSources` the host's runtime
+/// value sources (see `ProseHandle.setValueSources`). Needs no DOM. Throws on
+/// options, profiles, shapes or overlays it cannot read; a problem in the policy is never
+/// thrown, it is a finding.
 #[wasm_bindgen]
 pub fn validate(
     json: &str,
     #[wasm_bindgen(unchecked_param_type = "string | string[] | null")] profiles: JsValue,
-    options: Option<ValidateOptionsArg>,
+    #[wasm_bindgen(unchecked_optional_param_type = "ValidateOptions | null")] options: Option<
+        ValidateOptionsArg,
+    >,
+    #[wasm_bindgen(unchecked_optional_param_type = "string | null")] shapes: Option<String>,
+    #[wasm_bindgen(unchecked_optional_param_type = "string[] | null")] overlays: Option<
+        Vec<String>,
+    >,
+    #[wasm_bindgen(unchecked_optional_param_type = "ValueSources | null")] value_sources: Option<
+        JsValue,
+    >,
 ) -> Result<String, JsError> {
+    let sources = match value_sources {
+        Some(v) => all_sources(&v).map_err(throw)?,
+        None => ValueSources::new(),
+    };
     let options = options_of(options.as_ref()).map_err(throw)?;
     let texts = match to_json(&profiles, "profiles").map_err(throw)? {
         Some(v) => validation::profile_list(&v).map_err(throw)?,
         None => Vec::new(),
     };
-    let v = validation::validator(&texts, options).map_err(throw)?;
+    let v = validation::validator_with_sources(
+        &texts,
+        shapes.as_deref(),
+        &overlays.unwrap_or_default(),
+        &sources,
+        options,
+    )
+    .map_err(throw)?;
     Ok(validation::validate_text(json, &v))
 }
 
@@ -314,6 +554,12 @@ pub fn rules() -> String {
 #[wasm_bindgen]
 pub struct ProseValidator {
     validator: Validator,
+    // What `setShapes` and `setOverlays` rebuild the validator from.
+    wording: Wording,
+    shapes: Option<ShapesGraph>,
+    overlays: Vec<Overlay>,
+    sources: ValueSources,
+    options: Options,
 }
 
 #[wasm_bindgen]
@@ -327,8 +573,113 @@ impl ProseValidator {
     ) -> Result<ProseValidator, JsError> {
         let options = options_of(options.as_ref()).map_err(throw)?;
         let texts = texts_of(&profiles).map_err(throw)?;
-        let validator = validation::validator(&texts, options).map_err(throw)?;
-        Ok(ProseValidator { validator })
+        let wording = validation::wording(&texts).map_err(throw)?;
+        let validator = Validator::new(Arc::new(wording.clone()), options.clone());
+        Ok(ProseValidator {
+            validator,
+            wording,
+            shapes: None,
+            overlays: Vec::new(),
+            sources: ValueSources::new(),
+            options,
+        })
+    }
+
+    /// Loads companion SHACL shapes (JSON-LD or Turtle text), or none for
+    /// `null`; see `ProseHandle.setShapes`. Returns the summary as JSON text
+    /// (`"null"` after clearing). Throws when the text is not readable
+    /// shapes; the previous shapes then stay.
+    #[wasm_bindgen(js_name = setShapes)]
+    pub fn set_shapes(&mut self, text: Option<String>) -> Result<String, JsError> {
+        let shapes = text
+            .as_deref()
+            .map(validation::shapes)
+            .transpose()
+            .map_err(throw)?;
+        let summary = shapes.as_ref().map_or_else(
+            || "null".to_string(),
+            |s| {
+                let w = validation::with_value_sources(
+                    validation::with_shapes(
+                        validation::with_overlays(self.wording.clone(), &self.overlays),
+                        Some(s),
+                    ),
+                    &self.sources,
+                );
+                validation::shapes_summary_json(s, Some(&w))
+            },
+        );
+        self.shapes = shapes;
+        self.rebuild();
+        Ok(summary)
+    }
+
+    /// Loads operator overlays (JSON-LD or Turtle text each), or none for
+    /// `[]`; see `ProseHandle.setOverlays`. Returns the summaries as the JSON
+    /// text of a list. Throws when a text is not a readable overlay; the
+    /// previous overlays then stay.
+    #[wasm_bindgen(js_name = setOverlays)]
+    pub fn set_overlays(&mut self, texts: Vec<String>) -> Result<String, JsError> {
+        let overlays = validation::overlays(&texts).map_err(throw)?;
+        let summary = validation::overlay_summaries_json(
+            &validation::with_overlays(self.wording.clone(), &overlays),
+            &overlays,
+        );
+        self.overlays = overlays;
+        self.rebuild();
+        Ok(summary)
+    }
+
+    /// Sets, or with `null` clears, the host's value source for one left
+    /// operand or party role; see `ProseHandle.setValueSource`. Returns the
+    /// summary as JSON text. Throws when it cannot be read; the previous
+    /// source then stays.
+    #[wasm_bindgen(js_name = setValueSource)]
+    pub fn set_value_source(
+        &mut self,
+        key: &str,
+        #[wasm_bindgen(unchecked_param_type = "ValueSourceValue[] | null")] values: JsValue,
+        #[wasm_bindgen(unchecked_optional_param_type = "{ closed?: boolean }")] options: Option<
+            JsValue,
+        >,
+    ) -> Result<String, JsError> {
+        self.sources =
+            next_sources(&self.sources, key, &values, options.as_ref()).map_err(throw)?;
+        self.rebuild();
+        Ok(validation::value_source_summary_json(
+            &self.wording,
+            &self.sources,
+            key,
+        ))
+    }
+
+    /// Replaces every value source at once; see `ProseHandle.setValueSources`.
+    /// Returns the summaries as the JSON text of an object. Throws when it
+    /// cannot be read; the previous sources then stay.
+    #[wasm_bindgen(js_name = setValueSources)]
+    pub fn set_value_sources(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "ValueSources | null")] sources: JsValue,
+    ) -> Result<String, JsError> {
+        self.sources = all_sources(&sources).map_err(throw)?;
+        self.rebuild();
+        Ok(validation::value_source_summaries_json(
+            &self.wording,
+            &self.sources,
+        ))
+    }
+
+    /// The validator for the profiles with the overlays, then the shapes,
+    /// then the host's value sources.
+    fn rebuild(&mut self) {
+        let wording = validation::with_value_sources(
+            validation::with_shapes(
+                validation::with_overlays(self.wording.clone(), &self.overlays),
+                self.shapes.as_ref(),
+            ),
+            &self.sources,
+        );
+        self.validator = Validator::new(Arc::new(wording), self.options.clone());
     }
 
     /// The report for the policy `json`, as JSON text.

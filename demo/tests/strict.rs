@@ -315,7 +315,8 @@ async fn the_structural_tier_is_off_until_switched_on() {
     set_textarea(&c, "textarea#policy", STRUCTURAL_BAD);
     settle().await;
     click_tab(&c, "Edit").await;
-    let codes = |c: &Element| text(c, "#problems");
+    // `odrl.constraint-incomplete` is always on in strict mode, structural or not.
+    let codes = |c: &Element| text(c, "#problems").replace("odrl.constraint-incomplete", "");
     assert!(!codes(&c).contains("odrl."), "{}", codes(&c));
     click(&c, "#profile-structural").await;
     assert!(checked(&c, "#profile-structural"));

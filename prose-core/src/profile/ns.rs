@@ -8,9 +8,12 @@ pub(crate) const SKOS: &str = "http://www.w3.org/2004/02/skos/core#";
 pub(crate) const DCT: &str = "http://purl.org/dc/terms/";
 pub(crate) const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
 pub(crate) const PROF: &str = "http://www.w3.org/ns/dx/prof/";
+/// SHACL, read by [`crate::shapes`].
+pub(crate) const SH: &str = "http://www.w3.org/ns/shacl#";
 /// The ds-prose suggestion extension. A ds-prose convention, not ODRL.
 pub(crate) const PROSE: &str = "https://ds-labs-org.github.io/ds-prose-rs/profile#";
 
+pub(crate) const RDF_NIL: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#nil";
 pub(crate) const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 pub(crate) const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
 

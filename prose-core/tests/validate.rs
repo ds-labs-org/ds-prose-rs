@@ -307,6 +307,16 @@ fn catalogue() -> Vec<Row> {
             false,
         ),
         (
+            "odrl.constraint-incomplete",
+            Tier::Odrl,
+            Basis::Standard,
+            Off,
+            Error,
+            None,
+            false,
+            false,
+        ),
+        (
             "prose.operator-not-allowed",
             Tier::Prose,
             Convention,
@@ -416,6 +426,26 @@ fn catalogue() -> Vec<Row> {
             false,
             false,
         ),
+        (
+            "heuristic.single-child-group",
+            Tier::Heuristic,
+            Basis::Heuristic,
+            Off,
+            Off,
+            None,
+            false,
+            false,
+        ),
+        (
+            "heuristic.duplicate-action",
+            Tier::Heuristic,
+            Basis::Heuristic,
+            Off,
+            Off,
+            None,
+            false,
+            false,
+        ),
     ]
 }
 
@@ -438,11 +468,17 @@ fn rules_snapshot() {
         .collect();
     assert_eq!(got, catalogue());
     for r in RULES {
-        assert_eq!(r.since_ruleset, 1, "{}", r.id);
+        let first = match r.id.as_str() {
+            "odrl.constraint-incomplete"
+            | "heuristic.single-child-group"
+            | "heuristic.duplicate-action" => 2,
+            _ => 1,
+        };
+        assert_eq!(r.since_ruleset, first, "{}", r.id);
         assert!(!r.title.is_empty() && !r.source.is_empty(), "{}", r.id);
         assert!(r.since_ruleset <= RULESET);
     }
-    assert_eq!(RULESET, 1);
+    assert_eq!(RULESET, 2);
 }
 
 #[test]
@@ -492,8 +528,9 @@ fn level_of_table_both_modes_open_and_closed() {
             .into_iter()
             .find(|row| row.0 == r.id.as_str())
             .unwrap();
-        // The structural tier is off until switched on; see below.
-        let on = r.tier != Tier::Odrl;
+        // The structural tier is off until switched on; see below. The one
+        // exception is a half-written constraint.
+        let on = r.tier != Tier::Odrl || r.id == RuleId::OdrlConstraintIncomplete;
         let off = |l: Level| if on { l } else { Level::Off };
         assert_eq!(advisory.level_of(r.id, false), row.3, "{}", r.id);
         assert_eq!(advisory.level_of(r.id, true), row.3, "{} closed", r.id);
@@ -511,10 +548,17 @@ fn level_of_table_both_modes_open_and_closed() {
 fn structural_off_by_default_in_strict() {
     let odrl: Vec<RuleId> = RULES
         .iter()
-        .filter(|r| r.tier == Tier::Odrl)
+        .filter(|r| r.tier == Tier::Odrl && r.id != RuleId::OdrlConstraintIncomplete)
         .map(|r| r.id)
         .collect();
     assert_eq!(odrl.len(), 10);
+    // A constraint left unfinished is an error in strict mode alone.
+    let inc = RuleId::OdrlConstraintIncomplete;
+    assert_eq!(Options::strict().level_of(inc, false), Level::Error);
+    assert_eq!(
+        Options::advisory().structural(true).level_of(inc, false),
+        Level::Off
+    );
     for &r in &odrl {
         assert_eq!(Options::strict().level_of(r, false), Level::Off, "{r}");
         assert_eq!(

@@ -1,4 +1,4 @@
-import type { ValidateOptions } from '@ds-labs/prose-wasm';
+import type { ValidateOptions, ValueSources } from '@ds-labs/prose-wasm';
 
 /** What `reportChanged` reads of a `ValidationReport`. */
 export interface ReportLike {
@@ -46,6 +46,32 @@ export function profileTexts(profile: string | null | undefined, profiles: reado
 }
 
 /**
+ * The text for the `shapes` input (companion SHACL shapes, JSON-LD or
+ * Turtle): as given, except that blank text means no shapes, as for a profile.
+ */
+export function shapesText(shapes: string | null | undefined): string | null {
+  return shapes == null || shapes.trim() === '' ? null : shapes;
+}
+
+/**
+ * The texts for the `overlays` input (operator overlays, JSON-LD or Turtle):
+ * as given, except that blank texts are dropped, as for the profiles. `null`
+ * and `undefined` are no overlays.
+ */
+export function overlayTexts(overlays: readonly string[] | null | undefined): string[] {
+  return (overlays ?? []).filter((t) => t.trim() !== '');
+}
+
+/**
+ * The runtime value sources for the `valueSources` input, as given, except
+ * that `null`, `undefined` and `{}` are none (`null`). The keys are a left
+ * operand's IRI, or `"assigner"`, `"assignee"` or `"target"`.
+ */
+export function valueSourcesOf(sources: ValueSources | null | undefined): ValueSources | null {
+  return sources == null || Object.keys(sources).length === 0 ? null : sources;
+}
+
+/**
  * A tracker of the value last handed to the wasm, one per component. It
  * returns true when `value` differs from the last one (compared as JSON), so
  * an unchanged input is not handed over again. `null` and `undefined` are
@@ -83,23 +109,28 @@ export class StandaloneReporter<V extends ValidatorLike = ValidatorLike> {
   private cached?: { key: string; value: V };
   private good: ValidateOptions | null = null;
 
-  private readonly build: (profiles: string[], options: ValidateOptions) => V;
+  private readonly build: (profiles: string[], options: ValidateOptions, shapes: string | null, overlays: string[], sources: ValueSources | null) => V;
 
   // No parameter property: the tests run this file with types stripped only.
-  constructor(build: (profiles: string[], options: ValidateOptions) => V) {
+  constructor(build: (profiles: string[], options: ValidateOptions, shapes: string | null, overlays: string[], sources: ValueSources | null) => V) {
     this.build = build;
   }
 
-  /** The report text for `json`, and the error when `options` were unreadable. */
-  report(profiles: string[], options: ValidateOptions, json: string): { report: string | null; error?: unknown } {
+  /**
+   * The report text for `json`, and the error when `options` were unreadable.
+   * `shapes` is the text of companion SHACL shapes the validator is built
+   * with; the caller passes only shapes that were read, and likewise the
+   * operator `overlays` (texts) and the host's value `sources`.
+   */
+  report(profiles: string[], options: ValidateOptions, json: string, shapes: string | null = null, overlays: string[] = [], sources: ValueSources | null = null): { report: string | null; error?: unknown } {
     try {
-      const report = this.validator(profiles, options).validate(json);
+      const report = this.validator(profiles, options, shapes, overlays, sources).validate(json);
       this.good = options;
       return { report };
     } catch (error) {
       if (this.good) {
         try {
-          return { report: this.validator(profiles, this.good).validate(json), error };
+          return { report: this.validator(profiles, this.good, shapes, overlays, sources).validate(json), error };
         } catch {
           // Not even the previous options work (the profiles changed under them).
         }
@@ -118,10 +149,10 @@ export class StandaloneReporter<V extends ValidatorLike = ValidatorLike> {
     this.cached = undefined;
   }
 
-  private validator(profiles: string[], options: ValidateOptions): V {
-    const key = JSON.stringify([profiles, options]);
+  private validator(profiles: string[], options: ValidateOptions, shapes: string | null, overlays: string[], sources: ValueSources | null): V {
+    const key = JSON.stringify([profiles, options, shapes, overlays, sources]);
     if (this.cached?.key !== key) {
-      const value = this.build(profiles, options);
+      const value = this.build(profiles, options, shapes, overlays, sources);
       this.cached?.value.free();
       this.cached = { key, value };
     }

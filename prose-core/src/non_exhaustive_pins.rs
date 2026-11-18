@@ -51,6 +51,7 @@
 //!     }
 //! }
 //! ```
+//! ```
 //! #![deny(unreachable_patterns)]
 //! #![allow(dead_code)]
 //! use prose_core::edit::NewItem;
@@ -380,6 +381,7 @@
 //!         RuleId::OdrlRuleTarget => 0,
 //!         RuleId::OdrlRuleAction => 0,
 //!         RuleId::OdrlConstraintShape => 0,
+//!         RuleId::OdrlConstraintIncomplete => 0,
 //!         RuleId::OdrlSetOperatorCardinality => 0,
 //!         RuleId::OdrlConsequenceNesting => 0,
 //!         RuleId::OdrlInheritanceCycle => 0,
@@ -394,6 +396,56 @@
 //!         RuleId::InputUnchecked => 0,
 //!         RuleId::InputReaderNote => 0,
 //!         RuleId::HeuristicOrderedOnUnordered => 0,
+//!         RuleId::HeuristicSingleChildGroup => 0,
+//!         RuleId::HeuristicDuplicateAction => 0,
+//!         _ => 1,
+//!     }
+//! }
+//! ```
+//! ```
+//! #![deny(unreachable_patterns)]
+//! #![allow(dead_code)]
+//! use prose_core::profile::HintSource;
+//! fn f(x: &HintSource) -> u8 {
+//!     match x {
+//!         HintSource::Profile => 0,
+//!         HintSource::Overlay => 0,
+//!         HintSource::Shapes => 0,
+//!         HintSource::Host => 0,
+//!         _ => 1,
+//!     }
+//! }
+//! ```
+//! ```
+//! #![deny(unreachable_patterns)]
+//! #![allow(dead_code)]
+//! use prose_core::shapes::ShapesError;
+//! fn f(x: &ShapesError) -> u8 {
+//!     match x {
+//!         ShapesError::TooLarge { .. } => 0,
+//!         ShapesError::Json(_) => 0,
+//!         ShapesError::LooksLikeHtml => 0,
+//!         ShapesError::UnsupportedFormat => 0,
+//!         ShapesError::LimitExceeded(_) => 0,
+//!         ShapesError::Turtle(_) => 0,
+//!         ShapesError::NotShapes(_) => 0,
+//!         _ => 1,
+//!     }
+//! }
+//! ```
+//! ```
+//! #![deny(unreachable_patterns)]
+//! #![allow(dead_code)]
+//! use prose_core::profile::OverlayError;
+//! fn f(x: &OverlayError) -> u8 {
+//!     match x {
+//!         OverlayError::TooLarge { .. } => 0,
+//!         OverlayError::Json(_) => 0,
+//!         OverlayError::LooksLikeHtml => 0,
+//!         OverlayError::UnsupportedFormat => 0,
+//!         OverlayError::LimitExceeded(_) => 0,
+//!         OverlayError::Turtle(_) => 0,
+//!         OverlayError::NotOverlay(_) => 0,
 //!         _ => 1,
 //!     }
 //! }

@@ -59,6 +59,9 @@ export class PolicyComponent {
 | `articleClass` | input | extra class(es) for the rendered `<article class="ds-prose">` |
 | `profile` | input | the ODRL profile the prose is worded with, as JSON-LD text, or Turtle with the Turtle build (`null` or blank: none) |
 | `profiles` | input | several profiles, as text each; a list wins over `profile` (an empty list clears them) |
+| `shapes` | input | the dataspace's companion SHACL shapes as text, JSON-LD or Turtle with the Turtle build (`null` or blank: none); a value a shape's `sh:in` does not list is a finding with `expected.source` `"shapes"` |
+| `overlays` | input | the dataspace's operator overlays as text each (`prose:` hints about terms the profile declares; JSON-LD, or Turtle with the Turtle build); blank texts are dropped. Shapes win over an overlay; a finding an overlay closed has `expected.source` `"overlay"` |
+| `valueSources` | input | values the host took from its registry or catalog (participant DIDs, credential types, asset ids, purposes), keyed by left operand IRI or by party role (`assigner`, `assignee`, `target`): a list of values (`string` or `{ value, label, group }`), which only suggests, or `{ values, closed }`. They sit on top of the profile, overlays and shapes; a finding a closed source caused has `expected.source` `"host"`, and a value it no longer lists stays in the policy |
 | `strict` | input | validate with a closed vocabulary: ODRL plus the loaded profiles (default `false`) |
 | `validation` | input | the full `ValidateOptions`; takes precedence over `strict` |
 | `showViolations` | input | also show the findings and the verdict under the prose (needs `strict` or `validation`) |
@@ -68,6 +71,12 @@ export class PolicyComponent {
 | `loadFailed` | output | emits the error when the wasm cannot be loaded |
 | `profileLoaded` | output | emits a `ProfileSummary` (`iri`, `title`, `version`, `terms`, `counts`, `warnings`) for each profile loaded |
 | `profileError` | output | emits the error when `profile` is not a readable profile; the previous profile stays |
+| `overlaysLoaded` | output | emits an `OverlaySummary[]` (`terms`, `warnings`, one per overlay) when `overlays` changed to overlays that were read |
+| `overlaysError` | output | emits the error when an overlay is not readable; the previous overlays stay |
+| `valueSourcesLoaded` | output | emits a `Record<string, ValueSourceSummary>` (`values`, `closed`, `warnings`, one per key) when `valueSources` changed to sources that were read |
+| `valueSourcesError` | output | emits the error when `valueSources` cannot be read; the previous sources stay |
+| `shapesLoaded` | output | emits a `ShapesSummary` (`constraints`, `actions`, `leftOperands`, `warnings`) when `shapes` changed to shapes that were read, and again when only the `profiles` changed (its `warnings` include what the profiles make unusable, such as an `sh:class` the limits cut) |
+| `shapesError` | output | emits the error when `shapes` is not readable shapes; the previous shapes stay |
 | `PROSE_WASM_URL` | injection token | where the browser fetches the wasm from, relative to the page's base href (default `prose_wasm_bg.wasm`) |
 | `PROSE_WASM_MODULE` | injection token | which build of `@ds-labs/prose-wasm` runs: by default JSON-LD profiles only; `() => import('@ds-labs/prose-wasm/turtle')`, with `PROSE_WASM_URL` set to `prose_wasm_turtle_bg.wasm`, reads Turtle as well |
 
@@ -117,7 +126,11 @@ emitted text. The editor reads and writes the bare keys of ODRL JSON-LD
 | `articleClass`, `profile`, `profiles`, `strict`, `validation` | inputs | as for `ds-odrl-prose`; with validation on, the editor shows inline markers and a problems panel with fix buttons |
 | `limits` | input | how many items each list may hold, by name (`{ min?, max? }`); a given entry replaces the default for that list |
 | `termInput` | input | `'free'` (the default) or `'select'`: the term slots (action, left operand, policy type, and a unit or right operand of a left operand the profile closes) become dropdowns of the loaded profiles' terms |
+| `refuseTerms` | input | `true`: under validation, an edit that writes a term the loaded profiles do not define is refused instead of committed and flagged (default `false`, or the preset's) |
+| `preset` | input | `'dataspace'` sets strict and structural validation, `termInput` `'select'`, `refuseTerms`, `limits` of `{ logicalDepth: { max: 2 } }` and the lints `heuristic.single-child-group` and `heuristic.duplicate-action` as warnings; each of `strict`, `validation`, `termInput`, `refuseTerms` and `limits` you set yourself wins |
+| `outOfScope` | input | `'show'` (the default), `'strip'` or `'reject'`: what to do with a section whose limit is `max: 0` (say the assigner and assignee of a policy definition) when `json` holds one, in any spelling of its key. `'strip'` drops it, `outOfScopeRemoved` emits what went and `jsonChange` emits the stripped document (so a bound `json` drops it too); `'reject'` fails the load through `jsonError` with the offending `paths` |
 | `jsonChange` | output | the JSON-LD text after each committed edit |
+| `outOfScopeRemoved` | output | the `{ path, key, limit }` of each section `'strip'` dropped |
 | `jsonError`, `loadFailed`, `profileLoaded`, `profileError`, `validationChange`, `validationError` | outputs | as for `ds-odrl-prose` (`jsonError`: the `json` input is not a readable policy) |
 | `report` | signal | the latest validation report, or `null` |
 

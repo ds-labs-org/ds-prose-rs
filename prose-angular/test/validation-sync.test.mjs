@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  StandaloneReporter, createChangeTracker, parseReport, profileTexts, reportChanged, validationOptions,
+  StandaloneReporter, createChangeTracker, parseReport, overlayTexts, profileTexts, reportChanged, shapesText, validationOptions, valueSourcesOf,
 } from '../src/validation-sync.ts';
 
 const finding = (rule, fingerprint, severity = 'error') => ({ rule, fingerprint, severity, message: `${rule} said so` });
@@ -160,4 +160,74 @@ test('free releases the validator', () => {
   r.report([], { strict: true }, 'A');
   r.free();
   assert.equal(freed.length, 1);
+});
+
+test('shapes: blank means none, the text is kept as given', () => {
+  assert.equal(shapesText(null), null);
+  assert.equal(shapesText(undefined), null);
+  assert.equal(shapesText(''), null);
+  assert.equal(shapesText('  \n'), null);
+  assert.equal(shapesText('{"@id":"x"}'), '{"@id":"x"}');
+});
+
+test('a standalone validator is built with the shapes, and rebuilt when they change', () => {
+  const built = [];
+  const r = new StandaloneReporter((profiles, options, shapes) => {
+    const v = { validate: (json) => JSON.stringify({ json, shapes }), free: () => {} };
+    built.push([profiles, options, shapes]);
+    return v;
+  });
+  assert.deepEqual(JSON.parse(r.report(['p'], {}, 'A', 'S').report), { json: 'A', shapes: 'S' });
+  r.report(['p'], {}, 'B', 'S');
+  assert.equal(built.length, 1, 'reused while nothing changed');
+  r.report(['p'], {}, 'B', 'T');
+  assert.equal(built.length, 2, 'rebuilt for other shapes');
+  assert.deepEqual(JSON.parse(r.report(['p'], {}, 'B').report), { json: 'B', shapes: null }, 'no shapes is null');
+  assert.equal(built.length, 3);
+});
+
+test('overlays: blank texts are dropped, null and undefined are none', () => {
+  assert.deepEqual(overlayTexts(null), []);
+  assert.deepEqual(overlayTexts(undefined), []);
+  assert.deepEqual(overlayTexts(['', ' \n']), []);
+  assert.deepEqual(overlayTexts(['O', '  ', 'P']), ['O', 'P']);
+});
+
+test('a standalone validator is built with the overlays, and rebuilt when they change', () => {
+  const built = [];
+  const r = new StandaloneReporter((profiles, options, shapes, overlays) => {
+    built.push([profiles, options, shapes, overlays]);
+    return { validate: (json) => JSON.stringify({ json, overlays }), free: () => {} };
+  });
+  assert.deepEqual(JSON.parse(r.report(['p'], {}, 'A', null, ['O']).report), { json: 'A', overlays: ['O'] });
+  r.report(['p'], {}, 'B', null, ['O']);
+  assert.equal(built.length, 1, 'reused while nothing changed');
+  r.report(['p'], {}, 'B', null, ['O', 'P']);
+  assert.equal(built.length, 2, 'rebuilt for other overlays');
+  assert.deepEqual(JSON.parse(r.report(['p'], {}, 'B').report), { json: 'B', overlays: [] }, 'no overlays is an empty list');
+  assert.equal(built.length, 3);
+});
+
+test('valueSources: none, empty and undefined are null; a map is kept as given', () => {
+  assert.equal(valueSourcesOf(null), null);
+  assert.equal(valueSourcesOf(undefined), null);
+  assert.equal(valueSourcesOf({}), null);
+  const m = { assignee: ['did:web:a'] };
+  assert.deepEqual(valueSourcesOf(m), m);
+});
+
+test('a standalone validator is built with the value sources, and rebuilt when they change', () => {
+  const built = [];
+  const r = new StandaloneReporter((profiles, options, shapes, overlays, sources) => {
+    built.push([profiles, options, shapes, overlays, sources]);
+    return { validate: (json) => JSON.stringify({ json, sources }), free: () => {} };
+  });
+  const a = { assignee: ['did:web:a'] };
+  assert.deepEqual(JSON.parse(r.report(['p'], {}, 'A', null, [], a).report), { json: 'A', sources: a });
+  r.report(['p'], {}, 'B', null, [], { assignee: ['did:web:a'] });
+  assert.equal(built.length, 1, 'reused while nothing changed');
+  r.report(['p'], {}, 'B', null, [], { assignee: ['did:web:b'] });
+  assert.equal(built.length, 2, 'rebuilt for other sources');
+  assert.deepEqual(JSON.parse(r.report(['p'], {}, 'B').report), { json: 'B', sources: null }, 'no sources is null');
+  assert.equal(built.length, 3);
 });

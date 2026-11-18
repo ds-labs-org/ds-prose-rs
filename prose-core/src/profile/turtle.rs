@@ -38,6 +38,15 @@ pub(crate) fn vocab(
     }
 }
 
+/// The triples of a Turtle text, for a reader that is not a profile's.
+pub(crate) fn triples(
+    text: &str,
+    base: Option<&str>,
+    limits: &ProfileLimits,
+) -> Result<Parsed, ProfileError> {
+    read(text, base, limits).map(|(parsed, _)| parsed)
+}
+
 /// `base`: the document's own address, if the host knows it; a `@base` in
 /// the text still wins. Also gives the first relative IRI skipped.
 fn read(

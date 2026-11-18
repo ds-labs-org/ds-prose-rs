@@ -1,4 +1,5 @@
 //! What an editor may offer and the reducer will accept.
+use super::apply::NewItem;
 use super::model::*;
 use super::path::*;
 use crate::words::local_name;
@@ -68,6 +69,12 @@ pub struct EditRules {
     pub entity_refinement: Limit,
     pub constraints: Limit,
     pub logical_children: Limit,
+    /// How deep `and`/`or`/`xone` groups may nest: `max` is the deepest
+    /// level a group may be at (a group directly in a constraint list is at
+    /// level 1, one inside it at level 2), and `min` is not used. Applies to
+    /// adding and wrapping; a document read with deeper groups keeps them,
+    /// and ungrouping is always allowed.
+    pub logical_depth: Limit,
     /// Applies to operators in `set_operators`; any other operator is
     /// capped at one value.
     pub right_operand_values: Limit,
@@ -105,6 +112,7 @@ impl Default for EditRules {
             entity_refinement: Limit::ANY,
             constraints: Limit::ANY,
             logical_children: Limit::ANY,
+            logical_depth: Limit::ANY,
             right_operand_values: Limit::at_least(1),
             profile: Limit::ANY,
             inherit_from: Limit::ANY,
@@ -258,6 +266,73 @@ impl EditRules {
             Some(max) if len >= max => Some(format!("at most {max} allowed")),
             _ => None,
         }
+    }
+
+    /// How many groups enclose the node at `path`.
+    fn enclosing_groups(path: &NodePath) -> usize {
+        path.steps
+            .iter()
+            .filter(|s| matches!(s, Step::Child(_)))
+            .count()
+    }
+
+    /// Why a group would nest too deep at `depth`; `None` when it fits.
+    fn depth_refusal(&self, depth: usize) -> Option<String> {
+        match self.logical_depth.max {
+            Some(max) if depth > max => Some(match max {
+                0 => "groups are not allowed".to_string(),
+                1 => "groups may not nest".to_string(),
+                _ => format!("groups may nest at most {max} deep"),
+            }),
+            _ => None,
+        }
+    }
+
+    /// As [`EditRules::add_refusal`], for adding `item`: a new group also
+    /// has to fit [`EditRules::logical_depth`].
+    pub(crate) fn add_item_refusal(
+        &self,
+        doc: &EditDoc,
+        list: &ListPath,
+        item: NewItem,
+    ) -> Option<String> {
+        if let Some(why) = self.add_refusal(doc, list) {
+            return Some(why);
+        }
+        if matches!(item, NewItem::Logical(_)) {
+            let owner = list.owner.as_ref()?;
+            let inside = usize::from(list.kind == ListKind::Children);
+            return self.depth_refusal(Self::enclosing_groups(owner) + inside + 1);
+        }
+        None
+    }
+
+    /// Whether `item` may be added to `list`: [`EditRules::can_add`], and a
+    /// group within [`EditRules::logical_depth`].
+    pub fn can_add_item(&self, doc: &EditDoc, list: &ListPath, item: NewItem) -> bool {
+        self.add_item_refusal(doc, list, item).is_none()
+    }
+
+    /// Why wrapping the constraint at `path` in a group is refused by
+    /// [`EditRules::logical_depth`]; `None` when it fits.
+    pub(crate) fn wrap_refusal(&self, doc: &EditDoc, path: &NodePath) -> Option<String> {
+        fn height(c: &ConstraintNode) -> usize {
+            match c {
+                ConstraintNode::Logical(l) => 1 + l.children.iter().map(height).max().unwrap_or(0),
+                _ => 0,
+            }
+        }
+        let below = match doc.node(path) {
+            Some(NodeRef::Constraint(c)) => height(c),
+            _ => 0,
+        };
+        self.depth_refusal(Self::enclosing_groups(path) + 1 + below)
+    }
+
+    /// Whether the constraint at `path` may be wrapped in a group within
+    /// [`EditRules::logical_depth`].
+    pub fn can_wrap(&self, doc: &EditDoc, path: &NodePath) -> bool {
+        self.allow_logical && self.wrap_refusal(doc, path).is_none()
     }
 
     pub fn can_remove(&self, doc: &EditDoc, list: &ListPath) -> bool {

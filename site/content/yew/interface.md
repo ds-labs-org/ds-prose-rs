@@ -158,15 +158,20 @@ The whole configuration of an editing view. It is `Clone`, `PartialEq` and `Defa
 | `max_suggestions` | `usize` | `8` | The cap of the suggestion list. |
 | `host_plans_operator_switches` | `bool` | `false` | The host translates an operator switch the reducer would refuse, so the select offers every operator. Off, it offers only the switches the reducer accepts. |
 | `term_input` | `TermInput` | `TermInput::Free` | How the term slots take their value. `TermInput::Select` renders them as `select.prose-select.prose-term-select`; see below. |
+| `strict_edit` | `StrictEdit` | `StrictEdit::Flag` | What the editor does with an edit that writes a term the validator (see `with_strict`) does not allow: `Flag` commits it and the report marks it, `RefuseTerms` refuses it. Does nothing without a validator. |
 | `wording` | `Rc<Wording>` | `Rc::new(Wording::default())` | The loaded profiles. Set it with `with_wording`. |
+| `value_sources` | `ValueSources` | `ValueSources::default()` | The values the host took from its registry or catalog (participant DIDs, credential types, asset ids, purposes), per left operand and per party role. Set it with `with_value_sources`. The editor never fetches them. |
 | `validator` | `Option<Validator>` | `None` | Set it with `with_strict`. `None` validates nothing. |
 
-Two builders consume the config and return it:
+Three builders consume the config and return it:
 
 ```rust
 pub fn with_wording(self, w: Rc<Wording>) -> EditConfig
+pub fn with_value_sources(self, sources: ValueSources) -> EditConfig
 pub fn with_strict(self, options: Options) -> EditConfig
 ```
+
+`with_value_sources` lays the host's runtime value sources over the hints of `wording` (profile < overlay < shapes < host), before or after `with_wording`, and rebuilds a validator that is already set. A right operand a closed source lists is a select of those values (with `TermInput::Select`), listed with their `label` under an `<optgroup>` for their `group`; a source that only suggests leaves the slot free text, with the same suggestions. A value the source no longer lists stays selected as an extra first option, with `data-outside="true"` and the `not_in_source` note, and the validator flags it with `expected.source` `host`; it is never dropped. A list for a party role (`assigner`, `assignee`, `target`) feeds the suggestions of those slots. When it is closed, each of those slots is a select of its values too, with the same extra first option, note and flag for a party or asset it does not list. Build the sources with `ValueSources::set_operand(iri, ValueSource::new(values, closed))` and `set_role(EntityRole, ...)`; a `SourceValue` has a value, and optionally `with_label` and `with_group`.
 
 `with_wording` uses the profiles and adds their terms to `vocab` under `labels.group_profile`, so set the labels first. `with_strict` validates against `wording` with `options`, usually `Options::strict()`, and rewrites `rules.defaults` (left operand, operator, action, policy type) so that what an add button creates is admissible. Call it after `with_wording`.
 
@@ -174,7 +179,7 @@ Choices that fix a name:
 
 - `ButtonContent::Symbol`, `ButtonContent::Text` and `ButtonContent::SymbolAndText` (the default). The accessible name of a button is always the specific label, whatever it shows.
 - `Reveal::Always` (the default) and `Reveal::OnHoverOrFocus`, which adds `prose-reveal-hover` to the root.
-- `TermInput::Free` (the default): the term slots are free text with the vocabulary as suggestions. `TermInput::Select`: the action, the left operand and the policy type are a `<select>` of `vocab`. The loaded profiles' terms come under their `group_profile` heading, the core terms under `group_core`. A unit and a right operand are a select too when the profile closes the constraint's left operand (`prose:closed`) and lists units or values for it. On an open left operand those units and values stay suggestions of a free-text slot, as does any other right operand. Strict validation lists only what it takes. Deprecated terms are listed last under `labels.deprecated`, or hidden when the validator makes them an error (`deny_deprecated`). A stored value that is none of the options stays selected as an extra first option, with `data-outside="true"` and the `not_in_profile` note (`not_in_list` with no profile loaded). A select takes the error and warning classes of a slot. Picking an option sends `SetText`, or `SetIri` for a right operand that held no IRI.
+- `TermInput::Free` (the default): the term slots are free text with the vocabulary as suggestions. `TermInput::Select`: the action, the left operand and the policy type are a `<select>` of `vocab`. The loaded profiles' terms come under their `group_profile` heading, the core terms under `group_core`. A unit and a right operand are a select too when the profile closes the constraint's left operand (`prose:closed`) and lists units or values for it. On an open left operand those units and values stay suggestions of a free-text slot, as does any other right operand. A right operand whose shape lists literals in `sh:in` is a select too, with the literals as options (a pick is written as text). A host's closed value source makes the right operand a select but does not close the units: they stay a free-text slot with suggestions unless the profile or shapes closed the operand. Strict validation lists only what it takes. Deprecated terms are listed last under `labels.deprecated`, or hidden when the validator makes them an error (`deny_deprecated`). A stored value that is none of the options stays selected as an extra first option, with `data-outside="true"` and the `not_in_profile` note (`not_in_list` with no profile loaded). A select takes the error and warning classes of a slot. Picking an option sends `SetText`, or `SetIri` for a right operand that held no IRI.
 
 ## Labels
 
@@ -233,15 +238,21 @@ Keep the visible text of a button contained in its accessible name. A change of 
 | `from_profile` | `From {profile}` | Profiles and glossary |
 | `deprecated` | `Deprecated in the profile` | Profiles and glossary |
 | `suggested_operators` | `Suggested by the profile` | Profiles and glossary |
+| `suggested_operators_overlay` | `Suggested by the overlay` | Operators an overlay suggests |
 | `other_operators` | `Other operators` | Profiles and glossary |
 | `profile_values` | `Profile values(not specific to this operand)` | Profiles and glossary |
 | `datatype_placeholders` | a list of six pairs: integer, decimal, boolean, date, dateTime, duration | Profiles and glossary |
 | `not_in_profile` | `(not in the profile)` | Strict validation, and a term select whose value is none of its options |
+| `not_in_source` | `(not in the host's list)` | A term select, or a closed field, whose value the host's value source no longer lists |
 | `not_in_list` | `(not in the list)` | A term select whose value is none of its options, with no profile loaded |
 | `kept_previous` | `Kept "{kept}";"{typed}" is not in the profile` | Strict validation |
 | `kept_empty` | `"{typed}" is not in the profile;the field stays empty` | Strict validation |
 | `allowed_group` | `Allowed by the profile` | Strict validation |
 | `not_allowed_group` | `Not allowed by the profile` | Strict validation |
+| `allowed_group_overlay` | `Allowed by the overlay` | Strict validation, operators the overlay gave |
+| `not_allowed_group_overlay` | `Not allowed by the overlay` | Strict validation, operators the overlay gave |
+| `allowed_group_shapes` | `Allowed by the shapes` | Strict validation, operators the shapes gave |
+| `not_allowed_group_shapes` | `Not allowed by the shapes` | Strict validation, operators the shapes gave |
 | `not_allowed_option` | `{label}(not allowed)` | Strict validation |
 | `not_allowed_term` | `"{typed}" is not an allowed {field} in {profile}.` | Strict validation |
 | `did_you_mean` | `Did you mean {suggestion}?` | Strict validation |

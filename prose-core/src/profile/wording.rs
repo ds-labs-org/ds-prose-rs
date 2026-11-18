@@ -1,8 +1,12 @@
 //! The loaded profiles and language preferences one reading uses, and how a
 //! policy's compact terms expand.
-use super::{ProfileVocab, Term, ns};
+use super::{
+    HintSource, OperandHints, Overlay, ProfileVocab, Term, TermKind, ValueSource, ValueSources, ns,
+};
+use crate::edit::EntityRole;
+use crate::shapes::ShapesGraph;
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Bound;
 use std::sync::{Arc, OnceLock};
 
@@ -14,6 +18,20 @@ pub struct Wording {
     profiles: Vec<Arc<ProfileVocab>>,
     languages: Vec<String>,
     conflicts: Vec<String>,
+    overlays: Vec<Arc<Overlay>>,
+    shapes: Option<Arc<ShapesGraph>>,
+    value_sources: ValueSources,
+    /// Lines found when the shapes were laid over the profiles (see
+    /// [`Wording::shapes_warnings`]).
+    shape_notes: Vec<String>,
+    /// Left operand IRI -> why its closed host source widens what the shapes
+    /// or an overlay closed (see [`Wording::value_source_warning`]).
+    widened: HashMap<String, String>,
+    /// Left operand IRI -> its profile hints with the overlays, then the
+    /// shapes, laid over them, for each left operand one of them gives
+    /// something for. Rebuilt whenever a profile, an overlay or the shapes
+    /// are added, so their order does not matter.
+    shaped: HashMap<String, OperandHints>,
 }
 
 impl Wording {
@@ -37,7 +55,294 @@ impl Wording {
             }
         }
         self.profiles.push(Arc::new(p));
+        self.layer_hints();
         self
+    }
+
+    /// Adds the companion SHACL shapes (see [`crate::shapes`]): they add
+    /// hints to the left operands the loaded profiles declare, and may close
+    /// the lists of actions and left operands for the whole policy. They
+    /// never add or relabel a term. Replaces shapes given earlier; the order
+    /// of this call and [`Wording::with_profile`] does not matter.
+    pub fn with_shapes(mut self, shapes: ShapesGraph) -> Wording {
+        self.shapes = Some(Arc::new(shapes));
+        self.layer_hints();
+        self
+    }
+
+    /// Adds an operator overlay (see [`Overlay`]): its `prose:` hints merge
+    /// onto the left operands the loaded profiles declare, and never add or
+    /// relabel a term. An overlay is not a second declaration, so it is no
+    /// "declared by both" conflict. Overlays are laid over the profiles in
+    /// the order they are added (a later one's facet replaces an earlier
+    /// one's), and the shapes over those: profile < overlay < shapes. The
+    /// order of this call and [`Wording::with_profile`] does not matter.
+    pub fn with_overlay(mut self, overlay: Overlay) -> Wording {
+        self.overlays.push(Arc::new(overlay));
+        self.layer_hints();
+        self
+    }
+
+    /// The overlays, in the order they were added.
+    pub fn overlays(&self) -> impl Iterator<Item = &Overlay> {
+        self.overlays.iter().map(|o| &**o)
+    }
+
+    /// What `overlay` says that this wording cannot use: its own warnings,
+    /// then a line for each term it names that no loaded profile declares as
+    /// a left operand (ignored). Lower-case fragments, each once.
+    pub fn overlay_warnings(&self, overlay: &Overlay) -> Vec<String> {
+        let mut out: Vec<String> = overlay.warnings().to_vec();
+        for (iri, _) in overlay.terms() {
+            let msg = match self.lookup(iri) {
+                None => format!(
+                    "ignored <{iri}>: no loaded profile declares it, and an overlay never adds a term"
+                ),
+                Some((t, _)) if !t.kinds.contains(&TermKind::LeftOperand) => format!(
+                    "ignored <{iri}>: it is not a left operand, and an overlay only gives hints to left operands"
+                ),
+                Some(_) => continue,
+            };
+            if !out.contains(&msg) {
+                out.push(msg);
+            }
+        }
+        out
+    }
+
+    /// Sets the host's runtime value sources (see [`ValueSources`]), replacing
+    /// any set before; an empty set clears them. A source for a left operand
+    /// a loaded profile declares gives that operand its values, with the host
+    /// on top of the overlays and the shapes (profile < overlay < shapes <
+    /// host) for the values facet alone. A source for a party role is read
+    /// with [`Wording::role_source`]. The order of this call and
+    /// [`Wording::with_profile`] does not matter.
+    pub fn with_value_sources(mut self, sources: ValueSources) -> Wording {
+        self.value_sources = sources;
+        self.layer_hints();
+        self
+    }
+
+    /// The host's value sources.
+    pub fn value_sources(&self) -> &ValueSources {
+        &self.value_sources
+    }
+
+    /// The host's source for the parties (or assets, for the target) of
+    /// `role`, when it gave a non-empty one.
+    pub fn role_source(&self, role: EntityRole) -> Option<&ValueSource> {
+        self.value_sources.role(role).filter(|s| !s.is_empty())
+    }
+
+    /// What the host's sources say that this wording cannot use: a line for
+    /// each left operand they name that no loaded profile declares, or that
+    /// is not a left operand (ignored). Lower-case fragments.
+    pub fn value_source_warnings(&self) -> Vec<String> {
+        self.value_sources
+            .operands()
+            .filter_map(|(iri, _)| self.value_source_warning(iri))
+            .collect()
+    }
+
+    /// Why a source for the left operand `iri` is ignored, when it is.
+    pub fn value_source_warning(&self, iri: &str) -> Option<String> {
+        match self.lookup(iri) {
+            None => Some(format!(
+                "ignored <{iri}>: no loaded profile declares it, and a value source never adds a term"
+            )),
+            Some((t, _)) if !t.kinds.contains(&TermKind::LeftOperand) => Some(format!(
+                "ignored <{iri}>: it is not a left operand, and a value source only gives values to left operands"
+            )),
+            Some(_) => self.widened.get(iri).cloned(),
+        }
+    }
+
+    /// The companion shapes, when some were given.
+    pub fn shapes(&self) -> Option<&ShapesGraph> {
+        self.shapes.as_deref()
+    }
+
+    /// The hints for a left operand `t` (a term this wording looked up):
+    /// the loaded profile's own `prose:` hints with the companion shapes
+    /// laid over them. A facet a shape gives replaces the profile's for that
+    /// facet, and a left operand a shape says anything about is closed, with
+    /// [`OperandHints::sources`] naming who closed each facet. Without
+    /// shapes, or for a left operand none of them selects, these are
+    /// `t.hints`.
+    pub fn operand_hints<'a>(&'a self, t: &'a Term) -> &'a OperandHints {
+        self.shaped.get(&t.iri).unwrap_or(&t.hints)
+    }
+
+    /// What the shapes say that the loaded profiles make unusable, found
+    /// when the shapes were laid over them (the shapes' own parse warnings
+    /// are [`ShapesGraph::warnings`]): an `sh:class` with more members than
+    /// the limits keep closes nothing. Lower-case fragments.
+    pub fn shapes_warnings(&self) -> Vec<String> {
+        self.shape_notes.clone()
+    }
+
+    /// The terms of `kind` the shapes close the policy to (`sh:in` on
+    /// `odrl:action` or `odrl:leftOperand`), as expanded IRIs; `None` when
+    /// no shape closes that list.
+    pub fn closed_terms(&self, kind: TermKind) -> Option<&[String]> {
+        let shapes = self.shapes.as_deref()?;
+        match kind {
+            TermKind::Action => shapes.closed_actions(),
+            TermKind::LeftOperand => shapes.closed_left_operands(),
+            _ => None,
+        }
+    }
+
+    /// Recomputes `shaped` from the profiles, the overlays and the shapes.
+    fn layer_hints(&mut self) {
+        self.shaped.clear();
+        self.shape_notes.clear();
+        self.widened.clear();
+        let mut shaped: HashMap<String, OperandHints> = HashMap::new();
+        for overlay in self.overlays.clone() {
+            for (iri, patch) in overlay.terms() {
+                let Some((term, _)) = self.lookup(iri) else {
+                    continue;
+                };
+                if !term.kinds.contains(&TermKind::LeftOperand) {
+                    continue;
+                }
+                let base = shaped.get(&term.iri).unwrap_or(&term.hints);
+                let layered = super::layer_overlay(base, patch);
+                shaped.insert(term.iri.clone(), layered);
+            }
+        }
+        if let Some(shapes) = self.shapes.clone() {
+            self.shape_notes = self.layer_shapes(&shapes, &mut shaped);
+        }
+        self.widened = self.layer_sources(&mut shaped);
+        shaped.retain(|iri, h| self.lookup(iri).is_none_or(|(t, _)| *h != t.hints));
+        self.shaped = shaped;
+    }
+
+    /// Lays the host's value sources over `shaped`, on top of everything else.
+    /// Returns, by left operand, why a closed source lists values a closed
+    /// base from the shapes or an overlay did not.
+    fn layer_sources(&self, shaped: &mut HashMap<String, OperandHints>) -> HashMap<String, String> {
+        let mut widened = HashMap::new();
+        for (iri, source) in self.value_sources.operands() {
+            let Some((term, _)) = self.lookup(iri) else {
+                continue;
+            };
+            if !term.kinds.contains(&TermKind::LeftOperand) || source.is_empty() {
+                continue;
+            }
+            let values: Vec<String> = source
+                .values()
+                .iter()
+                .map(|v| v.value().to_string())
+                .collect();
+            let patch = OperandHints {
+                value_tree: values.iter().map(|v| (v.clone(), 0)).collect(),
+                values_exact: true,
+                values,
+                closed: source.is_closed(),
+                source_values: source.values().to_vec(),
+                ..OperandHints::default()
+            };
+            let base = shaped.get(&term.iri).unwrap_or(&term.hints);
+            if patch.closed
+                && base.closed
+                && matches!(
+                    base.sources.values,
+                    HintSource::Shapes | HintSource::Overlay
+                )
+            {
+                let allowed: HashSet<&str> = base
+                    .values
+                    .iter()
+                    .chain(&base.literal_values)
+                    .map(String::as_str)
+                    .collect();
+                let extra: Vec<&str> = patch
+                    .values
+                    .iter()
+                    .map(String::as_str)
+                    .filter(|v| !allowed.contains(v))
+                    .collect();
+                if !extra.is_empty() {
+                    let by = if base.sources.values == HintSource::Shapes {
+                        "the shapes"
+                    } else {
+                        "an overlay"
+                    };
+                    widened.insert(
+                        iri.to_string(),
+                        format!(
+                            "the closed source for <{iri}> lists {} value(s) that {by} did not allow (for example <{}>): the host's list is used, and it allows them",
+                            extra.len(),
+                            extra[0]
+                        ),
+                    );
+                }
+            }
+            let layered = super::layer_host(base, &patch);
+            shaped.insert(term.iri.clone(), layered);
+        }
+        widened
+    }
+
+    /// Lays the shapes over `shaped` (the profiles' hints with the overlays
+    /// over them).
+    fn layer_shapes(
+        &self,
+        shapes: &ShapesGraph,
+        shaped: &mut HashMap<String, OperandHints>,
+    ) -> Vec<String> {
+        let mut notes = Vec::new();
+        let narrower = narrower_values(self);
+        for (left, shape) in shapes.constraints() {
+            let Some((term, _)) = self.lookup(left) else {
+                continue;
+            };
+            if !term.kinds.contains(&TermKind::LeftOperand) {
+                continue;
+            }
+            let mut patch = OperandHints {
+                operators: shape.operators.clone(),
+                units: shape.units.clone(),
+                datatype: shape.datatype.clone(),
+                min_inclusive: shape.min_inclusive.clone(),
+                max_inclusive: shape.max_inclusive.clone(),
+                ..OperandHints::default()
+            };
+            if let Some((src, flags)) = &shape.pattern {
+                patch.pattern = Some(src.clone());
+                patch.pattern_flags = flags.clone();
+            }
+            if !shape.values.is_empty() || !shape.literals.is_empty() {
+                // `sh:in` is exactly its list: no descendants.
+                patch.literal_values = shape.literals.clone();
+                patch.values = shape.values.clone();
+                patch.value_tree = shape.values.iter().map(|v| (v.clone(), 0)).collect();
+                patch.values_exact = true;
+            } else if !shape.classes.is_empty() {
+                let (tree, cut) = class_members(self, &narrower, &shape.classes, shapes.limits());
+                if cut {
+                    // A cut list would close wrongly: the class closes nothing.
+                    notes.push(format!(
+                        "ignored the sh:class of <{left}>: it has more members than the reader keeps ({}), and a cut list would close wrongly",
+                        shapes.limits().max_terms
+                    ));
+                    continue;
+                }
+                patch.values = tree
+                    .iter()
+                    .filter(|(_, d)| *d == 0)
+                    .map(|(v, _)| v.clone())
+                    .collect();
+                patch.value_tree = tree;
+            }
+            let base = shaped.get(&term.iri).unwrap_or(&term.hints);
+            let layered = super::layer(base, &patch, HintSource::Shapes);
+            shaped.insert(term.iri.clone(), layered);
+        }
+        notes
     }
 
     /// The label languages to prefer, most preferred first.
@@ -104,6 +409,99 @@ impl Wording {
     pub fn is_empty(&self) -> bool {
         self.profiles.is_empty()
     }
+}
+
+/// Broader value -> its narrower right operands across the loaded profiles
+/// (the first profile that declares a term wins), in load order.
+fn narrower_values(w: &Wording) -> HashMap<String, Vec<String>> {
+    let mut out: HashMap<String, Vec<String>> = HashMap::new();
+    let mut seen: HashSet<&str> = HashSet::new();
+    for p in w.profiles() {
+        for t in p.terms() {
+            if !seen.insert(&t.iri) || !t.kinds.contains(&TermKind::RightOperand) {
+                continue;
+            }
+            for b in &t.broader {
+                out.entry(b.clone()).or_default().push(t.iri.clone());
+            }
+        }
+    }
+    out
+}
+
+/// The right operands that belong to any of `classes` (`sh:class`): those
+/// the profile types with the class, the class itself when it is a right
+/// operand, and the right operands directly narrower than it; each with the
+/// descendants a `skos:broader` link leads to, depth first, each once, with
+/// its depth below the member that holds it. At most `max_terms` values, and
+/// no deeper than `max_depth` (the limits the shapes were read with); the
+/// flag says whether the list was cut by either.
+fn class_members(
+    w: &Wording,
+    narrower: &HashMap<String, Vec<String>>,
+    classes: &[String],
+    limits: &super::ProfileLimits,
+) -> (Vec<(String, usize)>, bool) {
+    let mut cut = false;
+    let mut members: Vec<&str> = Vec::new();
+    let mut seen: HashSet<&str> = HashSet::new();
+    for p in w.profiles() {
+        for t in p.terms() {
+            if !seen.insert(&t.iri) || !t.kinds.contains(&TermKind::RightOperand) {
+                continue;
+            }
+            let of_class = classes
+                .iter()
+                .any(|c| *c == t.iri || t.types.contains(c) || t.broader.contains(c));
+            if of_class {
+                members.push(&t.iri);
+            }
+        }
+    }
+    // A member narrower than another member is listed under it.
+    let member_set: HashSet<&str> = members.iter().copied().collect();
+    let by_iri = |iri: &str| w.lookup(iri).map(|(t, _)| t);
+    let roots: Vec<&str> = members
+        .iter()
+        .copied()
+        .filter(|m| {
+            !by_iri(m).is_some_and(|t| t.broader.iter().any(|b| member_set.contains(b.as_str())))
+        })
+        .collect();
+    let mut out: Vec<(String, usize)> = Vec::new();
+    let mut done: HashSet<&str> = HashSet::new();
+    let kids: HashMap<&str, Vec<&str>> = narrower
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.iter().map(String::as_str).collect()))
+        .collect();
+    // An explicit stack, so a deep hierarchy cannot overflow the call stack:
+    // (index into `child_lists`, the next item of that list, its depth).
+    let mut child_lists: Vec<Vec<&str>> = vec![roots];
+    let mut frames: Vec<(usize, usize, usize)> = vec![(0, 0, 0)];
+    while let Some(&(list, next, depth)) = frames.last() {
+        let Some(&item) = child_lists[list].get(next) else {
+            frames.pop();
+            continue;
+        };
+        frames.last_mut().unwrap().1 += 1;
+        if !done.insert(item) {
+            continue;
+        }
+        if out.len() >= limits.max_terms {
+            cut = true;
+            break;
+        }
+        out.push((item.to_string(), depth));
+        if let Some(k) = kids.get(item) {
+            if depth + 1 < limits.max_depth {
+                child_lists.push(k.clone());
+                frames.push((child_lists.len() - 1, 0, depth + 1));
+            } else if !k.is_empty() {
+                cut = true;
+            }
+        }
+    }
+    (out, cut)
 }
 
 /// A local name a compact IRI may end with: not empty, no `/`, `#`, `:` or

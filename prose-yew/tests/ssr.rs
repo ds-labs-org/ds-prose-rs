@@ -1468,3 +1468,52 @@ async fn a_present_identifier_the_host_holds_elsewhere_is_read_only() {
         "{html}"
     );
 }
+
+#[tokio::test]
+async fn the_group_buttons_follow_the_depth_limit() {
+    let json = r#"{"@type":"Set","uid":"urn:p","permission":[{"action":"use","target":"urn:a","constraint":[
+        {"and":[{"leftOperand":"count","operator":"eq","rightOperand":"1"}]}]}]}"#;
+    let doc = Rc::new(read_model(json).unwrap());
+    let render = |max: Option<usize>| {
+        let mut cfg = EditConfig::default();
+        cfg.base_css = false;
+        cfg.rules.logical_depth = Limit { min: 0, max };
+        render_view(props(doc.clone(), EditMode::Edit, cfg))
+    };
+    let groups = |html: &str| -> Vec<String> {
+        html.split("<button")
+            .filter(|b| b.contains("data-item=\"group\""))
+            .filter_map(|b| b.split("data-add=\"").nth(1))
+            .filter_map(|b| b.split('"').next())
+            .map(String::from)
+            .collect()
+    };
+    let (top, inner, refine) = (
+        "policy[0].permission[0]@constraint",
+        "policy[0].permission[0].constraint[0]@child",
+        "policy[0].permission[0].action[0]@refinement",
+    );
+    // No limit: a group can be added at both levels, and wrapped.
+    let html = render(None).await;
+    assert!(groups(&html).iter().any(|g| g == top), "{html}");
+    assert!(groups(&html).iter().any(|g| g == inner), "{html}");
+    assert!(html.contains("\"Group condition 1 of"), "{html}");
+    // Two deep: the group may hold a group, and each condition may be wrapped.
+    let html = render(Some(2)).await;
+    assert!(groups(&html).iter().any(|g| g == inner), "{html}");
+    assert_eq!(html.matches("\"Group condition 1 of").count(), 2, "{html}");
+    // One deep: no group inside a group, and neither the group nor the
+    // condition in it may be wrapped; the top-level list still takes one.
+    let html = render(Some(1)).await;
+    assert!(groups(&html).iter().any(|g| g == top), "{html}");
+    assert!(groups(&html).iter().any(|g| g == refine), "{html}");
+    assert!(!groups(&html).iter().any(|g| g == inner), "{html}");
+    assert!(!html.contains("\"Group condition"), "{html}");
+    // Ungrouping what is there stays possible at any limit.
+    assert!(html.contains("\"Ungroup condition 1 of"), "{html}");
+    // Zero: no group at all.
+    let html = render(Some(0)).await;
+    assert!(groups(&html).is_empty(), "{html}");
+    assert!(!html.contains("\"Group condition"), "{html}");
+    assert!(html.contains("\"Ungroup condition 1 of"), "{html}");
+}

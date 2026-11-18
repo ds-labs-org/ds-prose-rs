@@ -6,6 +6,9 @@ use prose_core::validate::{Level, RULES, RULESET, RuleId};
 use prose_wasm::validation::*;
 use serde_json::{Value, json};
 
+mod common;
+use common::{CLASS_SHAPES, chain_profile};
+
 const RESEARCH: &str = include_str!("../../prose-core/tests/profiles/research.jsonld");
 const RESEARCH_TTL: &str = include_str!("../../prose-core/tests/profiles/research.ttl");
 const CLOSED: &str = include_str!("../../prose-core/tests/profiles/research-closed.jsonld");
@@ -344,5 +347,322 @@ fn dts_names_every_key_of_the_report() {
             TYPES_D_TS.contains(&format!("{key}?:")),
             "ValidateOptions.{key}"
         );
+    }
+}
+
+// --- companion shapes ----------------------------------------------------------
+
+const DX_PROFILE: &str = include_str!("../../prose-core/tests/shapes/dataspace-profile.jsonld");
+const DX_SHAPES: &str = include_str!("../../prose-core/tests/shapes/dataspace-shapes.jsonld");
+
+const DX_POLICY: &str = r#"{
+  "@context": ["http://www.w3.org/ns/odrl.jsonld", {"dx": "https://example.org/dataspace/"}],
+  "@type": "Set", "uid": "urn:p", "profile": "https://example.org/dataspace/profile",
+  "permission": [{"target": "urn:a", "action": "dx:train", "constraint": [
+    {"leftOperand": "dx:purpose", "operator": "eq", "rightOperand": {"@id": "dx:clinical"}}
+  ]}]
+}"#;
+
+fn shaped_report(shapes: Option<&str>) -> Value {
+    let texts = vec![DX_PROFILE.to_string()];
+    let v = validator_with_shapes(&texts, shapes, opts(json!({}))).expect("reads");
+    serde_json::from_str(&validate_text(DX_POLICY, &v)).expect("the report is JSON")
+}
+
+#[test]
+fn shapes_summary_says_what_was_read() {
+    let s = shapes(DX_SHAPES).expect("shapes");
+    let v: Value = serde_json::from_str(&shapes_summary_json(&s, None)).unwrap();
+    assert_eq!(v["constraints"], 5);
+    assert_eq!(
+        v["actions"],
+        json!([
+            "https://example.org/dataspace/train",
+            "https://example.org/dataspace/share"
+        ])
+    );
+    assert_eq!(v["leftOperands"].as_array().unwrap().len(), 5);
+    assert_eq!(v["warnings"], json!([]));
+    let open = shapes(
+        r#"{"@context":{"sh":"http://www.w3.org/ns/shacl#"},"@id":"http://e.org/S","sh:closed":true,"sh:property":{"sh:path":{"@id":"http://e.org/p"}}}"#,
+    )
+    .unwrap();
+    let v: Value = serde_json::from_str(&shapes_summary_json(&open, None)).unwrap();
+    assert_eq!(v["actions"], Value::Null, "no closed list");
+    assert_eq!(v["leftOperands"], Value::Null);
+    assert!(v["warnings"].as_array().unwrap().len() >= 2, "{v}");
+}
+
+#[test]
+fn shapes_summary_lists_what_the_profiles_make_unusable() {
+    let s = shapes(CLASS_SHAPES).expect("shapes");
+    let deep = wording(&[chain_profile(70)]).expect("profile");
+    let v: Value =
+        serde_json::from_str(&shapes_summary_json(&s, Some(&with_shapes(deep, Some(&s))))).unwrap();
+    let w = v["warnings"].as_array().unwrap();
+    assert!(
+        w.iter().any(|m| m.as_str().unwrap().contains("sh:class")
+            && m.as_str().unwrap().contains("more members")),
+        "{v}"
+    );
+    // A chain within the limits is read whole: nothing to say.
+    let ok = wording(&[chain_profile(5)]).expect("profile");
+    let v: Value =
+        serde_json::from_str(&shapes_summary_json(&s, Some(&with_shapes(ok, Some(&s))))).unwrap();
+    assert_eq!(v["warnings"], json!([]), "{v}");
+}
+
+#[test]
+fn a_validator_with_shapes_names_the_shapes_in_its_findings() {
+    let without = shaped_report(None);
+    assert_eq!(without["verdict"], "conforms");
+    let with = shaped_report(Some(DX_SHAPES));
+    assert_eq!(with["verdict"], "violations");
+    let f = &with["findings"][0];
+    assert_eq!(f["rule"], "prose.value-not-allowed");
+    assert_eq!(f["expected"]["source"], "shapes");
+    assert!(f["message"].as_str().unwrap().contains("the shapes allow"));
+}
+
+#[test]
+fn unreadable_shapes_say_what_is_wrong() {
+    for bad in ["", "{", "<!doctype html><p>hi", DX_PROFILE] {
+        let e = shapes(bad).unwrap_err();
+        assert!(e.starts_with("shapes: "), "{e}");
+    }
+    let e = validator_with_shapes(&[DX_PROFILE.to_string()], Some("{"), opts(json!({})))
+        .map(|_| ())
+        .unwrap_err();
+    assert!(e.starts_with("shapes: "), "{e}");
+}
+
+#[test]
+fn dts_declares_the_shapes_api() {
+    for name in [
+        "ShapesSummary",
+        "source?:",
+        "pattern?:",
+        "minInclusive?:",
+        "maxInclusive?:",
+    ] {
+        assert!(TYPES_D_TS.contains(name), "{name}");
+    }
+}
+
+// --- operator overlays ---------------------------------------------------------
+
+const DX_OVERLAY: &str = include_str!("../../prose-core/tests/overlay/dataspace-overlay.jsonld");
+
+fn overlaid_report(overlays: &[&str]) -> Value {
+    let texts = vec![DX_PROFILE.to_string()];
+    let overlays: Vec<String> = overlays.iter().map(|s| s.to_string()).collect();
+    let v = validator_with(&texts, None, &overlays, opts(json!({}))).expect("reads");
+    serde_json::from_str(&validate_text(DX_POLICY, &v)).expect("the report is JSON")
+}
+
+#[test]
+fn overlay_summaries_say_what_was_read_and_what_was_ignored() {
+    let o = overlays(&[DX_OVERLAY.to_string()]).expect("overlay");
+    let w = with_overlays(wording(&[DX_PROFILE.to_string()]).unwrap(), &o);
+    let v: Value = serde_json::from_str(&overlay_summaries_json(&w, &o)).unwrap();
+    assert_eq!(v.as_array().unwrap().len(), 1);
+    assert_eq!(v[0]["terms"], 3);
+    assert_eq!(v[0]["warnings"], json!([]));
+    // A term no loaded profile declares is ignored, with a warning.
+    let ghost = r#"{"@context":{"prose":"https://ds-labs-org.github.io/ds-prose-rs/profile#"},"@id":"https://example.org/dataspace/ghost","prose:closed":true}"#;
+    let o = overlays(&[ghost.to_string()]).expect("overlay");
+    let w = with_overlays(wording(&[DX_PROFILE.to_string()]).unwrap(), &o);
+    let v: Value = serde_json::from_str(&overlay_summaries_json(&w, &o)).unwrap();
+    assert!(
+        v[0]["warnings"][0].as_str().unwrap().contains("ghost"),
+        "{v}"
+    );
+}
+
+#[test]
+fn a_validator_with_an_overlay_names_the_overlay_in_its_findings() {
+    assert_eq!(overlaid_report(&[])["verdict"], "conforms");
+    let with = overlaid_report(&[DX_OVERLAY]);
+    assert_eq!(with["verdict"], "violations");
+    let f = &with["findings"][0];
+    assert_eq!(f["rule"], "prose.value-not-allowed");
+    assert_eq!(f["expected"]["source"], "overlay");
+    assert!(
+        f["message"]
+            .as_str()
+            .unwrap()
+            .contains("the overlay allows")
+    );
+}
+
+#[test]
+fn shapes_win_over_an_overlay_in_one_validator() {
+    let shapes = r#"{"@context":{"sh":"http://www.w3.org/ns/shacl#","odrl":"http://www.w3.org/ns/odrl/2/","dx":"https://example.org/dataspace/"},
+      "@id":"dx:S","sh:property":[{"sh:path":{"@id":"odrl:leftOperand"},"sh:hasValue":{"@id":"dx:purpose"}},
+      {"sh:path":{"@id":"odrl:rightOperand"},"sh:in":{"@list":[{"@id":"dx:marketing"}]}}]}"#;
+    let v = validator_with(
+        &[DX_PROFILE.to_string()],
+        Some(shapes),
+        &[DX_OVERLAY.to_string()],
+        opts(json!({})),
+    )
+    .unwrap();
+    let r: Value = serde_json::from_str(&validate_text(DX_POLICY, &v)).unwrap();
+    assert_eq!(r["findings"][0]["expected"]["source"], "shapes");
+}
+
+#[test]
+fn unreadable_overlays_say_what_is_wrong() {
+    for bad in ["", "{", "<!doctype html><p>hi", DX_PROFILE] {
+        let e = overlay(bad).unwrap_err();
+        assert!(e.starts_with("overlay: "), "{e}");
+    }
+    let e = validator_with(
+        &[DX_PROFILE.to_string()],
+        None,
+        &["{".to_string()],
+        opts(json!({})),
+    )
+    .map(|_| ())
+    .unwrap_err();
+    assert!(e.starts_with("overlay: "), "{e}");
+}
+
+#[test]
+fn dts_declares_the_overlay_api() {
+    for name in ["OverlaySummary", "\"overlay\""] {
+        assert!(TYPES_D_TS.contains(name), "{name}");
+    }
+}
+
+// --- runtime value sources -------------------------------------------------------
+
+const DX: &str = "https://example.org/dataspace/";
+
+fn purposes(closed: bool) -> Value {
+    json!({
+        format!("{DX}purpose"): {
+            "values": [
+                {"value": format!("{DX}research"), "label": "Research", "group": "Purposes"},
+                format!("{DX}marketing"),
+            ],
+            "closed": closed
+        }
+    })
+}
+
+fn sourced_report(sources: &Value) -> Value {
+    let texts = vec![DX_PROFILE.to_string()];
+    let sources = value_sources(sources).expect("reads");
+    let v = validator_with_sources(&texts, None, &[], &sources, opts(json!({}))).expect("builds");
+    serde_json::from_str(&validate_text(DX_POLICY, &v)).expect("the report is JSON")
+}
+
+#[test]
+fn a_closed_value_source_names_the_host_in_its_findings() {
+    assert_eq!(sourced_report(&json!({}))["verdict"], "conforms");
+    let r = sourced_report(&purposes(true));
+    assert_eq!(r["verdict"], "violations", "{r}");
+    let f = &r["findings"][0];
+    assert_eq!(f["rule"], "prose.value-not-allowed");
+    assert_eq!(f["expected"]["source"], "host");
+    assert!(f["message"].as_str().unwrap().contains("the host allows"));
+}
+
+#[test]
+fn a_suggest_only_value_source_flags_nothing_as_an_error() {
+    let r = sourced_report(&purposes(false));
+    assert_ne!(r["verdict"], "violations", "{r}");
+}
+
+#[test]
+fn a_value_source_takes_text_or_labelled_values_and_a_closed_flag() {
+    let s = value_sources(&purposes(true)).expect("reads");
+    let src = s.operand(&format!("{DX}purpose")).expect("the source");
+    assert!(src.is_closed());
+    assert_eq!(src.values().len(), 2);
+    assert_eq!(src.values()[0].label(), Some("Research"));
+    assert_eq!(src.values()[0].group(), Some("Purposes"));
+    assert_eq!(src.values()[1].value(), format!("{DX}marketing"));
+    assert_eq!(src.values()[1].label(), None);
+    // A bare list is suggest-only.
+    let s = value_sources(&json!({ format!("{DX}purpose"): ["a", "b"] })).unwrap();
+    assert!(!s.operand(&format!("{DX}purpose")).unwrap().is_closed());
+}
+
+#[test]
+fn a_value_source_is_addressed_by_left_operand_or_party_role() {
+    use prose_core::edit::EntityRole;
+    let s = value_sources(&json!({
+        "assignee": ["did:web:a"],
+        "target": {"values": ["urn:asset:1"], "closed": true},
+        "http://www.w3.org/ns/odrl/2/assigner": ["did:web:b"],
+        format!("{DX}purpose"): ["x"],
+    }))
+    .expect("reads");
+    assert!(s.role(EntityRole::Assignee).is_some());
+    assert!(s.role(EntityRole::Target).unwrap().is_closed());
+    assert!(s.role(EntityRole::Assigner).is_some());
+    assert_eq!(s.operands().count(), 1);
+}
+
+#[test]
+fn setting_a_source_to_null_clears_it() {
+    let mut s = value_sources(&purposes(true)).unwrap();
+    set_value_source(&mut s, &format!("{DX}purpose"), &Value::Null, false).expect("clears");
+    assert!(s.is_empty());
+    let mut s = value_sources(&json!({"assignee": ["did:web:a"]})).unwrap();
+    set_value_source(&mut s, "assignee", &Value::Null, false).unwrap();
+    assert!(s.is_empty());
+}
+
+#[test]
+fn unreadable_value_sources_say_what_is_wrong() {
+    for bad in [
+        json!("x"),
+        json!([1]),
+        json!({"": ["a"]}),
+        json!({"k": "not a list"}),
+        json!({"k": [1]}),
+        json!({"k": [{"label": "no value"}]}),
+        json!({"k": [{"value": "v", "labell": "typo"}]}),
+        json!({"k": {"values": [], "closd": true}}),
+        json!({"k": {"values": [], "closed": "yes"}}),
+    ] {
+        let e = value_sources(&bad).unwrap_err();
+        assert!(e.starts_with("valueSources: "), "{bad}: {e}");
+    }
+}
+
+#[test]
+fn value_source_summaries_say_what_was_read_and_what_was_ignored() {
+    let mut json = purposes(true);
+    json[format!("{DX}ghost")] = json!(["a"]);
+    json["assignee"] = json!(["did:web:a", "did:web:b"]);
+    let s = value_sources(&json).unwrap();
+    let w = with_value_sources(wording(&[DX_PROFILE.to_string()]).unwrap(), &s);
+    let v: Value = serde_json::from_str(&value_source_summaries_json(&w, &s)).unwrap();
+    assert_eq!(v[format!("{DX}purpose")]["values"], 2, "{v}");
+    assert_eq!(v[format!("{DX}purpose")]["closed"], true);
+    assert_eq!(v[format!("{DX}purpose")]["warnings"], json!([]));
+    assert_eq!(v["assignee"]["values"], 2);
+    assert!(
+        v[format!("{DX}ghost")]["warnings"][0]
+            .as_str()
+            .unwrap()
+            .contains("ghost"),
+        "{v}"
+    );
+}
+
+#[test]
+fn dts_declares_the_value_source_api() {
+    for name in [
+        "ValueSourceValue",
+        "ValueSources",
+        "ValueSourceSummary",
+        "\"host\"",
+    ] {
+        assert!(TYPES_D_TS.contains(name), "{name}");
     }
 }
