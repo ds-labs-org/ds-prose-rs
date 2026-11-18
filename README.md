@@ -473,7 +473,7 @@ order. A change to `@1` may only add keys; removing or renaming one is `@2`.
 
 ```json
 { "schema": "ds-prose/validation-report@1",
-  "tool": {"name": "ds-prose-rs", "version": "0.8.0"},
+  "tool": {"name": "ds-prose-rs", "version": "0.9.0"},
   "mode": "strict",
   "tiers": ["profile", "odrl", "prose", "input"],
   "ruleset": 2,
@@ -682,8 +682,8 @@ The profile types can grow too: `ProfileVocab`, `Wording`, `Prefixes` and
 fields, and start from `ProfileLimits::default()` to change a limit. So is
 `edit::ChoiceSlot`: build one with `ChoiceSlot::new` and set its fields.
 
-**Unreleased (after 0.8.0), at a glance.** This section is the release notes for the next
-version; the paragraphs after it give the detail. Nothing here is released or versioned yet.
+**Changed in 0.9.0, at a glance.** This section is the release notes for 0.9.0;
+the paragraphs after it give the detail.
 
 Added:
 
@@ -738,7 +738,7 @@ Breaking, or needing a change in a caller:
 - New variants of the `#[non_exhaustive]` enums (`RuleId`, `HintSource`, ...) need the
   wildcard arm a match on them already needs.
 
-Unreleased: a limit of `max: 0` can be the scope of the incoming document, not
+Changed in 0.9.0: a limit of `max: 0` can be the scope of the incoming document, not
 only of the add buttons. `setOutOfScope('strip')` on `ProseEditorHandle` (and
 `[outOfScope]="'strip'"` on `<ds-odrl-prose-editor>`) drops every section held in
 such a list when a document loads, in the bare, prefixed and full-IRI
@@ -748,7 +748,7 @@ spellings of the key, and `removed()` (`(outOfScopeRemoved)`) reports it;
 `edit::out_of_scope` and `edit::strip_out_of_scope` do the same on a
 `serde_json::Value`, with an `EditRules`.
 
-Unreleased: for a dataspace that wants members to write only policies it can
+Changed in 0.9.0: for a dataspace that wants members to write only policies it can
 evaluate. Ruleset 2 adds `odrl.constraint-incomplete` (an error in strict mode:
 a constraint with no left operand, operator or right operand, or an empty
 value), and the lints `heuristic.single-child-group` (with an "Ungroup" fix)
