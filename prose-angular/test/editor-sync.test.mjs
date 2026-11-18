@@ -40,6 +40,7 @@ function fake(bad = new Set(), scope = {}) {
         if (t === 'bad shapes') throw new Error('not shapes');
         return t == null ? 'null' : '{"constraints":2,"actions":null,"leftOperands":null,"warnings":["ignored sh:minCount"]}';
       },
+      shapesSummary: () => (calls.push(['shapesSummary']), '{"constraints":2,"actions":null,"leftOperands":null,"warnings":["recomputed"]}'),
       setOverlays: (t) => {
         calls.push(['setOverlays', t]);
         if (t.includes('bad overlay')) throw new Error('not an overlay');
@@ -448,6 +449,32 @@ test('shapes: handed over once, after the profiles and before the validation, an
   assert.equal(again.shapesSummary, undefined);
 });
 
+test('shapes: new profiles recompute the summary, since what the shapes say about a profile terms (a class cut) changes with the profiles', () => {
+  const s = new EditorSession();
+  const f = fake();
+  s.apply(inputs({ texts: ['p'], shapes: 'S' }), f.mount);
+  f.calls.length = 0;
+  // Only the profiles change: the shapes are not handed over again, their summary is read again.
+  const out = s.apply(inputs({ texts: ['q'], shapes: 'S' }), f.mount);
+  assert.ok(!names(f.calls).includes('setShapes'));
+  assert.ok(names(f.calls).includes('shapesSummary'));
+  assert.deepEqual(out.shapesSummary, { constraints: 2, actions: null, leftOperands: null, warnings: ['recomputed'] });
+  // Without shapes nothing is asked.
+  const s2 = new EditorSession();
+  const f2 = fake();
+  s2.apply(inputs({ texts: ['p'] }), f2.mount);
+  s2.apply(inputs({ texts: ['q'] }), f2.mount);
+  assert.ok(!names(f2.calls).includes('shapesSummary'));
+  // New profiles together with new shapes: one summary, from setShapes.
+  const f3 = fake();
+  const s3 = new EditorSession();
+  s3.apply(inputs({ texts: ['p'], shapes: 'S' }), f3.mount);
+  f3.calls.length = 0;
+  const both = s3.apply(inputs({ texts: ['q'], shapes: 'T' }), f3.mount);
+  assert.ok(!names(f3.calls).includes('shapesSummary'));
+  assert.equal(both.shapesSummary.warnings[0], 'ignored sh:minCount');
+});
+
 test('shapes: none (null, undefined, blank) on a fresh mount needs no call; going back to none clears them', () => {
   const s = new EditorSession();
   const f = fake();
@@ -705,4 +732,26 @@ test('outOfScope: reject, a new document that fixes what the new limits refuse i
   assert.equal(out.jsonError, undefined);
   assert.equal(f.state.text, '{"uid":"b"}');
   assert.equal(f.state.capped, true, 'the limits are in force once the new document is');
+});
+
+test('outOfScope: strip, the host binding the stripped document back does not reload it', () => {
+  const s = new EditorSession();
+  const f = scoped();
+  const inp = { outOfScope: 'strip', limits: { policyAssigner: { max: 0 } } };
+  f.state.removed = [{ path: 'assigner', key: 'assigner', limit: 'policyAssigner' }];
+  const out = s.apply(inputs({ ...inp, json: '{"uid":"a","assigner":"x"}' }), f.mount);
+  f.state.calls.length = 0;
+  s.apply(inputs({ ...inp, json: out.strippedJson }), f.mount);
+  assert.deepEqual(f.state.calls.filter((c) => c === 'update'), [], 'the handle already holds it');
+});
+
+test('outOfScope: strip, limits that change later strip the document on screen and report it', () => {
+  const s = new EditorSession();
+  const f = scoped();
+  const doc = '{"uid":"a","assigner":"x"}';
+  s.apply(inputs({ json: doc, outOfScope: 'strip' }), f.mount);
+  f.state.removed = [{ path: 'assigner', key: 'assigner', limit: 'policyAssigner' }];
+  const out = s.apply(inputs({ json: doc, outOfScope: 'strip', limits: { policyAssigner: { max: 0 } } }), f.mount);
+  assert.equal(out.removed.length, 1);
+  assert.equal(out.strippedJson, '{"uid":"a"}');
 });

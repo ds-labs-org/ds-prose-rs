@@ -11,6 +11,9 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_test::*;
 use web_sys::{Element, HtmlElement};
 
+mod common;
+use common::{CLASS_SHAPES, chain_profile};
+
 wasm_bindgen_test_configure!(run_in_browser);
 
 const RESEARCH: &str = include_str!("../../prose-core/tests/profiles/research.jsonld");
@@ -1163,4 +1166,24 @@ async fn out_of_scope_strip_follows_a_context_alias() {
     settle().await;
     assert_eq!(removed_paths(&h), ["giver", "permission[0].giver"]);
     assert!(!h.json().contains("\"urn:a\""), "{}", h.json());
+}
+
+#[wasm_bindgen_test]
+async fn the_editor_handle_reports_what_the_profiles_make_unusable_in_the_shapes_summary() {
+    let (_c, mut h, _calls) = mount(DX_POLICY).await;
+    h.set_profile(Some(chain_profile(70))).unwrap();
+    let summary = h.set_shapes(Some(CLASS_SHAPES.to_string())).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&summary).unwrap();
+    let warned = v["warnings"].as_array().unwrap().iter().any(|m| {
+        let m = m.as_str().unwrap();
+        m.contains("sh:class") && m.contains("more members")
+    });
+    assert!(warned, "{summary}");
+    let again = |h: &ProseEditorHandle| h.shapes_summary().contains("more members");
+    h.set_profile(Some(chain_profile(5))).unwrap();
+    assert!(!again(&h), "new profiles change what the shapes can say");
+    h.set_profile(Some(chain_profile(70))).unwrap();
+    assert!(again(&h));
+    h.set_shapes(None).unwrap();
+    assert_eq!(h.shapes_summary(), "null");
 }

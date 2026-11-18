@@ -12,6 +12,9 @@ use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_test::*;
 use web_sys::Element;
 
+mod common;
+use common::{CLASS_SHAPES, chain_profile};
+
 wasm_bindgen_test_configure!(run_in_browser);
 
 const RESEARCH: &str = include_str!("../../prose-core/tests/profiles/research.jsonld");
@@ -604,4 +607,37 @@ fn validate_takes_value_sources_as_its_last_argument() {
         )
         .is_err()
     );
+}
+
+fn warns_of_the_cut_class(summary: &str) -> bool {
+    let v: Value = serde_json::from_str(summary).unwrap();
+    v["warnings"].as_array().unwrap().iter().any(|m| {
+        let m = m.as_str().unwrap();
+        m.contains("sh:class") && m.contains("more members")
+    })
+}
+
+#[wasm_bindgen_test]
+fn a_validator_reports_what_the_profiles_make_unusable_in_the_shapes_summary() {
+    let mut v = ProseValidator::new(list(&[&chain_profile(70)]), None).unwrap();
+    let summary = v.set_shapes(Some(CLASS_SHAPES.to_string())).unwrap();
+    assert!(warns_of_the_cut_class(&summary), "{summary}");
+    let mut ok = ProseValidator::new(list(&[&chain_profile(5)]), None).unwrap();
+    let summary = ok.set_shapes(Some(CLASS_SHAPES.to_string())).unwrap();
+    assert!(!warns_of_the_cut_class(&summary), "{summary}");
+}
+
+#[wasm_bindgen_test]
+async fn the_rendering_handle_reports_what_the_profiles_make_unusable_in_the_shapes_summary() {
+    let (_c, mut h) = mount(POLICY).await;
+    h.set_profiles(list(&[&chain_profile(70)])).unwrap();
+    let summary = h.set_shapes(Some(CLASS_SHAPES.to_string())).unwrap();
+    assert!(warns_of_the_cut_class(&summary), "{summary}");
+    // New profiles change what the shapes can say; shapesSummary follows.
+    h.set_profiles(list(&[&chain_profile(5)])).unwrap();
+    assert!(!warns_of_the_cut_class(&h.shapes_summary()));
+    h.set_profiles(list(&[&chain_profile(70)])).unwrap();
+    assert!(warns_of_the_cut_class(&h.shapes_summary()));
+    h.set_shapes(None).unwrap();
+    assert_eq!(h.shapes_summary(), "null");
 }

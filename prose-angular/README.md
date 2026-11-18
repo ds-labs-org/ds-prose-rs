@@ -75,7 +75,7 @@ export class PolicyComponent {
 | `overlaysError` | output | emits the error when an overlay is not readable; the previous overlays stay |
 | `valueSourcesLoaded` | output | emits a `Record<string, ValueSourceSummary>` (`values`, `closed`, `warnings`, one per key) when `valueSources` changed to sources that were read |
 | `valueSourcesError` | output | emits the error when `valueSources` cannot be read; the previous sources stay |
-| `shapesLoaded` | output | emits a `ShapesSummary` (`constraints`, `actions`, `leftOperands`, `warnings`) when `shapes` changed to shapes that were read |
+| `shapesLoaded` | output | emits a `ShapesSummary` (`constraints`, `actions`, `leftOperands`, `warnings`) when `shapes` changed to shapes that were read, and again when only the `profiles` changed (its `warnings` include what the profiles make unusable, such as an `sh:class` the limits cut) |
 | `shapesError` | output | emits the error when `shapes` is not readable shapes; the previous shapes stay |
 | `PROSE_WASM_URL` | injection token | where the browser fetches the wasm from, relative to the page's base href (default `prose_wasm_bg.wasm`) |
 | `PROSE_WASM_MODULE` | injection token | which build of `@ds-labs/prose-wasm` runs: by default JSON-LD profiles only; `() => import('@ds-labs/prose-wasm/turtle')`, with `PROSE_WASM_URL` set to `prose_wasm_turtle_bg.wasm`, reads Turtle as well |

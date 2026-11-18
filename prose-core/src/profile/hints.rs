@@ -205,3 +205,78 @@ pub(crate) fn layer_host(base: &OperandHints, patch: &OperandHints) -> OperandHi
     out.source_values = patch.source_values.clone();
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn values(v: &[&str]) -> OperandHints {
+        OperandHints {
+            values: v.iter().map(|s| s.to_string()).collect(),
+            value_tree: v.iter().map(|s| (s.to_string(), 0)).collect(),
+            ..OperandHints::default()
+        }
+    }
+
+    fn operators(v: &[&str]) -> OperandHints {
+        OperandHints {
+            operators: v.iter().map(|s| s.to_string()).collect(),
+            ..OperandHints::default()
+        }
+    }
+
+    /// A base the shapes closed for values alone, over suggested operators.
+    fn values_closed_over_suggestions() -> OperandHints {
+        let mut base = operators(&["eq"]);
+        base.units = vec!["unit".into()];
+        layer(&base, &values(&["a"]), HintSource::Shapes)
+    }
+
+    #[test]
+    fn a_values_only_base_is_no_longer_values_only_once_a_binding_facet_is_laid_over_it() {
+        let base = values_closed_over_suggestions();
+        assert!(base.closed && base.values_only);
+        let out = layer(&base, &operators(&["neq"]), HintSource::Host);
+        assert!(!out.values_only && out.binds_other_facets(), "{out:?}");
+        assert_eq!(out.operators, ["neq"]);
+        // The suggestions the patch does not give are gone; the closed values stay.
+        assert!(out.units.is_empty());
+        assert_eq!(out.values, ["a"]);
+    }
+
+    #[test]
+    fn a_base_that_only_suggested_values_loses_them_to_a_binding_patch() {
+        let mut base = operators(&["eq"]);
+        base.values = vec!["suggested".into()];
+        base.value_tree = vec![("suggested".into(), 0)];
+        let out = layer(&base, &operators(&["neq"]), HintSource::Shapes);
+        assert!(
+            out.values.is_empty() && out.value_tree.is_empty(),
+            "{out:?}"
+        );
+        assert_eq!(out.operators, ["neq"]);
+    }
+
+    #[test]
+    fn values_alone_stay_values_only_over_each_kind_of_suggestion_and_close_the_operand_over_none()
+    {
+        let units = OperandHints {
+            units: vec!["u".into()],
+            ..OperandHints::default()
+        };
+        let datatype = OperandHints {
+            datatype: Some("xsd:string".into()),
+            ..OperandHints::default()
+        };
+        for base in [operators(&["eq"]), units, datatype] {
+            let out = layer(&base, &values(&["a"]), HintSource::Shapes);
+            assert!(out.closed && out.values_only, "{base:?}");
+        }
+        let out = layer(
+            &OperandHints::default(),
+            &values(&["a"]),
+            HintSource::Shapes,
+        );
+        assert!(out.closed && !out.values_only);
+    }
+}

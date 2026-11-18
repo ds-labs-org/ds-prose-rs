@@ -13,10 +13,14 @@
 //! it.
 //!
 //! Where it follows XSD (as SHACL's `sh:pattern` does): `.` does not match a
-//! line break and `\s` is only space, tab, CR and LF. Where it does not:
-//! `\d` is ASCII digits only (XSD: every `\p{Nd}`) and
-//! `\w` is alphanumeric or `_` (XSD: everything but punctuation, separators
-//! and controls, so `_` is excluded there). Class subtraction
+//! line break, `\s` is only space, tab, CR and LF, and `\d` is every
+//! `\p{Nd}` (Unicode 16.0, a static table searched by bisection: the
+//! category is one item, not class ranges, so it costs one against
+//! [`MAX_PROGRAM`]). Where it does not: `\w` is alphanumeric or `_` (XSD:
+//! `[^\p{P}\p{Z}\p{C}]`, which leaves `_` out). It stays so on purpose: a
+//! pattern such as `[\w-]+` is written for identifiers with underscores, and
+//! the XSD set needs tables of punctuation, formatting and unassigned code
+//! points that `char` cannot tell apart, for a result that rejects `_`. Class subtraction
 //! (`[a-z-[aeiou]]`) is refused, as is a `{` with nothing to repeat.
 //!
 //! The pattern is third-party input. Matching keeps a set of visited
@@ -447,16 +451,32 @@ fn fold(c: char) -> char {
 fn in_item(item: &Item, c: char) -> bool {
     match item {
         Item::Range(lo, hi) => (*lo..=*hi).contains(&c),
-        Item::Digit(yes) => c.is_ascii_digit() == *yes,
+        Item::Digit(yes) => {
+            super::unicode_tables::contains(super::unicode_tables::DIGITS, c) == *yes
+        }
         Item::Word(yes) => (c.is_alphanumeric() || c == '_') == *yes,
         Item::Space(yes) => matches!(c, ' ' | '\t' | '\n' | '\r') == *yes,
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    static COMPILES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many patterns this thread has compiled: a test counts them to see a
+/// cache at work.
+#[cfg(test)]
+pub(crate) fn compiles() -> usize {
+    COMPILES.with(|n| n.get())
 }
 
 impl Pattern {
     /// Compiles `source` with SHACL `flags` (`""` or `"i"`), or says why it
     /// is not in the subset.
     pub(crate) fn new(source: &str, flags: &str) -> Result<Pattern, String> {
+        #[cfg(test)]
+        COMPILES.with(|n| n.set(n.get() + 1));
         if let Some(f) = flags.chars().find(|&f| f != 'i') {
             return Err(format!("the flag {f:?} is not read (only i is)"));
         }
@@ -579,6 +599,10 @@ mod tests {
 
     fn m(p: &str, t: &str) -> bool {
         Pattern::new(p, "").unwrap().is_match(t).unwrap()
+    }
+
+    fn m_flags(p: &str, t: &str, flags: &str) -> bool {
+        Pattern::new(p, flags).unwrap().is_match(t).unwrap()
     }
 
     #[test]
@@ -737,6 +761,47 @@ mod tests {
     }
 
     #[test]
+    fn a_class_is_sorted_and_merged_and_probed_at_every_edge() {
+        // Out of order, overlapping and adjacent ranges, with a duplicate.
+        let c = Class::new(vec![
+            Item::Range('x', 'z'),
+            Item::Range('a', 'c'),
+            Item::Range('0', '9'),
+            Item::Range('d', 'e'),
+            Item::Range('b', 'b'),
+            Item::Range('x', 'z'),
+            Item::Digit(true),
+            Item::Digit(true),
+        ]);
+        assert_eq!(c.ranges, [('0', '9'), ('a', 'e'), ('x', 'z')]);
+        assert_eq!(c.others, [Item::Digit(true)]);
+        for ch in ['0', '9', 'a', 'e', 'x', 'z'] {
+            assert!(c.has(ch, false), "{ch}");
+        }
+        for ch in ['/', ':', '`', 'f', 'w', '{'] {
+            assert!(!c.has(ch, false), "{ch}");
+        }
+        // Three hundred separate points, each found and each neighbour missed.
+        let big = Class::new(
+            (0..300u32)
+                .rev()
+                .map(|n| {
+                    let ch = char::from_u32(0x4e00 + n * 2).unwrap();
+                    Item::Range(ch, ch)
+                })
+                .collect(),
+        );
+        assert_eq!(big.ranges.len(), 300, "no point merges with its neighbour");
+        assert!(big.ranges.windows(2).all(|w| w[0].1 < w[1].0), "sorted");
+        for n in 0..300u32 {
+            let at = 0x4e00 + n * 2;
+            assert!(big.has(char::from_u32(at).unwrap(), false), "{at:x}");
+            assert!(!big.has(char::from_u32(at + 1).unwrap(), false), "{at:x}+1");
+        }
+        assert!(!big.has(char::from_u32(0x4dff).unwrap(), false));
+    }
+
+    #[test]
     fn class_subtraction_and_a_bare_brace_are_refused() {
         let e = Pattern::new("[a-z-[aeiou]]", "").unwrap_err();
         assert!(e.contains("subtraction"), "{e}");
@@ -753,8 +818,92 @@ mod tests {
     fn dot_and_space_follow_xsd() {
         assert!(!m("^.$", "\n"), "XSD . does not match a line break");
         assert!(!m("^.$", "\r"));
-        assert!(m(r"^\s$", " "));
+        for ws in [" ", "\t", "\n", "\r"] {
+            assert!(m(r"^\s$", ws), "{ws:?}");
+            assert!(!m(r"^\S$", ws), "{ws:?}");
+        }
+        assert!(m(r"^\S$", "\u{a0}"));
+        assert!(m(r"^[\s]$", "\t") && !m(r"^[^\s]$", "\t"));
         assert!(!m(r"^\s$", "\u{a0}"), "XSD \\s is space, tab, CR, LF only");
+    }
+
+    #[test]
+    fn d_is_every_unicode_decimal_digit_and_costs_one_instruction() {
+        // Arabic-Indic, Devanagari, fullwidth and mathematical bold digits.
+        // Segmented digits (U+1FBF0) are the last run in the table.
+        for d in [
+            "\u{663}",
+            "\u{967}",
+            "\u{ff15}",
+            "\u{1d7ce}",
+            "\u{1fbf0}",
+            "\u{1fbf9}",
+        ] {
+            assert!(m(r"^\d$", d), "{d:?}");
+            assert!(!m(r"^\D$", d), "{d:?}");
+            assert!(m(r"^[\d]$", d) && !m(r"^[^\d]$", d), "{d:?}");
+        }
+        assert!(m(r"^\d+$", "2026\u{665}\u{ff10}"));
+        // Not decimal digits: a superscript, a fraction, a Roman numeral,
+        // and the characters either side of ASCII 0-9 and of the Arabic-Indic block.
+        for n in [
+            "\u{b2}", "\u{bd}", "\u{2167}", "/", ":", "\u{65f}", "\u{66a}",
+        ] {
+            assert!(!m(r"^\d$", n), "{n:?}");
+            assert!(m(r"^\D$", n), "{n:?}");
+        }
+        // The class budget: the whole category is one item, not thousands of ranges.
+        let p = Pattern::new(r"[\d]", "").unwrap();
+        assert!(p.prog.len() < 10, "{}", p.prog.len());
+        let many = r"\d".repeat(150);
+        assert!(
+            Pattern::new(&many, "").is_ok(),
+            "150 \\d stay within the program bound"
+        );
+        // With the case flag the digit still matches by category.
+        assert!(m_flags(r"^\d$", "\u{967}", "i"));
+    }
+
+    #[test]
+    fn the_digit_table_is_sorted_disjoint_in_tens_and_numeric() {
+        use super::super::unicode_tables::DIGITS;
+        assert!(
+            DIGITS.windows(2).all(|w| w[0].1 < w[1].0),
+            "sorted and disjoint"
+        );
+        for &(lo, hi) in DIGITS {
+            assert_eq!((hi - lo + 1) % 10, 0, "{lo:x}..{hi:x} runs in tens");
+            for c in lo..=hi {
+                assert!(char::from_u32(c).unwrap().is_numeric(), "{c:x}");
+            }
+        }
+        assert!(DIGITS.len() > 60, "every script's digits");
+    }
+
+    #[test]
+    fn every_digit_in_the_table_matches_and_the_code_points_around_each_run_do_not() {
+        use super::super::unicode_tables::DIGITS;
+        for (i, &(lo, hi)) in DIGITS.iter().enumerate() {
+            for c in lo..=hi {
+                let s = char::from_u32(c).unwrap().to_string();
+                assert!(m(r"^\d$", &s), "{c:x} (run {i}) is a digit");
+            }
+            // Just outside a run is a digit only when the next run starts there.
+            for c in [lo - 1, hi + 1] {
+                let inside = DIGITS.iter().any(|&(a, b)| (a..=b).contains(&c));
+                let s = char::from_u32(c).unwrap().to_string();
+                assert_eq!(m(r"^\d$", &s), inside, "{c:x} beside run {i}");
+            }
+        }
+    }
+
+    #[test]
+    fn w_still_takes_letters_digits_and_underscore_and_a_dash_after_it_in_a_class() {
+        // Kept as it was, for `[\w-]`: XSD would leave `_` out of `\w`.
+        assert!(m(r"^[\w-]+$", "a-b_c"));
+        assert!(m(r"^\w$", "_") && m(r"^\w$", "\u{e9}") && m(r"^\w$", "\u{663}"));
+        assert!(!m(r"^\w$", "-") && !m(r"^\w$", " ") && m(r"^\W$", "."));
+        assert!(!m(r"^[\w-]+$", "a.b"));
     }
 
     #[test]

@@ -133,7 +133,11 @@ Shapes add hints to the terms the profiles declare and survive a later
 `setProfile`. `sh:in` on a right operand selected by `odrl:leftOperand
 sh:hasValue X` makes it a dropdown (`setTermInput('select')`) and any other
 value an error whose `expected.source` is `"shapes"`. Only a subset of SHACL is
-read; the rest is listed in `warnings`. `validate(policyJson, profiles,
+read; the rest is listed in `warnings`, with what the loaded profiles make
+unusable (an `sh:class` with more members than the limits keep closes
+nothing). That part changes with the profiles, so `shapesSummary()` on
+`ProseHandle` and `ProseEditorHandle` returns the summary again for the
+profiles loaded now. `validate(policyJson, profiles,
 options?, shapes?)` takes the shapes text as its last argument.
 
 `setOverlays(texts)` loads the dataspace's operator overlays (JSON-LD, or Turtle in

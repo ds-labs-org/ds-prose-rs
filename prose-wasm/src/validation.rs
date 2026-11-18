@@ -191,13 +191,24 @@ fn shapes_error(e: &prose_core::shapes::ShapesError) -> String {
 /// What `setShapes` returns for loaded shapes, as JSON text: `constraints`
 /// (how many left operands a shape selects), `actions` and `leftOperands`
 /// (the expanded IRIs the shapes close the policy to, `null` when they do
-/// not) and `warnings` (what was not read).
-pub fn shapes_summary_json(s: &ShapesGraph) -> String {
+/// not) and `warnings` (what was not read). `wording` is the profiles with
+/// these shapes laid over them, when there are profiles: what the shapes say
+/// that the profiles make unusable (an `sh:class` with more members than the
+/// limits keep) is listed after the shapes' own warnings.
+pub fn shapes_summary_json(s: &ShapesGraph, wording: Option<&Wording>) -> String {
+    let mut warnings: Vec<String> = s.warnings().to_vec();
+    if let Some(w) = wording {
+        for m in w.shapes_warnings() {
+            if !warnings.contains(&m) {
+                warnings.push(m);
+            }
+        }
+    }
     json!({
         "constraints": s.constraints().count(),
         "actions": s.closed_actions(),
         "leftOperands": s.closed_left_operands(),
-        "warnings": s.warnings(),
+        "warnings": warnings,
     })
     .to_string()
 }

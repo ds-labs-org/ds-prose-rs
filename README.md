@@ -687,6 +687,11 @@ version; the paragraphs after it give the detail. Nothing here is released or ve
 
 Added:
 
+- `shapesSummary()` on `ProseHandle` and `ProseEditorHandle`, and the `warnings` of
+  `setShapes` / `shapesLoaded` now include what the profiles make unusable (an `sh:class` cut
+  by the limits); the Angular components emit the summary again when only the profiles change.
+  A shapes list past 256 values warns once, naming 256. `sh:pattern`'s `\d` is every Unicode
+  decimal digit (`\w` is unchanged, with `_`).
 - `outOfScope` (`'show'` | `'strip'` | `'reject'`): a `max: 0` limit can be the scope of an
   incoming document (#72).
   A policy's `@id` is its uid, as ODRL's context maps `uid` to `@id`, so the scope drops both
@@ -946,14 +951,17 @@ This is not a SHACL engine. Only this subset is read:
   (the IRIs of that class in the profile, with `skos:broader` descendants),
   `sh:datatype`, and `sh:pattern`, `sh:minInclusive`, `sh:maxInclusive` (lexical
   checks; the pattern is a small regular expression subset, at most 2048
-  characters and bounded in size, with `.` and `\s` as in XSD, `\d` ASCII only and
-  `\w` including `_`; class subtraction `[a-z-[aeiou]]` and a bare `{n}` are refused
+  characters and bounded in size, with `.` and `\s` as in XSD, `\d` every Unicode decimal digit
+  (`\p{Nd}`, Unicode 16) and `\w` alphanumeric or `_` (XSD's `\w` leaves `_` out; kept so
+  `[\w-]+` takes identifiers); class subtraction `[a-z-[aeiou]]` and a bare `{n}` are refused
   with a warning). Lists are read once and capped at `max_terms` values per left
   operand, with a warning past it. A JSON-LD list holds at most `max_values_per_key`
-  (256) values, exactly 256 included; one more is ignored with a warning, as is an empty
+  (256) values, exactly 256 included; one more is ignored with exactly one warning (it names 256), as is an empty
   list (`sh:in ()` in Turtle, `{"@list": []}` in JSON-LD), which adds no constraint. An
   `sh:class` with more members than `max_terms` (or nested deeper than `max_depth`)
-  closes nothing: `Wording::shapes_warnings()` says so;
+  closes nothing: `Wording::shapes_warnings()` says so, and so do the `warnings` of the
+  `setShapes` summary (the wasm handles' `shapesSummary()` gives them again after the profiles
+  change);
 - `sh:in` on `odrl:operator` and `odrl:unit` there (IRIs; a string written as an absolute IRI,
   `"http://www.w3.org/ns/odrl/2/eq"`, is read as that IRI, and any other string, a curie
   included, ignores the list with a warning);

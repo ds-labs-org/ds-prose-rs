@@ -23,7 +23,7 @@
   "scripts": {
     "build": "ng-packagr -p ng-package.json -c tsconfig.lib.prod.json && cp ../LICENSE ../dist-npm/prose-angular/LICENSE",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --test test/*.test.mjs"
+    "test": "tsc --noEmit -p tsconfig.json && node --test test/*.test.mjs"
   },
   "publishConfig": {
     "access": "public"

@@ -68,9 +68,12 @@ use serde_json::Value;
 mod bounds;
 mod pattern;
 mod read;
+mod unicode_tables;
 
 pub(crate) use bounds::{Bound, outside_bounds};
 pub(crate) use pattern::Pattern;
+#[cfg(test)]
+pub(crate) use pattern::compiles as pattern_compiles;
 
 /// What the shapes say about one left operand's right operand, operator and
 /// unit, as read; not yet laid over a profile's hints.

@@ -248,7 +248,15 @@ export interface ShapesSummary {
   actions: string[] | null;
   /** The left operands the shapes close the policy to; `null` when they do not. */
   leftOperands: string[] | null;
-  /** What was not read, or read with a guess. */
+  /**
+   * What was not read, or read with a guess, then what the shapes say that
+   * the loaded profiles make unusable: an `sh:class` with more members (or a
+   * deeper hierarchy) than the limits keep closes nothing. That second part
+   * depends on the profiles, so it is only complete once they are loaded
+   * (`ProseHandle.shapesSummary()` and `ProseEditorHandle.shapesSummary()`
+   * return it again for the profiles loaded now, and `shapesLoaded` of the
+   * Angular components emits it again when the profiles change).
+   */
   warnings: string[];
 }
 

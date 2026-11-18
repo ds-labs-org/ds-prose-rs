@@ -169,6 +169,18 @@ impl Collect {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    static WALK_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many list nodes this thread has walked: a test counts them to see that
+/// a shared list is walked once.
+#[cfg(test)]
+fn walk_steps() -> usize {
+    WALK_STEPS.with(|n| n.get())
+}
+
 /// The values of the list headed `head`, walked once per graph.
 fn walk<'t>(g: &Graph<'t>, head: &'t str, limits: &ProfileLimits) -> Rc<Items> {
     if let Some(hit) = g.walked.borrow().get(head) {
@@ -180,6 +192,8 @@ fn walk<'t>(g: &Graph<'t>, head: &'t str, limits: &ProfileLimits) -> Rc<Items> {
     let mut steps = 0;
     while node != RDF_NIL && seen.insert(node) {
         steps += 1;
+        #[cfg(test)]
+        WALK_STEPS.with(|n| n.set(n.get() + 1));
         if steps > limits.max_terms {
             c.items.cut = true;
             break;
@@ -282,6 +296,7 @@ pub(crate) fn interpret(
     limits: &ProfileLimits,
 ) -> Result<ShapesGraph, ShapesError> {
     let Parsed { triples, notes, .. } = parsed;
+    let notes = recount(notes, limits);
     let is_shacl = triples.iter().any(|t| {
         t.p.starts_with(ns::SH)
             || (t.p == ns::RDF_TYPE && matches!(&t.o, Object::Iri(i) if i.starts_with(ns::SH)))
@@ -303,6 +318,27 @@ pub(crate) fn interpret(
     r.read();
     r.out.warnings = std::mem::take(&mut r.notes.list);
     Ok(r.out)
+}
+
+/// The triples were read with one more value per key than the reader keeps
+/// (see `wide`), so the reader's own cap note names that count and, for
+/// `sh:in`, repeats what the list warning already says. Counts the limit
+/// instead, and leaves `sh:in` to its own warning.
+fn recount(notes: Notes, limits: &ProfileLimits) -> Notes {
+    let wide = limits.max_values_per_key.saturating_add(1);
+    let head = format!("only the first {wide} values of <");
+    let mut out = Notes::default();
+    for m in notes.list {
+        match m.strip_prefix(&head) {
+            Some(rest) if rest.starts_with(&sh("in")) => {}
+            Some(rest) => out.warn(format!(
+                "only the first {} values of <{rest}",
+                limits.max_values_per_key
+            )),
+            None => out.warn(m),
+        }
+    }
+    out
 }
 
 impl<'t> Reader<'t> {
@@ -685,4 +721,105 @@ fn is_absolute_iri(s: &str) -> bool {
         && !s.chars().any(|c| c.is_whitespace())
         && (rest.starts_with("//") && rest.len() > 2
             || (["urn", "did"].contains(&scheme.to_ascii_lowercase().as_str()) && !rest.is_empty()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::time::{Duration, Instant};
+
+    /// Shapes in which `shapes` node shapes share one `sh:in` list of `items`
+    /// values, written as `rdf:first`/`rdf:rest` nodes.
+    fn shared_list(shapes: usize, items: usize) -> serde_json::Value {
+        let mut graph = Vec::new();
+        for i in 0..items {
+            let rest = if i + 1 == items {
+                json!({"@id": "rdf:nil"})
+            } else {
+                json!({"@id": format!("_:l{}", i + 1)})
+            };
+            graph.push(json!({
+                "@id": format!("_:l{i}"),
+                "rdf:first": {"@id": format!("ex:v{i}")},
+                "rdf:rest": rest
+            }));
+        }
+        for n in 0..shapes {
+            graph.push(json!({
+                "@id": format!("ex:S{n}"), "@type": "sh:NodeShape",
+                "sh:property": [
+                    {"sh:path": {"@id": "odrl:leftOperand"}, "sh:hasValue": {"@id": format!("ex:left{n}")}},
+                    {"sh:path": {"@id": "odrl:rightOperand"}, "sh:in": {"@id": "_:l0"}}
+                ]
+            }));
+        }
+        json!({
+            "@context": {
+                "sh": "http://www.w3.org/ns/shacl#",
+                "odrl": "http://www.w3.org/ns/odrl/2/",
+                "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+                "ex": "https://example.org/"
+            },
+            "@graph": graph
+        })
+    }
+
+    #[test]
+    fn a_list_shared_by_many_shapes_is_walked_once() {
+        let before = walk_steps();
+        let g = ShapesGraph::from_value(&shared_list(40, 300), &ProfileLimits::default()).unwrap();
+        assert_eq!(walk_steps() - before, 300, "one walk, not one per shape");
+        for n in [0, 17, 39] {
+            let c = g
+                .constraint(&format!("https://example.org/left{n}"))
+                .unwrap();
+            assert_eq!(c.values.len(), 300);
+        }
+    }
+
+    #[test]
+    fn collecting_distinct_values_is_linear() {
+        // 20,000 distinct values: a duplicate check by scanning costs some
+        // 2*10^8 comparisons, over a second in a debug build; a set costs
+        // milliseconds.
+        let mut c = Collect::default();
+        let started = Instant::now();
+        for i in 0..20_000 {
+            c.push(&Object::Iri(format!("https://example.org/v{i}")));
+        }
+        for i in 0..20_000 {
+            c.push(&Object::Iri(format!("https://example.org/v{i}")));
+        }
+        assert_eq!(c.items.iris.len(), 20_000);
+        assert!(
+            started.elapsed() < Duration::from_millis(300),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn a_union_with_a_cap_is_linear_and_keeps_the_first() {
+        let mut into: Vec<String> = Vec::new();
+        let add: Vec<String> = (0..20_000).map(|i| format!("v{i}")).collect();
+        let started = Instant::now();
+        assert!(!union(&mut into, add.clone(), usize::MAX));
+        assert!(
+            !union(&mut into, add.clone(), usize::MAX),
+            "nothing new, nothing cut"
+        );
+        assert!(
+            started.elapsed() < Duration::from_millis(300),
+            "{:?}",
+            started.elapsed()
+        );
+        let mut capped = vec!["a".to_string()];
+        assert!(union(
+            &mut capped,
+            vec!["a".into(), "b".into(), "c".into()],
+            2
+        ));
+        assert_eq!(capped, ["a", "b"]);
+    }
 }

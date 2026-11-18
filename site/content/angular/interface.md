@@ -37,7 +37,7 @@ Validation is covered on [its own page](/angular/validation/).
 | `profileError` | `unknown` | A profile text cannot be read. The previous profile stays. |
 | `overlaysLoaded` | `OverlaySummary[]` | After the `overlays` input changed to overlays that were read, and again when only the profiles changed (the `warnings` depend on them): one summary per overlay, with the `terms` it names and the `warnings` for what was not used. |
 | `overlaysError` | `unknown` | An overlay text cannot be read. The previous overlays stay. |
-| `shapesLoaded` | `ShapesSummary` | After the `shapes` input changed to shapes that were read. `warnings` lists what was not read. |
+| `shapesLoaded` | `ShapesSummary` | After the `shapes` input changed to shapes that were read, and again when only the profiles changed. `warnings` lists what was not read and what the profiles make unusable (an `sh:class` the limits cut). |
 | `shapesError` | `unknown` | The shapes text cannot be read. The previous shapes stay. |
 | `valueSourcesLoaded` | `Record<string, ValueSourceSummary>` | After the `valueSources` input changed to sources that were read, and again when only the profiles changed (the `warnings` depend on them): one summary per key, with the number of `values`, whether it is `closed`, and the `warnings` for what was not used. |
 | `valueSourcesError` | `unknown` | The `valueSources` cannot be read. The previous sources stay. |
@@ -91,7 +91,7 @@ The declared type is writable, because the source declares `readonly report = si
 | `profileError` | `unknown` | A profile text cannot be read. The previous profile stays. |
 | `overlaysLoaded` | `OverlaySummary[]` | After the `overlays` input changed to overlays that were read, and again when only the profiles changed (the `warnings` depend on them): one summary per overlay, with the `terms` it names and the `warnings` for what was not used. |
 | `overlaysError` | `unknown` | An overlay text cannot be read. The previous overlays stay. |
-| `shapesLoaded` | `ShapesSummary` | After the `shapes` input changed to shapes that were read. `warnings` lists what was not read. |
+| `shapesLoaded` | `ShapesSummary` | After the `shapes` input changed to shapes that were read, and again when only the profiles changed. `warnings` lists what was not read and what the profiles make unusable (an `sh:class` the limits cut). |
 | `shapesError` | `unknown` | The shapes text cannot be read. The previous shapes stay. |
 | `valueSourcesLoaded` | `Record<string, ValueSourceSummary>` | After the `valueSources` input changed to sources that were read, and again when only the profiles changed (the `warnings` depend on them): one summary per key, with the number of `values`, whether it is `closed`, and the `warnings` for what was not used. |
 | `valueSourcesError` | `unknown` | The `valueSources` cannot be read. The previous sources stay. |

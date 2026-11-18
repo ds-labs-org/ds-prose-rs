@@ -6,6 +6,9 @@ use prose_core::validate::{Level, RULES, RULESET, RuleId};
 use prose_wasm::validation::*;
 use serde_json::{Value, json};
 
+mod common;
+use common::{CLASS_SHAPES, chain_profile};
+
 const RESEARCH: &str = include_str!("../../prose-core/tests/profiles/research.jsonld");
 const RESEARCH_TTL: &str = include_str!("../../prose-core/tests/profiles/research.ttl");
 const CLOSED: &str = include_str!("../../prose-core/tests/profiles/research-closed.jsonld");
@@ -369,7 +372,7 @@ fn shaped_report(shapes: Option<&str>) -> Value {
 #[test]
 fn shapes_summary_says_what_was_read() {
     let s = shapes(DX_SHAPES).expect("shapes");
-    let v: Value = serde_json::from_str(&shapes_summary_json(&s)).unwrap();
+    let v: Value = serde_json::from_str(&shapes_summary_json(&s, None)).unwrap();
     assert_eq!(v["constraints"], 5);
     assert_eq!(
         v["actions"],
@@ -384,10 +387,29 @@ fn shapes_summary_says_what_was_read() {
         r#"{"@context":{"sh":"http://www.w3.org/ns/shacl#"},"@id":"http://e.org/S","sh:closed":true,"sh:property":{"sh:path":{"@id":"http://e.org/p"}}}"#,
     )
     .unwrap();
-    let v: Value = serde_json::from_str(&shapes_summary_json(&open)).unwrap();
+    let v: Value = serde_json::from_str(&shapes_summary_json(&open, None)).unwrap();
     assert_eq!(v["actions"], Value::Null, "no closed list");
     assert_eq!(v["leftOperands"], Value::Null);
     assert!(v["warnings"].as_array().unwrap().len() >= 2, "{v}");
+}
+
+#[test]
+fn shapes_summary_lists_what_the_profiles_make_unusable() {
+    let s = shapes(CLASS_SHAPES).expect("shapes");
+    let deep = wording(&[chain_profile(70)]).expect("profile");
+    let v: Value =
+        serde_json::from_str(&shapes_summary_json(&s, Some(&with_shapes(deep, Some(&s))))).unwrap();
+    let w = v["warnings"].as_array().unwrap();
+    assert!(
+        w.iter().any(|m| m.as_str().unwrap().contains("sh:class")
+            && m.as_str().unwrap().contains("more members")),
+        "{v}"
+    );
+    // A chain within the limits is read whole: nothing to say.
+    let ok = wording(&[chain_profile(5)]).expect("profile");
+    let v: Value =
+        serde_json::from_str(&shapes_summary_json(&s, Some(&with_shapes(ok, Some(&s))))).unwrap();
+    assert_eq!(v["warnings"], json!([]), "{v}");
 }
 
 #[test]

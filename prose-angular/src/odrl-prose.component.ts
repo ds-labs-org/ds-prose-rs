@@ -254,6 +254,15 @@ export class OdrlProseComponent implements OnChanges, OnDestroy {
         } catch (error) {
           out.shapesError = error;
         }
+      } else if (profilesSet && this.appliedShapes !== null) {
+        // What the shapes say about a profile's terms (an sh:class cut by the
+        // limits) changes with the profiles: the summary reported before is stale.
+        try {
+          const summary = JSON.parse(handle.shapesSummary()) as ShapesSummary | null;
+          if (summary) out.shapesSummary = summary;
+        } catch (error) {
+          out.shapesError = error;
+        }
       }
       // The host's value sources sit on top of the rest; unreadable ones keep the previous sources.
       if (this.sourcesChanged(sources)) {

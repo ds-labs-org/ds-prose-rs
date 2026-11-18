@@ -178,6 +178,68 @@ fn class_members_cut_by_the_limit_warn_and_close_nothing() {
     );
 }
 
+/// A profile whose members of `dx:Big` are a chain, each narrower than the one before.
+fn chain_profile(n: usize) -> ProfileVocab {
+    let mut graph = vec![
+        json!({"@id": format!("{DX}profile"), "@type": "owl:Ontology"}),
+        json!({"@id": "dx:purpose", "@type": ["odrl:LeftOperand", "skos:Concept"]}),
+        json!({"@id": "dx:Big", "@type": "rdfs:Class"}),
+    ];
+    for i in 0..n {
+        let mut node = json!({"@id": format!("dx:m{i}"), "@type": ["odrl:RightOperand", "dx:Big", "skos:Concept"]});
+        if i > 0 {
+            node["skos:broader"] = json!({"@id": format!("dx:m{}", i - 1)});
+        }
+        graph.push(node);
+    }
+    let doc = json!({
+        "@context": {"odrl": ODRL, "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+                     "skos": "http://www.w3.org/2004/02/skos/core#",
+                     "owl": "http://www.w3.org/2002/07/owl#", "dx": DX},
+        "@graph": graph
+    });
+    ProfileVocab::parse(&doc.to_string()).unwrap()
+}
+
+fn cut_noted(w: &Wording) -> bool {
+    w.shapes_warnings()
+        .iter()
+        .any(|m| m.contains("sh:class") && m.contains("more members"))
+}
+
+#[test]
+fn a_class_of_exactly_the_member_limit_is_read_whole_and_one_more_is_cut() {
+    let mut limits = ProfileLimits::default();
+    limits.max_terms = 10;
+    let at = Wording::new()
+        .with_profile(big_profile(10))
+        .with_shapes(class_shape(&limits));
+    assert!(hints(&at, "purpose").closed, "{:?}", at.shapes_warnings());
+    assert_eq!(hints(&at, "purpose").values.len(), 10);
+    assert!(!cut_noted(&at));
+    let over = Wording::new()
+        .with_profile(big_profile(11))
+        .with_shapes(class_shape(&limits));
+    assert!(!hints(&over, "purpose").closed);
+    assert!(cut_noted(&over));
+}
+
+#[test]
+fn a_class_hierarchy_of_exactly_the_depth_limit_is_read_whole_and_a_level_more_is_cut() {
+    let mut limits = ProfileLimits::default();
+    limits.max_depth = 12;
+    let at = Wording::new()
+        .with_profile(chain_profile(12))
+        .with_shapes(class_shape(&limits));
+    assert!(hints(&at, "purpose").closed, "{:?}", at.shapes_warnings());
+    assert!(!cut_noted(&at), "{:?}", at.shapes_warnings());
+    let over = Wording::new()
+        .with_profile(chain_profile(13))
+        .with_shapes(class_shape(&limits));
+    assert!(!hints(&over, "purpose").closed);
+    assert!(cut_noted(&over), "{:?}", over.shapes_warnings());
+}
+
 // --- #14 exact lists are not skipped under a profile that is not loaded ------
 
 const OTHER: &str = "https://example.org/not-loaded";
@@ -295,6 +357,67 @@ fn shapes_that_give_a_binding_facet_still_drop_the_suggestions_they_do_not_give(
     assert!(h.units.is_empty() && h.datatype.is_none(), "{h:?}");
 }
 
+#[test]
+fn shapes_that_close_values_alone_over_a_base_with_no_suggestions_close_the_operand() {
+    // Nothing to keep as a suggestion: closing the values closes the operand.
+    let w = plain().with_shapes(closing_shapes());
+    let h = hints(&w, "purpose");
+    assert!(
+        h.closed && !h.values_only && h.binds_other_facets(),
+        "{h:?}"
+    );
+}
+
+#[test]
+fn shapes_that_give_values_and_units_bind_what_they_say_and_drop_the_other_suggestions() {
+    let s = ShapesGraph::parse(
+        &shapes_doc(vec![
+            right_in(json!({"@list": [{"@id": "dx:research"}]})),
+            json!({"sh:path": {"@id": "odrl:unit"}, "sh:in": {"@list": [{"@id": "dx:unitB"}]}}),
+        ])
+        .to_string(),
+    )
+    .unwrap();
+    let w = plain().with_overlay(suggesting_overlay()).with_shapes(s);
+    let h = hints(&w, "purpose");
+    assert!(h.binds_other_facets() && !h.values_only, "{h:?}");
+    assert_eq!(h.units, [format!("{DX}unitB")]);
+    assert!(h.operators.is_empty() && h.datatype.is_none(), "{h:?}");
+}
+
+#[test]
+fn shapes_that_give_a_facet_over_a_closed_overlay_keep_what_the_overlay_bound() {
+    // The overlay closed the operand with its own operators and units: a
+    // shape that adds a datatype does not take them away.
+    let overlay = Overlay::parse(
+        &json!({
+            "@context": {"prose": PROSE, "odrl": ODRL, "dx": DX},
+            "@graph": [{"@id": "dx:purpose", "prose:closed": true,
+                        "prose:operator": [{"@id": "odrl:eq"}],
+                        "prose:unit": [{"@id": "dx:unitA"}]}]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let s = ShapesGraph::parse(
+        &shapes_doc(vec![
+            json!({"sh:path": {"@id": "odrl:rightOperand"}, "sh:datatype": {"@id": "http://www.w3.org/2001/XMLSchema#string"}}),
+        ])
+        .to_string(),
+    )
+    .unwrap();
+    let w = plain().with_overlay(overlay).with_shapes(s);
+    let h = hints(&w, "purpose");
+    assert!(h.binds_other_facets());
+    assert_eq!(h.operators, [format!("{ODRL}eq")]);
+    assert_eq!(h.sources.operators, HintSource::Overlay);
+    assert_eq!(h.units, [format!("{DX}unitA")]);
+    assert_eq!(
+        h.datatype.as_deref(),
+        Some("http://www.w3.org/2001/XMLSchema#string")
+    );
+}
+
 // --- #11 a closed host source can widen what the shapes closed ---------------
 
 fn closing_shapes() -> ShapesGraph {
@@ -345,6 +468,49 @@ fn a_closed_host_source_inside_the_shapes_list_or_an_open_one_warns_nothing() {
     assert!(open.value_source_warnings().is_empty());
     let no_base = plain().with_value_sources(host(&[&format!("{DX}clinical")], true));
     assert!(no_base.value_source_warnings().is_empty());
+}
+
+#[test]
+fn a_closed_host_source_widening_a_closed_overlay_says_an_overlay_did_not_allow_it() {
+    let overlay = Overlay::parse(
+        &json!({
+            "@context": {"prose": PROSE, "odrl": ODRL, "dx": DX},
+            "@graph": [{"@id": "dx:purpose", "prose:closed": true,
+                        "prose:rightOperand": [{"@id": "dx:research"}]}]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let w = plain().with_overlay(overlay).with_value_sources(host(
+        &[&format!("{DX}research"), &format!("{DX}clinical")],
+        true,
+    ));
+    let warnings = w.value_source_warnings();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0].contains("an overlay") && !warnings[0].contains("the shapes"),
+        "{warnings:?}"
+    );
+}
+
+#[test]
+fn a_closed_host_source_of_literals_the_shapes_list_warns_nothing() {
+    let s = ShapesGraph::parse(
+        &shapes_doc(vec![right_in(json!({"@list": ["alpha", "beta"]}))]).to_string(),
+    )
+    .unwrap();
+    let w = plain()
+        .with_shapes(s.clone())
+        .with_value_sources(host(&["alpha"], true));
+    assert!(
+        w.value_source_warnings().is_empty(),
+        "{:?}",
+        w.value_source_warnings()
+    );
+    let w = plain()
+        .with_shapes(s)
+        .with_value_sources(host(&["alpha", "gamma"], true));
+    assert_eq!(w.value_source_warnings().len(), 1);
 }
 
 // --- #12 an open host source over a closed base keeps its labels -------------
@@ -409,4 +575,93 @@ fn a_datatype_conflict_says_the_shapes_give_not_gives() {
         assert!(m.contains("the shapes give \""), "{m}");
         assert!(!m.contains("the shapes gives"), "{m}");
     }
+}
+
+#[test]
+fn an_open_host_source_over_a_closed_list_of_literals_keeps_the_labels_of_the_listed_ones() {
+    let shapes = ShapesGraph::parse(
+        &shapes_doc(vec![right_in(json!({"@list": ["alpha", "beta"]}))]).to_string(),
+    )
+    .unwrap();
+    let mut s = ValueSources::new();
+    s.set_operand(
+        &format!("{DX}purpose"),
+        ValueSource::new(
+            vec![
+                SourceValue::new("alpha").with_label("Alpha!"),
+                SourceValue::new("zeta").with_label("Not listed"),
+            ],
+            false,
+        ),
+    );
+    let w = plain().with_shapes(shapes).with_value_sources(s);
+    let h = hints(&w, "purpose");
+    assert!(h.closed);
+    assert_eq!(h.source_values.len(), 1, "{:?}", h.source_values);
+    assert_eq!(h.source_values[0].label(), Some("Alpha!"));
+}
+
+#[test]
+fn a_list_past_the_limit_warns_once_with_the_limit_as_the_count() {
+    let limit = ProfileLimits::default().max_values_per_key;
+    for n in [limit + 1, limit + 2, 1000] {
+        let s = ShapesGraph::parse(&shapes_doc(vec![right_in(ids(n))]).to_string()).unwrap();
+        let w = s.warnings();
+        assert_eq!(w.len(), 1, "{n}: {w:?}");
+        assert!(
+            w[0].contains("more values") && w[0].contains("(256)"),
+            "{w:?}"
+        );
+        assert!(!w.iter().any(|m| m.contains("257")), "{w:?}");
+    }
+}
+
+#[test]
+fn another_property_past_the_limit_is_counted_by_the_limit_not_one_more() {
+    let limit = ProfileLimits::default().max_values_per_key;
+    let many: Vec<Value> = (0..limit + 5).map(|i| json!(format!("v{i}"))).collect();
+    let doc = json!({
+        "@context": {"sh": "http://www.w3.org/ns/shacl#", "dx": DX},
+        "@graph": [{"@id": "dx:S", "@type": "sh:NodeShape", "sh:name": many}]
+    });
+    let s = ShapesGraph::parse(&doc.to_string()).unwrap();
+    let w = s.warnings();
+    assert!(
+        w.iter()
+            .any(|m| m.starts_with("only the first 256 values of <")),
+        "{w:?}"
+    );
+    assert!(!w.iter().any(|m| m.contains("first 257")), "{w:?}");
+}
+
+// --- a Turtle list of exactly the term limit ---------------------------------
+
+#[cfg(feature = "turtle")]
+fn turtle_in_list(n: usize) -> String {
+    let mut t = String::from(
+        "@prefix sh: <http://www.w3.org/ns/shacl#> .\n@prefix odrl: <http://www.w3.org/ns/odrl/2/> .\n@prefix dx: <https://example.org/dataspace/> .\n",
+    );
+    t.push_str("dx:S a sh:NodeShape ; sh:property [ sh:path odrl:leftOperand ; sh:hasValue dx:purpose ] , [ sh:path odrl:rightOperand ; sh:in (");
+    for i in 0..n {
+        t.push_str(&format!(" dx:v{i}"));
+    }
+    t.push_str(" ) ] .\n");
+    t
+}
+
+#[cfg(feature = "turtle")]
+#[test]
+fn a_turtle_list_of_exactly_the_term_limit_is_read_whole_and_one_more_is_cut() {
+    let mut limits = ProfileLimits::default();
+    limits.max_terms = 20;
+    let at = ShapesGraph::parse_with(&turtle_in_list(20), &limits).unwrap();
+    assert_eq!(
+        at.constraint(&format!("{DX}purpose")).unwrap().values.len(),
+        20,
+        "{:?}",
+        at.warnings()
+    );
+    assert!(at.warnings().is_empty(), "{:?}", at.warnings());
+    let over = ShapesGraph::parse_with(&turtle_in_list(21), &limits).unwrap();
+    assert!(!over.warnings().is_empty(), "one past the limit warns");
 }

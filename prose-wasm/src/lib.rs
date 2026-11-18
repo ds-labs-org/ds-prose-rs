@@ -287,9 +287,7 @@ impl ProseHandle {
             .map(validation::shapes)
             .transpose()
             .map_err(throw)?;
-        let summary = shapes
-            .as_ref()
-            .map_or_else(|| "null".to_string(), validation::shapes_summary_json);
+        let summary = self.summary_of(shapes.as_ref());
         self.shapes = shapes;
         self.refresh();
         self.render();
@@ -327,6 +325,17 @@ impl ProseHandle {
             .map_or_else(Wording::new, |w| (*w.0).clone());
         let w = validation::with_overlays(w, &self.overlays);
         validation::overlay_summaries_json(&w, &self.overlays)
+    }
+
+    /// The summary of the loaded shapes, as `setShapes` returns it,
+    /// recomputed against the profiles loaded now: what the shapes say that
+    /// the profiles make unusable (an `sh:class` with more members than the
+    /// limits keep) is in its `warnings`, so it changes when the profiles
+    /// do (`setShapes` only reports the state at its own call). `"null"`
+    /// without shapes.
+    #[wasm_bindgen(js_name = shapesSummary)]
+    pub fn shapes_summary(&self) -> String {
+        self.summary_of(self.shapes.as_ref())
     }
 
     /// Gives the values the host took from its registry or catalog for one
@@ -444,6 +453,22 @@ impl ProseHandle {
     }
 
     /// Rebuilds the validator from the options and the profiles.
+    /// The summary JSON of `shapes` laid over what is loaded now.
+    fn summary_of(&self, shapes: Option<&ShapesGraph>) -> String {
+        shapes.map_or_else(
+            || "null".to_string(),
+            |s| {
+                let w = shaped(
+                    self.wording.as_ref(),
+                    Some(s),
+                    &self.overlays,
+                    &self.sources,
+                );
+                validation::shapes_summary_json(s, w.as_ref().map(|w| &*w.0))
+            },
+        )
+    }
+
     fn refresh(&mut self) {
         self.validator = self.options.clone().map(|o| {
             let w = shaped(
@@ -571,9 +596,19 @@ impl ProseValidator {
             .map(validation::shapes)
             .transpose()
             .map_err(throw)?;
-        let summary = shapes
-            .as_ref()
-            .map_or_else(|| "null".to_string(), validation::shapes_summary_json);
+        let summary = shapes.as_ref().map_or_else(
+            || "null".to_string(),
+            |s| {
+                let w = validation::with_value_sources(
+                    validation::with_shapes(
+                        validation::with_overlays(self.wording.clone(), &self.overlays),
+                        Some(s),
+                    ),
+                    &self.sources,
+                );
+                validation::shapes_summary_json(s, Some(&w))
+            },
+        );
         self.shapes = shapes;
         self.rebuild();
         Ok(summary)

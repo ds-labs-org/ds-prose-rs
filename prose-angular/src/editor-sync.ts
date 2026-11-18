@@ -42,6 +42,8 @@ export interface EditorHandleLike {
   valueSourceSummaries(): string;
   /** Companion SHACL shapes (text) or none; returns the summary as JSON text, `"null"` after clearing. */
   setShapes(text: string | null): string;
+  /** The loaded shapes' summary as JSON text, recomputed against the profiles loaded now; `"null"` without shapes. */
+  shapesSummary(): string;
   setLimits(limits: EditLimits | null): void;
   setValidation(options: ValidateOptions | null): void;
   setTermInput(mode: TermInput): void;
@@ -141,6 +143,8 @@ export class EditorSession<H extends EditorHandleLike = EditorHandleLike> {
   // Whether the handle holds overlays now (for their summaries to refresh).
   private overlaysLoaded = false;
   private readonly shapesChanged = tracker<string>();
+  // Whether the handle holds shapes now (for their summary to refresh).
+  private shapesLoaded = false;
   private readonly sourcesChanged = tracker<ValueSources>();
   // Whether the handle holds value sources now (for their summaries to refresh).
   private sourcesLoaded = false;
@@ -250,7 +254,18 @@ export class EditorSession<H extends EditorHandleLike = EditorHandleLike> {
       } catch (error) {
         out.shapesError = error;
       }
+    } else if (profilesSet && this.shapesLoaded) {
+      // What the shapes say about a profile's terms (an sh:class cut by the
+      // limits) changes with the profiles: the summary reported before is stale.
+      try {
+        const summary = JSON.parse(handle.shapesSummary()) as ShapesSummary | null;
+        if (summary) out.shapesSummary = summary;
+      } catch (error) {
+        out.shapesError = error;
+      }
     }
+    if (shapes !== null && out.shapesError === undefined) this.shapesLoaded = true;
+    else if (shapes === null) this.shapesLoaded = false;
     // The host's value sources sit on top of everything above.
     const sources = inputs.valueSources == null || Object.keys(inputs.valueSources).length === 0 ? null : inputs.valueSources;
     if (this.sourcesChanged(sources)) {
@@ -308,6 +323,8 @@ export class EditorSession<H extends EditorHandleLike = EditorHandleLike> {
       // What the handle holds is no longer what the host bound: hand it back.
       try {
         out.strippedJson = handle.json();
+        // The host binds it back: that is not a new document to load.
+        this.lastJson = out.strippedJson;
       } catch (error) {
         console.error('ds-odrl-prose-editor: the stripped document could not be read', error);
       }

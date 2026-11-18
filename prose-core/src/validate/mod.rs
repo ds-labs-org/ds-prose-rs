@@ -502,4 +502,40 @@ mod tests {
         let _ = v.clone().validate(&doc);
         assert_eq!(check::index_builds(), before + 1);
     }
+
+    /// The lexical check of a hint pattern compiles it once per thread, not
+    /// once per constraint and run.
+    #[test]
+    fn hint_pattern_is_compiled_once_across_runs() {
+        use crate::profile::{ProfileVocab, Wording};
+        use crate::shapes::ShapesGraph;
+        let profile =
+            ProfileVocab::parse(include_str!("../../tests/shapes/dataspace-profile.jsonld"))
+                .unwrap();
+        let shapes =
+            ShapesGraph::parse(include_str!("../../tests/shapes/dataspace-shapes.jsonld")).unwrap();
+        let w = Wording::new().with_profile(profile).with_shapes(shapes);
+        let doc = read_model(
+            r#"{"@type": "Set", "uid": "urn:p",
+                "permission": [{"target": "urn:a", "action": "use",
+                  "constraint": [
+                    {"leftOperand": "https://example.org/dataspace/code", "operator": "eq", "rightOperand": "bad"},
+                    {"leftOperand": "https://example.org/dataspace/code", "operator": "eq", "rightOperand": "worse"}]}]}"#,
+        )
+        .unwrap();
+        let v = Validator::new(Arc::new(w), Options::strict());
+        let first = v.validate(&doc);
+        assert!(
+            first
+                .findings
+                .iter()
+                .any(|f| f.message.contains("does not match the pattern")),
+            "the pattern is read: {first:?}"
+        );
+        let before = crate::shapes::pattern_compiles();
+        for _ in 0..3 {
+            let _ = v.validate(&doc);
+        }
+        assert_eq!(crate::shapes::pattern_compiles(), before);
+    }
 }
