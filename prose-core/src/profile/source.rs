@@ -104,12 +104,13 @@ impl ValueSource {
     }
 }
 
-/// Every source a host passed: by the IRI of a left operand, and by party
-/// role (assigner, assignee, target).
+/// Every source a host passed: by the IRI of a left operand, by party role
+/// (assigner, assignee, target), and for the policy type.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ValueSources {
     operands: Vec<(String, ValueSource)>,
     roles: Vec<(EntityRole, ValueSource)>,
+    policy_type: Option<ValueSource>,
 }
 
 impl ValueSources {
@@ -120,7 +121,7 @@ impl ValueSources {
 
     /// Whether no source is set.
     pub fn is_empty(&self) -> bool {
-        self.operands.is_empty() && self.roles.is_empty()
+        self.operands.is_empty() && self.roles.is_empty() && self.policy_type.is_none()
     }
 
     /// Sets the source for the left operand `iri` (an expanded IRI),
@@ -168,5 +169,22 @@ impl ValueSources {
     /// The source for the party role `role`, if any.
     pub fn role(&self, role: EntityRole) -> Option<&ValueSource> {
         self.roles.iter().find(|(r, _)| *r == role).map(|(_, s)| s)
+    }
+
+    /// Sets the source for the policy type: the classes (expanded IRIs) the
+    /// host allows, replacing the one it had. The editor's `policyTypes`
+    /// limit sets it; a closed one flags a policy of any other type.
+    pub fn set_policy_type(&mut self, source: ValueSource) {
+        self.policy_type = Some(source);
+    }
+
+    /// Removes the source of the policy type; whether there was one.
+    pub fn remove_policy_type(&mut self) -> bool {
+        self.policy_type.take().is_some()
+    }
+
+    /// The source for the policy type, if any.
+    pub fn policy_type(&self) -> Option<&ValueSource> {
+        self.policy_type.as_ref()
     }
 }

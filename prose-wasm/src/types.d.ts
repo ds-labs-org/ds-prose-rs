@@ -204,8 +204,25 @@ export interface LimitSpec {
   max?: number | null;
 }
 
-/** The lists to limit, by name; a list not named keeps its default. */
-export type EditLimits = Partial<Record<LimitName, LimitSpec>>;
+/**
+ * The lists to limit, by name (a list not named keeps its default), and the
+ * policy types the editor offers and accepts.
+ *
+ * `policyTypes` is not a list limit: it names classes, in the order you
+ * prefer them. Each is an ODRL class bare (`"Set"`), prefixed (`"odrl:Set"`,
+ * or a prefix a loaded profile binds, such as `"ex:ResearchAgreement"`), or
+ * a full IRI; duplicates are dropped. The first is the default of a new
+ * policy and what `outOfScope: "strip"` rewrites another type to. With one
+ * type the heading shows it as text and has no dropdown; with several the
+ * type is a dropdown of those, even under `termInput: "free"`. A document
+ * that holds another type keeps it, shown as outside the list and flagged.
+ * Omitted, `null` (also `setLimits(null)`) means every policy class. An
+ * empty array, a non-string entry, an unbound prefix or an unknown bare name
+ * throws, and the previous limits stay.
+ */
+export type EditLimits = Partial<Record<LimitName, LimitSpec>> & {
+  policyTypes?: string[] | null;
+};
 
 /**
  * How the editor's term slots take their value (`setTermInput`): `"free"`
@@ -229,8 +246,12 @@ export interface RemovedSection {
   path: string;
   /** The key as written: `assigner`, `odrl:assigner` or a full IRI. */
   key: string;
-  /** The `EditLimits` name of the list that left it out, such as `ruleAssigner`. */
-  limit: LimitName;
+  /** The `EditLimits` name of the list that left it out, such as `ruleAssigner`, or `"policyTypes"` for a policy type the host does not allow. */
+  limit: LimitName | "policyTypes";
+  /** For `"policyTypes"`: the type as written; left out when the policy had none (or `Policy` alone, read as `Set`). Absent for the other limits. */
+  value?: string;
+  /** For `"policyTypes"`: the first allowed type, as the document now spells it. Absent for the other limits. */
+  replacedWith?: string;
 }
 
 /**

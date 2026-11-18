@@ -33,6 +33,7 @@ pub use model::{
 pub use path::{
     EntityRole, Field, ListKind, ListPath, NodePath, PathError, RuleList, SlotPath, Step,
 };
+pub(crate) use rules::base_class_as_set;
 pub use rules::{EditRules, Limit, NewNodeDefaults, odrl_position};
 pub use scope::{OutOfScope, out_of_scope, strip_out_of_scope};
 pub use segments::{

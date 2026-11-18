@@ -52,6 +52,26 @@ A host that checks the report before it saves can refuse a document whose `verdi
 
 `limits.logicalDepth.max` is how deep groups may nest. A group directly in a condition list is at depth 1, a group in it at depth 2. The editor hides the "group" buttons that would go past the limit, and the reducer refuses the event if a script sends it. A document that already nests deeper is kept as written, and ungrouping stays possible.
 
+## Restricting the policy types
+
+A portal that stores only one kind of policy can say so in `limits`. The EONA-X portal edits policy definitions and always stores an `odrl:Set`:
+
+```html
+<ds-odrl-prose-editor
+  [json]="policy" (jsonChange)="policy = $event"
+  [profile]="eonaXProfileText"
+  preset="dataspace"
+  [limits]="{ policyTypes: ['Set'] }"
+  outOfScope="strip"
+  (outOfScopeRemoved)="onRemoved($event)" />
+```
+
+The policy type is then text in the heading and no dropdown is rendered. The preset sets no `policyTypes`, so your entry sits beside its `logicalDepth`. A document of another type is rewritten to `Set` on load. `outOfScopeRemoved` then reports `{ path: '@type', key: '@type', limit: 'policyTypes', value: 'Offer', replacedWith: 'Set' }`.
+
+With `outOfScope="reject"` the load fails instead. With neither, the editor shows the type as outside the list and validation flags it.
+
+List several types (`['Set', 'Offer']`) to offer a dropdown of those. The first is what a new policy starts with.
+
 See [the editor inputs](/angular/interface/#editor-inputs) for the other inputs, and [validation](/angular/validation/) for the report.
 
 ## Companion shapes

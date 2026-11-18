@@ -658,6 +658,46 @@ drive. It knows ODRL and nothing about any particular engine or wire format.
   and `EditRules` do not look at the profile.
 
 ### Compatibility
+**Unreleased (after 0.9.0), at a glance.** This section is the release notes for the
+next release; the paragraphs after it give the detail. When it ships the heading becomes
+"Changed in 0.10.0".
+
+Added:
+
+- `policyTypes` on `EditLimits` / `setLimits` (and so on `[limits]` of
+  `<ds-odrl-prose-editor>`, with no new input): the policy types the editor offers and
+  accepts (#79). It is a list of class names in the host's order, not a `{ min, max }`:
+  `"Set"`, `"odrl:Set"`, a prefix a loaded profile binds (`"ex:ResearchAgreement"`) or a full
+  IRI; duplicates go after expansion. With one type the policy heading shows it as text and
+  the dropdown is not rendered; with several only those are listed, as a dropdown even under
+  `termInput: 'free'`. The reducer refuses another type (`EditError::NotAllowed`), except
+  setting the type a document already holds, and a new policy starts with the default type
+  if listed, else the first listed. A document that holds another type keeps it: the
+  dropdown shows it as outside the list (`data-outside`, with a note, so it can be put
+  right; a sole allowed type is still plain text when the document holds it) and validation
+  flags it with `prose.value-not-allowed` (`expected.source` `"host"`). Under
+  `outOfScope: 'strip'` the type is rewritten to the first listed one, spelled as the
+  document spells types, and `removed()` reports `limit: "policyTypes"` with `value` (the
+  type as written; left out for a missing one) and `replacedWith`; a policy with no `@type`, or
+  `Policy` alone, counts as `Set`. Under `'reject'` the load fails, and the message names the
+  type. `null` or an omitted key means every class, as before. An empty list, a non-string
+  entry, an unbound prefix or an unknown bare name throws and keeps the previous limits.
+  `valueSources` does not take a `policyType` key: use the limit.
+  The `dataspace` preset sets no `policyTypes`; yours composes with its `logicalDepth`.
+- Rust: `EditRules::{policy_types, policy_type_allowed, policy_type_default,
+  new_policy_kind}`, `profile::ValueSources::{set_policy_type, policy_type,
+  remove_policy_type}`, `Wording::policy_type_source`,
+  `EditConfig::with_policy_types` (which keeps the other value sources), and
+  `OutOfScope::{value, replaced_with}`.
+
+Breaking, or needing a change in a caller:
+
+- `EditRules` (not `#[non_exhaustive]`) gained `policy_types`: a struct literal needs it
+  (use `..Default::default()`).
+- `RemovedSection.limit` is `LimitName | "policyTypes"`, and `EditLimits` is an intersection
+  with `{ policyTypes?: string[] | null }`: code that indexed `EditLimits` by every key as a
+  `LimitSpec` needs to skip `policyTypes`.
+
 
 The enums that grow as the editor learns more of ODRL are `#[non_exhaustive]`,
 so adding a variant is a minor release, not a breaking one. In `prose-core`:

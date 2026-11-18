@@ -144,7 +144,7 @@ The whole configuration of an editing view. It is `Clone`, `PartialEq` and `Defa
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `rules` | `EditRules` | `EditRules::default()` | Limits per list. Controls the rules forbid are not rendered, and the reducer refuses the event anyway. |
+| `rules` | `EditRules` | `EditRules::default()` | Limits per list. Controls the rules forbid are not rendered, and the reducer refuses the event anyway. `EditConfig::with_policy_types(vec!["Set".into()])` limits the policy types: one type is text in the heading, several are a dropdown of those. |
 | `labels` | `Labels` | `Labels::default()` | Every word the editor writes. See Labels below. |
 | `classes` | `ProseClasses` | `ProseClasses::default()` | Extra classes per kind of element. See [Styling](/yew/styling/). |
 | `styles` | `ProseStyles` | `ProseStyles::default()` | Inline styles per kind of element. |

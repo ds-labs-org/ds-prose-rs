@@ -2601,3 +2601,169 @@ async fn ux10_alt_arrow_down_lists_the_allowed_entries_for_any_draft() {
     settle().await;
     assert!(shown_options(&c).len() > 3, "{:?}", shown_options(&c));
 }
+
+// --- policy types (#79) -----------------------------------------------------
+
+#[derive(Properties, PartialEq, Clone)]
+struct TypesProps {
+    json: AttrValue,
+    log: Log,
+    types: Vec<String>,
+    no_uid: bool,
+}
+
+/// A host that limits the policy types (`EditConfig::with_policy_types`),
+/// and optionally holds the identifier elsewhere.
+#[function_component(TypesHost)]
+fn types_host(p: &TypesProps) -> Html {
+    let config = use_memo((p.types.clone(), p.no_uid), |(types, no_uid)| {
+        let mut cfg = EditConfig::default().with_policy_types(types.clone());
+        if *no_uid {
+            cfg.rules.policy_uid = prose_core::edit::Limit::NONE;
+        }
+        cfg
+    });
+    let json = p.json.clone();
+    let editor = use_prose_editor(
+        move || read_model(&json).expect("a readable fixture"),
+        Rc::new(config.rules.clone()),
+    );
+    let onedit = {
+        let log = p.log.clone();
+        let inner = editor.onedit.clone();
+        Callback::from(move |ev: EditEvent| {
+            log.borrow_mut().push(ev.clone());
+            inner.emit(ev);
+        })
+    };
+    html! {
+        <OdrlProseView
+            doc={editor.doc.clone()}
+            mode={EditMode::Edit}
+            config={config.clone()}
+            onedit={onedit}
+        />
+    }
+}
+
+async fn mount_types(types: &[&str], no_uid: bool) -> (Element, Log) {
+    let container = document().create_element("div").unwrap();
+    document().body().unwrap().append_child(&container).unwrap();
+    let log: Log = Rc::new(RefCell::new(vec![]));
+    let props = TypesProps {
+        json: TWO_PERMISSIONS.into(),
+        log: log.clone(),
+        types: types.iter().map(|t| t.to_string()).collect(),
+        no_uid,
+    };
+    std::mem::forget(
+        yew::Renderer::<TypesHost>::with_root_and_props(container.clone(), props).render(),
+    );
+    settle().await;
+    (container, log)
+}
+
+const KIND: &str = "policy[0]#kind";
+
+fn change(select: &HtmlSelectElement) {
+    select
+        .dispatch_event(&Event::new_with_event_init_dict("change", &bubbling()).unwrap())
+        .unwrap();
+}
+
+fn kind_texts(log: &Log) -> Vec<String> {
+    log.borrow()
+        .iter()
+        .filter_map(|e| match e {
+            EditEvent::SetText { slot, value, .. } if slot.to_string() == KIND => {
+                Some(value.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[wasm_bindgen_test]
+async fn picking_a_listed_policy_type_emits_set_text() {
+    let (c, log) = mount_types(&["Set", "Offer"], false).await;
+    let select: HtmlSelectElement = slot(&c, KIND).dyn_into().unwrap();
+    assert_eq!(select.query_selector_all("option").unwrap().length(), 2);
+    select.set_value("Offer");
+    change(&select);
+    settle().await;
+    assert_eq!(kind_texts(&log), ["Offer"]);
+    let select: HtmlSelectElement = slot(&c, KIND).dyn_into().unwrap();
+    assert_eq!(select.value(), "Offer");
+}
+
+#[wasm_bindgen_test]
+async fn a_script_that_sets_an_unlisted_policy_type_is_refused() {
+    let (c, log) = mount_types(&["Set", "Offer"], false).await;
+    let select: HtmlSelectElement = slot(&c, KIND).dyn_into().unwrap();
+    // An option the editor did not list.
+    let rogue = document().create_element("option").unwrap();
+    rogue.set_attribute("value", "Agreement").unwrap();
+    select.append_child(&rogue).unwrap();
+    select.set_value("Agreement");
+    assert_eq!(select.value(), "Agreement");
+    change(&select);
+    settle().await;
+    assert!(kind_texts(&log).is_empty(), "sent {:?}", kind_texts(&log));
+    // The select is drawn again from the document.
+    let select: HtmlSelectElement = slot(&c, KIND).dyn_into().unwrap();
+    assert_eq!(select.value(), "Set");
+}
+
+#[wasm_bindgen_test]
+async fn the_reducer_refuses_an_unlisted_policy_type_it_is_sent() {
+    // What the view's guard keeps out, the reducer refuses as well.
+    let rules = EditRules {
+        policy_types: vec!["http://www.w3.org/ns/odrl/2/Set".into()],
+        ..EditRules::default()
+    };
+    let mut doc = read_model(TWO_PERMISSIONS).unwrap();
+    let id = doc.policies[0].id;
+    let err = doc.apply(
+        &EditEvent::SetText {
+            slot: KIND.parse().unwrap(),
+            expect: id,
+            value: "Offer".into(),
+        },
+        &rules,
+    );
+    assert!(err.is_err());
+    assert_eq!(doc.policies[0].kind, "Set");
+}
+
+#[wasm_bindgen_test]
+async fn a_single_policy_type_leaves_the_heading_without_a_select() {
+    let (c, _log) = mount_types(&["Set"], false).await;
+    assert!(
+        c.query_selector(&format!("[data-slot=\"{KIND}\"]"))
+            .unwrap()
+            .is_none()
+    );
+    let heading = q(&c, "h3").text_content().unwrap();
+    assert!(heading.contains("Set"), "{heading}");
+    // The uid is still a slot of its own, in the tab order.
+    assert!(
+        q(&c, "h3")
+            .query_selector("[data-slot=\"policy[0]#uid\"]")
+            .unwrap()
+            .is_some()
+    );
+    assert!(q(&c, "h3").query_selector("select").unwrap().is_none());
+}
+
+#[wasm_bindgen_test]
+async fn a_single_policy_type_and_a_held_uid_make_the_heading_plain_text() {
+    let (c, _log) = mount_types(&["Set"], true).await;
+    let h3 = q(&c, "h3");
+    assert!(
+        h3.query_selector("[data-slot]").unwrap().is_none(),
+        "{}",
+        h3.inner_html()
+    );
+    let text = h3.text_content().unwrap();
+    assert!(text.contains("Set") && text.contains("urn:p"), "{text}");
+}

@@ -287,3 +287,16 @@ test('reportChanged: the page\'s statement is what the function does (first repo
   assert.equal(reportChanged({ verdict: 'violations', findings: [f('a'), f('b')] }, { verdict: 'violations', findings: [f('b', 'error', 'reworded'), f('a')] }), false);
   assert.match(vsec('The report'), /The first report counts/);
 });
+
+test('policyTypes: documented where limits are, in the types the page names, and not a new input', () => {
+  assert.match(sec('Editor inputs'), /policyTypes/);
+  assert.match(interfaceMd, /`EditLimits` also takes `policyTypes`/);
+  assert.match(frontMatterless(content('angular/dataspace.md')), /policyTypes: \['Set'\]/);
+  // It rides `limits`: the type admits the key, and `LimitName` does not list it.
+  assert.match(dts, /EditLimits = Partial<Record<LimitName, LimitSpec>> & \{\s*policyTypes\?: string\[\] \| null;/);
+  const names = /export type LimitName =([\s\S]*?);/.exec(dts)[1];
+  assert.doesNotMatch(names, /policyTypes/);
+  assert.match(dts, /limit: LimitName \| "policyTypes"/);
+  assert.match(sec('Editor outputs'), /replacedWith/);
+  assert.equal(members('input', EDITOR).some((i) => /policyTypes/i.test(i.name)), false);
+});

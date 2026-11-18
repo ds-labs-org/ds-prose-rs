@@ -5,7 +5,9 @@
 use prose_core::edit::{
     EditRules, EmptyText, Field, ListKind, ListPath, NodePath, RuleList, Step, StrictEdit,
 };
-use prose_core::profile::{Prefixes, ProfileVocab, Term, TermKind, ValueSources, Wording};
+use prose_core::profile::{
+    Prefixes, ProfileVocab, SourceValue, Term, TermKind, ValueSource, ValueSources, Wording,
+};
 use prose_core::validate::{Options, Validator};
 use prose_core::wording;
 use std::collections::{HashMap, HashSet};
@@ -989,12 +991,54 @@ impl EditConfig {
     /// before or after [`EditConfig::with_wording`]; a validator already
     /// set is rebuilt over the new hints.
     pub fn with_value_sources(mut self, sources: ValueSources) -> EditConfig {
+        let mut sources = sources;
+        // The policy types the host limited stay a closed source, so that
+        // setting the other sources does not stop validation flagging a
+        // type outside the list.
+        if sources.policy_type().is_none() && !self.rules.policy_types.is_empty() {
+            let values = self.rules.policy_types.iter().map(|i| SourceValue::new(i));
+            sources.set_policy_type(ValueSource::new(values.collect(), true));
+        }
         self.wording = Rc::new((*self.wording).clone().with_value_sources(sources.clone()));
         self.value_sources = sources;
         match self.validator.take() {
             Some(v) => self.with_strict(v.options().clone()),
             None => self,
         }
+    }
+
+    /// Limits the policy types the editor offers and accepts to `types`
+    /// (issue #79), in the host's order: the first is the default of a new
+    /// policy. Each is an ODRL class bare (`Set`), prefixed (`odrl:Set`, or
+    /// a prefix a loaded profile binds), or an IRI; duplicates are dropped
+    /// after expansion. An empty list lifts the limit (every class).
+    ///
+    /// With one type the policy heading shows it as text, with several the
+    /// type is a select of those even under [`TermInput::Free`], the reducer
+    /// refuses another, and a document that holds another type keeps it,
+    /// shown as outside the list and flagged by validation (the same
+    /// `prose.value-not-allowed` as a host value source). The other value
+    /// sources are kept. Works before or after [`EditConfig::with_wording`]
+    /// and [`EditConfig::with_strict`].
+    pub fn with_policy_types(mut self, types: Vec<String>) -> EditConfig {
+        let mut iris: Vec<String> = Vec::new();
+        for t in &types {
+            let iri = self.wording.expand(&Prefixes::default(), t);
+            if !iris.contains(&iri) {
+                iris.push(iri);
+            }
+        }
+        // The sources the wording holds: those of `with_value_sources`, and
+        // any the wording was given with them.
+        let mut sources = self.wording.value_sources().clone();
+        if iris.is_empty() {
+            sources.remove_policy_type();
+        } else {
+            let values = iris.iter().map(|i| SourceValue::new(i)).collect();
+            sources.set_policy_type(ValueSource::new(values, true));
+        }
+        self.rules.policy_types = iris;
+        self.with_value_sources(sources)
     }
 
     /// Validates against `wording` with `options` (usually

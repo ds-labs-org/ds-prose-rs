@@ -16,7 +16,7 @@ use prose_core::edit::{
     ConstraintNode, EditDoc, EditEvent, Field, IssueTarget, Literal, NodeRef, RightOperand,
     Severity, Slot, SlotKind, SlotPath, Step, left_operand_at,
 };
-use prose_core::profile::{HintSource, OperandHints, SourceValue, Term, TermKind};
+use prose_core::profile::{HintSource, OperandHints, Prefixes, SourceValue, Term, TermKind};
 use prose_core::validate::{Level, Mode, RuleId, Validator};
 use prose_core::wording;
 
@@ -341,6 +341,7 @@ pub(crate) fn options_for(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<A
     match slot.kind {
         SlotKind::Action => flat(written(&v.actions)),
         SlotKind::LeftOperand => flat(written(&v.left_operands)),
+        SlotKind::PolicyKind if policy_types_limited(env, slot) => flat(policy_type_list(env)),
         SlotKind::PolicyKind => flat(written(&v.policy_kinds)),
         SlotKind::Party | SlotKind::Asset => flat(match role_source_list(env, slot) {
             Some(list) => list,
@@ -374,6 +375,41 @@ pub(crate) fn options_for(env: &Env, slot: &Slot) -> (Vec<Suggestion>, HashMap<A
         ),
         _ => flat(vec![]),
     }
+}
+
+/// Whether the host limits the policy types (`EditRules::policy_types`) and
+/// the slot is the one that holds a policy's type: it is a select of them.
+pub(crate) fn policy_types_limited(env: &Env, slot: &Slot) -> bool {
+    slot.kind == SlotKind::PolicyKind && !env.cfg.rules.policy_types.is_empty()
+}
+
+/// The types the host allows, in its order: the label the vocabulary gives
+/// the class (the profile's, else ODRL's), else one made from its name; the
+/// value as the policy's prefixes write it.
+fn policy_type_list(env: &Env) -> Vec<Suggestion> {
+    let w = &env.cfg.wording;
+    let expand = |v: &str| w.expand(&Prefixes::default(), v);
+    env.cfg
+        .rules
+        .policy_types
+        .iter()
+        .map(|iri| {
+            match env
+                .cfg
+                .vocab
+                .policy_kinds
+                .iter()
+                .find(|s| expand(&s.value) == *iri)
+            {
+                Some(known) => Suggestion {
+                    value: written_form(iri, &env.prefixes),
+                    group: None,
+                    ..known.clone()
+                },
+                None => profile_suggestion(env, iri, None),
+            }
+        })
+        .collect()
 }
 
 /// The host's value source for the slot's party (or asset) role, when it

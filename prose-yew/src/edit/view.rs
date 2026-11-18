@@ -1298,17 +1298,34 @@ impl Rend<'_> {
     /// The heading: the type and the identifier. With the host holding the
     /// identifier elsewhere (`policy_uid` capped at zero) an empty one is
     /// dropped, with the space before it, and a present one is plain text.
+    /// With the host allowing one policy type alone (`policy_types`) the
+    /// type is plain text too, there being nothing to choose; a document
+    /// that holds another type keeps its select, so the type can be put
+    /// right.
     fn heading_sentence(&self, h: &Sentence) -> Html {
-        if self.cfg().rules.policy_uid.max != Some(0) {
+        use prose_core::edit::SlotKind;
+        let rules = &self.cfg().rules;
+        let plain_uid = rules.policy_uid.max == Some(0);
+        let sole_type = self.edit && rules.policy_types.len() == 1;
+        if !plain_uid && !sole_type {
             return self.sentence(h);
         }
-        let is_uid = |seg: &Segment| matches!(seg, Segment::Slot(s) if s.kind == prose_core::edit::SlotKind::Uid);
+        let is_uid =
+            |seg: &Segment| plain_uid && matches!(seg, Segment::Slot(s) if s.kind == SlotKind::Uid);
+        let is_sole_type = |seg: &Segment| {
+            sole_type
+                && matches!(seg, Segment::Slot(s) if s.kind == SlotKind::PolicyKind
+                    && rules.policy_type_allowed(&s.raw, &self.env.prefixes))
+        };
         let segs = &h.segments;
         html! {
             <>
                 { for segs.iter().enumerate().filter_map(|(i, seg)| match seg {
                     Segment::Slot(s) if is_uid(seg) => (!s.raw.is_empty())
                         .then(|| self.term(&s.display, &s.raw, &s.path)),
+                    Segment::Slot(s) if is_sole_type(seg) => {
+                        Some(self.term(&s.display, &s.raw, &s.path))
+                    }
                     Segment::Text(t)
                         if t.trim().is_empty()
                             && segs.get(i + 1).is_some_and(|n| {

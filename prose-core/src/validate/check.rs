@@ -1148,6 +1148,7 @@ impl<'a> Checker<'a> {
         self.enter(path.clone(), p);
         self.policy_structure(&path, p);
         self.term(&path, p.id, Field::Kind, &p.kind, Pos::PolicyKind);
+        self.host_policy_type(&path, p);
         if let Some(c) = &p.conflict {
             self.term(&path, p.id, Field::Conflict, c, Pos::Conflict);
         }
@@ -1715,6 +1716,61 @@ impl<'a> Checker<'a> {
             f.node = Some(e.id);
             f.term = Some(TermRef {
                 written: iri.to_string(),
+                iri: here,
+            });
+            f.expected = Some(expected);
+        }
+    }
+
+    /// A policy's type, against the host's closed source for it (the
+    /// editor's `policyTypes` limit). A type the source does not list is
+    /// flagged and kept; an empty type, or `Policy` alone, is `Set`.
+    fn host_policy_type(&mut self, path: &NodePath, p: &PolicyNode) {
+        let Some(source) = self.w.policy_type_source().filter(|s| s.is_closed()) else {
+            return;
+        };
+        let here = crate::edit::base_class_as_set(&p.kind, self.expand(&p.kind));
+        if source
+            .values()
+            .iter()
+            .any(|v| v.value() == p.kind || self.expand(v.value()) == here)
+        {
+            return;
+        }
+        let shown = match p.kind.is_empty() {
+            true => "Set",
+            false => p.kind.as_str(),
+        };
+        let msg = format!(
+            "\"{shown}\" is not a policy type {} here",
+            the(HintSource::Host, "allows")
+        );
+        let total = source.values().len();
+        let expected = Expected {
+            values: source
+                .values()
+                .iter()
+                .take(MAX_EXPECTED_VALUES)
+                .map(|v| v.value().to_string())
+                .collect(),
+            values_total: if total > MAX_EXPECTED_VALUES {
+                total
+            } else {
+                0
+            },
+            closed: true,
+            source: Some(HintSource::Host),
+            ..Expected::default()
+        };
+        if let Some(f) = self.emit(
+            RuleId::ProseValueNotAllowed,
+            true,
+            slot(path, Field::Kind),
+            msg,
+        ) {
+            f.node = Some(p.id);
+            f.term = Some(TermRef {
+                written: p.kind.clone(),
                 iri: here,
             });
             f.expected = Some(expected);

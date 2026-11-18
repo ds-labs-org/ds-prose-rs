@@ -134,6 +134,11 @@ impl Wording {
         self.value_sources.role(role).filter(|s| !s.is_empty())
     }
 
+    /// The host's source for the policy type, when it gave a non-empty one.
+    pub fn policy_type_source(&self) -> Option<&ValueSource> {
+        self.value_sources.policy_type().filter(|s| !s.is_empty())
+    }
+
     /// What the host's sources say that this wording cannot use: a line for
     /// each left operand they name that no loaded profile declares, or that
     /// is not a left operand (ignored). Lower-case fragments.

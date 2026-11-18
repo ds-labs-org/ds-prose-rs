@@ -2,6 +2,8 @@
 use super::apply::NewItem;
 use super::model::*;
 use super::path::*;
+use crate::profile::Prefixes;
+use crate::read::ODRL_NS;
 use crate::words::local_name;
 
 /// How many items a list may hold.
@@ -82,6 +84,12 @@ pub struct EditRules {
     pub inherit_from: Limit,
     /// Compared after `wording::local_name`.
     pub set_operators: Vec<String>,
+    /// The policy types (classes) the host offers and accepts, as expanded
+    /// IRIs, in the order the host prefers them: the first is the default
+    /// of a new policy and the one an out-of-scope type is rewritten to.
+    /// Empty means every policy class, the default. Compared by expansion:
+    /// see [`EditRules::policy_type_allowed`].
+    pub policy_types: Vec<String>,
     pub allow_rule_kind_change: bool,
     pub allow_reorder: bool,
     pub allow_logical: bool,
@@ -124,6 +132,7 @@ impl Default for EditRules {
             .into_iter()
             .map(String::from)
             .collect(),
+            policy_types: Vec::new(),
             allow_rule_kind_change: true,
             allow_reorder: true,
             allow_logical: true,
@@ -152,7 +161,58 @@ pub fn odrl_position(parent: Option<RuleList>, list: RuleList) -> bool {
     )
 }
 
+/// `raw`, a policy type as written, as an IRI: bare, `odrl:` and full ODRL
+/// spellings are the same; an empty type, or ODRL's base class `Policy`
+/// alone, stands for `Set` (Information Model 2.1.1, as the reader takes
+/// it).
+pub(crate) fn policy_type_iri(raw: &str, prefixes: &Prefixes) -> String {
+    base_class_as_set(raw, prefixes.expand(raw))
+}
+
+/// `iri`, the expansion of the type `raw`, with an empty type and `Policy`
+/// alone read as `Set`.
+pub(crate) fn base_class_as_set(raw: &str, iri: String) -> String {
+    if raw.is_empty() || iri == format!("{ODRL_NS}Policy") {
+        return format!("{ODRL_NS}Set");
+    }
+    iri
+}
+
 impl EditRules {
+    /// Whether the policy type `raw`, as written in a document that binds
+    /// `prefixes`, is one the host allows: every type when
+    /// [`EditRules::policy_types`] is empty. The bare name, `odrl:` and the
+    /// full ODRL IRI compare equal, and so do a compact IRI and its
+    /// expansion. An empty type, or `Policy` alone, counts as `Set`.
+    pub fn policy_type_allowed(&self, raw: &str, prefixes: &Prefixes) -> bool {
+        if self.policy_types.is_empty() {
+            return true;
+        }
+        let iri = policy_type_iri(raw, prefixes);
+        self.policy_types.contains(&iri)
+    }
+
+    /// The policy type a new policy gets, and the one an out-of-scope type
+    /// is rewritten to: the first of [`EditRules::policy_types`], else `None`.
+    pub fn policy_type_default(&self) -> Option<&str> {
+        self.policy_types.first().map(String::as_str)
+    }
+
+    /// The `kind` of a policy an add button creates: `defaults.policy_kind`
+    /// when the host allows it, else the first allowed type (an ODRL class
+    /// bare, any other as its IRI).
+    pub fn new_policy_kind(&self) -> String {
+        let default = &self.defaults.policy_kind;
+        match self.policy_type_default() {
+            Some(first) if !self.policy_type_allowed(default, &Prefixes::default()) => first
+                .strip_prefix(ODRL_NS)
+                .filter(|l| !l.is_empty())
+                .unwrap_or(first)
+                .to_string(),
+            _ => default.clone(),
+        }
+    }
+
     pub fn is_set_operator(&self, op: &str) -> bool {
         let local = local_name(op);
         self.set_operators.iter().any(|s| local_name(s) == local)
