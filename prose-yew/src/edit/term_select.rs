@@ -21,7 +21,8 @@ use super::choice::use_select_in_step;
 use super::config::{Suggestion, TermInput, cls, merge_styles};
 use super::slot::{
     Closure, allowed_options, closed_role_source, holds_iri, host_values, left_operand_hints,
-    literal_members, options_for, picks_iri, placeholder, profile_suggestion, set_text, strict,
+    literal_members, options_for, picks_iri, placeholder, policy_types_limited, profile_suggestion,
+    set_text, strict,
 };
 use super::{Env, EnvRef, FocusKind, SlotFocus};
 
@@ -32,8 +33,13 @@ use super::{Env, EnvRef, FocusKind, SlotFocus};
 /// values are suggestions, so the slot stays free text with them. Any other
 /// right operand is a literal (a date, a number, an identifier) and stays
 /// free text. A party or an asset when the host's source for its role is
-/// closed.
+/// closed. The policy type when the host limits the types
+/// ([`EditRules::policy_types`](prose_core::edit::EditRules::policy_types)).
 pub(crate) fn takes_select(env: &Env, slot: &Slot) -> bool {
+    // A closed list is not free text, whatever `term_input` says.
+    if policy_types_limited(env, slot) {
+        return true;
+    }
     if env.cfg.term_input != TermInput::Select {
         return false;
     }
@@ -112,7 +118,8 @@ fn listing(env: &Env, slot: &Slot) -> Listing {
     });
     // The vocabulary leaves the deprecated actions, left operands and
     // policy classes out: they come from the profiles.
-    if let Some(kind) = term_kind(slot.kind) {
+    // A host that lists the types leaves the other classes out.
+    if let Some(kind) = term_kind(slot.kind).filter(|_| !policy_types_limited(env, slot)) {
         for p in w.profiles() {
             for t in p.terms_of(kind).filter(|t| t.deprecated) {
                 deprecated.push(profile_suggestion(env, &t.iri, None));
@@ -318,7 +325,7 @@ pub(crate) fn term_select(props: &TermSelectProps) -> Html {
         _ => {}
     }
     let style = merge_styles(&styles);
-    let note = if host || role {
+    let note = if host || role || policy_types_limited(&env, slot) {
         cfg.labels.not_in_source.clone()
     } else if cfg.wording.is_empty() {
         cfg.labels.not_in_list.clone()

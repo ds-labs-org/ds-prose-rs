@@ -10,7 +10,7 @@ use prose_yew::prose_core::edit::{
     EditDoc, EditRules, IssueTarget, Limit, OutOfScope, StrictEdit, check_profile, out_of_scope,
     read_model, strip_out_of_scope, write_jsonld,
 };
-use prose_yew::prose_core::profile::{Overlay, ValueSources, Wording};
+use prose_yew::prose_core::profile::{Overlay, TermKind, ValueSources, Wording};
 use prose_yew::prose_core::shapes::ShapesGraph;
 use prose_yew::prose_core::validate::{Options, Report, Validator};
 use prose_yew::{
@@ -94,13 +94,109 @@ fn limit_of(name: &str, v: &Value) -> Result<Limit, String> {
     Ok(Limit { min, max })
 }
 
-/// Sets the list limits of `rules` from a host's `EditLimits` value. `None`
-/// and `null` restore the limits of `EditRules::default()`; the other
-/// rules are left alone. On an error `rules` is unchanged.
-pub(crate) fn apply_limits(rules: &mut EditRules, limits: Option<&Value>) -> Result<(), String> {
+/// The ODRL classes a policy may be typed with.
+const POLICY_CLASSES: [&str; 7] = [
+    "Set",
+    "Offer",
+    "Agreement",
+    "Privacy",
+    "Request",
+    "Ticket",
+    "Assertion",
+];
+
+const ODRL_NS: &str = "http://www.w3.org/ns/odrl/2/";
+
+/// The entry `limits.policyTypes` as expanded IRIs, in the host's order and
+/// without duplicates. A bare name is an ODRL policy class, or the local
+/// name of a class a loaded profile declares; `odrl:` and any prefix a
+/// loaded profile binds are expanded; an IRI is kept.
+fn policy_types_of(v: &Value, wording: Option<&Wording>) -> Result<Vec<String>, String> {
+    let items = v
+        .as_array()
+        .ok_or_else(|| format!("limits.policyTypes must be an array of class names, not {v}"))?;
+    if items.is_empty() {
+        return Err(
+            "limits.policyTypes is empty: omit it, or pass null, to allow every policy type".into(),
+        );
+    }
+    let classes = POLICY_CLASSES.join(", ");
+    let mut out: Vec<String> = Vec::new();
+    for item in items {
+        let name = match item.as_str() {
+            Some(s) if !s.trim().is_empty() => s.trim(),
+            _ => {
+                return Err(format!(
+                    "limits.policyTypes: an entry must be a non-empty string, not {item}"
+                ));
+            }
+        };
+        let iri = if name.contains("://") || name.starts_with("urn:") {
+            name.to_string()
+        } else if let Some((prefix, local)) = name.split_once(':') {
+            let bound = if prefix == "odrl" {
+                Some(format!("{ODRL_NS}{local}"))
+            } else {
+                wording
+                    .map(|w| w.expand(&Default::default(), name))
+                    .filter(|iri| iri != name)
+            };
+            let Some(iri) = bound else {
+                return Err(format!(
+                    "limits.policyTypes: the prefix of \"{name}\" is not bound (use odrl:, a prefix a loaded profile binds, or a full IRI)"
+                ));
+            };
+            if prefix == "odrl" && !POLICY_CLASSES.contains(&local) {
+                return Err(if local == "Policy" {
+                    "limits.policyTypes: \"odrl:Policy\" is the base class; name one of its classes (Set, Offer, Agreement, ...)".to_string()
+                } else {
+                    format!(
+                        "limits.policyTypes: \"{name}\" is not an ODRL policy class ({classes})"
+                    )
+                });
+            }
+            iri
+        } else if POLICY_CLASSES.contains(&name) {
+            format!("{ODRL_NS}{name}")
+        } else if let Some(iri) = wording.and_then(|w| profile_class(w, name)) {
+            iri
+        } else if name == "Policy" {
+            return Err("limits.policyTypes: \"Policy\" is the base class; name one of its classes (Set, Offer, Agreement, ...)".into());
+        } else {
+            return Err(format!(
+                "limits.policyTypes: \"{name}\" is not an ODRL policy class ({classes}) or a class of a loaded profile; write another class with a prefix or as an IRI"
+            ));
+        };
+        if !out.contains(&iri) {
+            out.push(iri);
+        }
+    }
+    Ok(out)
+}
+
+/// The IRI of the policy class a loaded profile declares under the local
+/// name `name`.
+fn profile_class(w: &Wording, name: &str) -> Option<String> {
+    w.profiles()
+        .flat_map(|p| p.terms_of(TermKind::PolicyClass))
+        .find(|t| prose_yew::prose_core::wording::local_name(&t.iri) == name)
+        .map(|t| t.iri.clone())
+}
+
+/// Sets the list limits of `rules` from a host's `EditLimits` value, and its
+/// policy types (`policyTypes`: class names, not a list limit; `wording`
+/// binds the prefixes and the classes of the loaded profiles). `None` and
+/// `null` restore the limits of `EditRules::default()` and every policy
+/// type; the other rules are left alone. On an error `rules` is unchanged.
+pub(crate) fn apply_limits(
+    rules: &mut EditRules,
+    limits: Option<&Value>,
+    wording: Option<&Wording>,
+) -> Result<(), String> {
     let mut next = rules.clone();
     match limits {
         None | Some(Value::Null) => {
+            next.policy_types.clear();
             let d = EditRules::default();
             let mut from = d.clone();
             for name in LIMIT_NAMES.split(", ") {
@@ -112,9 +208,20 @@ pub(crate) fn apply_limits(rules: &mut EditRules, limits: Option<&Value>) -> Res
             }
         }
         Some(Value::Object(o)) => {
+            // A host that does not pass the key gets every type, as with
+            // the other limits: each call replaces the last.
+            next.policy_types.clear();
             for (name, spec) in o {
+                if name == "policyTypes" {
+                    if !spec.is_null() {
+                        next.policy_types = policy_types_of(spec, wording)?;
+                    }
+                    continue;
+                }
                 let field = limit_field(&mut next, name).ok_or_else(|| {
-                    format!("limits.{name} is not a list (lists are {LIMIT_NAMES})")
+                    format!(
+                        "limits.{name} is not a list (lists are {LIMIT_NAMES}; or policyTypes, a list of class names)"
+                    )
                 })?;
                 *field = limit_of(name, spec)?;
             }
@@ -202,7 +309,10 @@ pub(crate) fn apply_scope(
             }
             let list: Vec<String> = found
                 .iter()
-                .map(|o| format!("{} ({})", o.path, o.limit))
+                .map(|o| match &o.value {
+                    Some(v) => format!("{} ({v:?}) ({})", o.path, o.limit),
+                    None => format!("{} ({})", o.path, o.limit),
+                })
                 .collect();
             Err(ScopeError {
                 message: format!(
@@ -215,11 +325,21 @@ pub(crate) fn apply_scope(
     }
 }
 
-/// The removed sections as JSON text: `[{"path","key","limit"}]`.
+/// The removed sections as JSON text: `[{"path","key","limit"}]`; a policy
+/// type adds `value` (when it had one) and `replacedWith`.
 pub(crate) fn removed_json(removed: &[OutOfScope]) -> String {
     let items: Vec<Value> = removed
         .iter()
-        .map(|o| serde_json::json!({ "path": o.path, "key": o.key, "limit": o.limit }))
+        .map(|o| {
+            let mut item = serde_json::json!({ "path": o.path, "key": o.key, "limit": o.limit });
+            if let Some(v) = &o.value {
+                item["value"] = Value::from(v.as_str());
+            }
+            if let Some(w) = &o.replaced_with {
+                item["replacedWith"] = Value::from(w.as_str());
+            }
+            item
+        })
         .collect();
     serde_json::to_string(&items).unwrap_or_default()
 }
@@ -244,7 +364,9 @@ pub(crate) fn emitted_text(doc: &EditDoc) -> String {
 
 /// `EditConfig::default()`, then the wording, then the validation options,
 /// then the limits: `with_strict` rewrites the add-button defaults only, so
-/// the limits are applied last and kept.
+/// the limits are applied last and kept. The policy types are also given to
+/// the wording as a closed source (rebuilding the validator over it), so a
+/// document that holds another type is flagged as a host value is.
 pub(crate) fn build_config(
     wording: Option<&Rc<Wording>>,
     options: Option<&Options>,
@@ -257,7 +379,11 @@ pub(crate) fn build_config(
     if let Some(o) = options {
         c = c.with_strict(o.clone());
     }
-    apply_limits(&mut c.rules, limits)?;
+    apply_limits(&mut c.rules, limits, wording.map(|w| &**w))?;
+    if !c.rules.policy_types.is_empty() {
+        let types = c.rules.policy_types.clone();
+        c = c.with_policy_types(types);
+    }
     Ok(c)
 }
 
@@ -1068,7 +1194,13 @@ mod tests {
 
     fn limits(v: Value) -> Result<EditRules, String> {
         let mut r = EditRules::default();
-        apply_limits(&mut r, Some(&v)).map(|_| r)
+        apply_limits(&mut r, Some(&v), None).map(|_| r)
+    }
+
+    const ODRL: &str = "http://www.w3.org/ns/odrl/2/";
+
+    fn types(v: Value) -> Result<Vec<String>, String> {
+        limits(json!({ "policyTypes": v })).map(|r| r.policy_types)
     }
 
     #[test]
@@ -1133,12 +1265,12 @@ mod tests {
         let mut r = limits(json!({ "policyAssigner": { "max": 0 }, "policies": {} })).unwrap();
         r.allow_reorder = !r.allow_reorder;
         let reorder = r.allow_reorder;
-        apply_limits(&mut r, Some(&Value::Null)).unwrap();
+        apply_limits(&mut r, Some(&Value::Null), None).unwrap();
         let d = EditRules::default();
         assert_eq!(fields(&r), fields(&d));
         assert_eq!(r.allow_reorder, reorder, "only the limits are reset");
         let mut r = limits(json!({ "profile": { "max": 0 } })).unwrap();
-        apply_limits(&mut r, None).unwrap();
+        apply_limits(&mut r, None, None).unwrap();
         assert_eq!(fields(&r), fields(&d));
     }
 
@@ -1165,7 +1297,7 @@ mod tests {
             }
             for value in [bad, v] {
                 let before = fields(&r);
-                assert!(apply_limits(&mut r, Some(&value)).is_err(), "{value}");
+                assert!(apply_limits(&mut r, Some(&value), None).is_err(), "{value}");
                 assert_eq!(fields(&r), before, "{value}");
             }
         }
@@ -1195,6 +1327,184 @@ mod tests {
         assert!(build_config(None, None, Some(&json!({ "x": {} }))).is_err());
     }
 
+    #[test]
+    fn policy_types_take_bare_prefixed_and_full_spellings_in_order() {
+        let want = [format!("{ODRL}Offer"), format!("{ODRL}Set")];
+        assert_eq!(types(json!(["Offer", "Set"])).unwrap(), want);
+        assert_eq!(types(json!(["odrl:Offer", "odrl:Set"])).unwrap(), want);
+        assert_eq!(types(json!([format!("{ODRL}Offer"), "Set"])).unwrap(), want);
+        // Duplicates go after expansion; the first place stays.
+        assert_eq!(
+            types(json!(["Set", "odrl:Set", format!("{ODRL}Set"), "Offer"])).unwrap(),
+            [format!("{ODRL}Set"), format!("{ODRL}Offer")]
+        );
+        // Not a limit of a list: the other limits are untouched.
+        let r = limits(json!({ "policyTypes": ["Set"], "duty": { "max": 0 } })).unwrap();
+        assert_eq!(r.duty, Limit::NONE);
+        assert_eq!(r.policy_types, [format!("{ODRL}Set")]);
+        assert_eq!(
+            fields(&limits(json!({ "policyTypes": ["Set"] })).unwrap()),
+            fields(&EditRules::default())
+        );
+    }
+
+    #[test]
+    fn policy_types_take_a_prefix_a_loaded_profile_binds_and_its_classes_bare() {
+        let w = Wording::new().with_profile(ProfileVocab::parse(RESEARCH).unwrap());
+        let mut r = EditRules::default();
+        let ex = "https://example.org/odrl/profile/research/";
+        apply_limits(
+            &mut r,
+            Some(&json!({ "policyTypes": ["ex:ResearchAgreement", "ResearchAgreement"] })),
+            Some(&w),
+        )
+        .unwrap();
+        assert_eq!(r.policy_types, [format!("{ex}ResearchAgreement")]);
+    }
+
+    #[test]
+    fn bad_policy_types_are_refused_and_change_nothing() {
+        for (bad, says) in [
+            (json!("Set"), "array"),
+            (json!({}), "array"),
+            (json!([]), "null"),
+            (json!([1]), "string"),
+            (json!([""]), "empty"),
+            (json!(["nope:Set"]), "prefix"),
+            (json!(["Bogus"]), "Offer"),
+            (json!(["Policy"]), "base"),
+            (json!(["odrl:Bogus"]), "Offer"),
+            (json!(["Set", 3]), "string"),
+        ] {
+            let mut r = limits(json!({ "policyTypes": ["Offer"], "duty": { "max": 0 } })).unwrap();
+            let before = r.clone();
+            let value = json!({ "policyTypes": bad, "permission": { "max": 0 } });
+            let err = apply_limits(&mut r, Some(&value), None).unwrap_err();
+            assert!(err.contains("policyTypes"), "{value}: {err}");
+            assert!(err.contains(says), "{value}: {err}");
+            assert_eq!(r, before, "{value}");
+        }
+    }
+
+    #[test]
+    fn null_and_none_clear_the_policy_types() {
+        let mut r = limits(json!({ "policyTypes": ["Set"] })).unwrap();
+        apply_limits(&mut r, Some(&Value::Null), None).unwrap();
+        assert!(r.policy_types.is_empty());
+        let mut r = limits(json!({ "policyTypes": ["Set"] })).unwrap();
+        apply_limits(&mut r, None, None).unwrap();
+        assert!(r.policy_types.is_empty());
+        // And a null entry is the default too.
+        assert!(
+            limits(json!({ "policyTypes": null }))
+                .unwrap()
+                .policy_types
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn the_policy_types_reach_the_rules_the_wording_and_the_validator() {
+        use prose_yew::prose_core::edit::EntityRole;
+        use prose_yew::prose_core::profile::{SourceValue, ValueSource};
+        let mut s = ValueSources::new();
+        s.set_role(
+            EntityRole::Assignee,
+            ValueSource::new(vec![SourceValue::new("did:web:a")], true),
+        );
+        let w = Rc::new(Wording::new().with_value_sources(s));
+        let l = json!({ "policyTypes": ["Set"], "policyUid": { "max": 0 } });
+        let c = build_config(Some(&w), Some(&Options::strict()), Some(&l)).unwrap();
+        assert_eq!(c.rules.policy_types, [format!("{ODRL}Set")]);
+        assert_eq!(c.rules.policy_uid, Limit::NONE);
+        assert!(c.wording.policy_type_source().unwrap().is_closed());
+        // The host's other sources stay.
+        assert!(c.wording.role_source(EntityRole::Assignee).is_some());
+        let report = c
+            .validator
+            .as_ref()
+            .unwrap()
+            .validate_json(r#"{"@context":"http://www.w3.org/ns/odrl.jsonld","@type":"Offer","uid":"urn:p","permission":[{"target":"urn:t","action":"use"}]}"#);
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.message.contains("policy type")),
+            "{:?}",
+            report.findings
+        );
+        // Without the limit there is no source.
+        let c = build_config(Some(&w), Some(&Options::strict()), None).unwrap();
+        assert!(c.wording.policy_type_source().is_none());
+        assert!(c.rules.policy_types.is_empty());
+    }
+
+    const OFFER: &str = r#"{"@context":"http://www.w3.org/ns/odrl.jsonld","@type":"Offer","uid":"urn:p:1","permission":[{"action":"use"}]}"#;
+
+    fn set_only() -> EditRules {
+        limits(json!({ "policyTypes": ["Set"] })).unwrap()
+    }
+
+    #[test]
+    fn strip_rewrites_the_type_and_reports_it_as_json() {
+        let s = apply_scope(OFFER, &set_only(), Scope::Strip).unwrap();
+        assert!(s.text.contains(r#""@type":"Set""#), "{}", s.text);
+        let removed: Value = serde_json::from_str(&removed_json(&s.removed)).unwrap();
+        assert_eq!(
+            removed,
+            json!([{
+                "path": "@type", "key": "@type", "limit": "policyTypes",
+                "value": "Offer", "replacedWith": "Set"
+            }])
+        );
+    }
+
+    #[test]
+    fn other_removed_sections_keep_their_json_unchanged() {
+        let removed: Value = serde_json::from_str(&removed_json(
+            &apply_scope(PARTIES, &no_parties(), Scope::Strip)
+                .unwrap()
+                .removed,
+        ))
+        .unwrap();
+        for item in removed.as_array().unwrap() {
+            assert!(
+                item.get("value").is_none() && item.get("replacedWith").is_none(),
+                "{item}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_missing_type_is_reported_without_a_value() {
+        let text = r#"{"@context":"http://www.w3.org/ns/odrl.jsonld","uid":"urn:p:1","permission":[{"action":"use"}]}"#;
+        let rules = limits(json!({ "policyTypes": ["Offer"] })).unwrap();
+        let s = apply_scope(text, &rules, Scope::Strip).unwrap();
+        let removed: Value = serde_json::from_str(&removed_json(&s.removed)).unwrap();
+        assert_eq!(removed[0]["replacedWith"], "Offer");
+        assert!(removed[0].get("value").is_none(), "{removed}");
+    }
+
+    #[test]
+    fn reject_names_the_type_and_keeps_the_paths_plain() {
+        let e = apply_scope(OFFER, &set_only(), Scope::Reject).unwrap_err();
+        assert!(
+            e.message.contains(r#"@type ("Offer") (policyTypes)"#),
+            "{}",
+            e.message
+        );
+        assert_eq!(e.paths, ["@type"]);
+        // A document in scope is let through.
+        assert!(
+            apply_scope(
+                OFFER,
+                &limits(json!({ "policyTypes": ["Offer"] })).unwrap(),
+                Scope::Reject
+            )
+            .is_ok()
+        );
+    }
+
     const PARTIES: &str = r#"{"@type":"Set","uid":"urn:p:1","assigner":"urn:a","permission":[{"action":"use","odrl:assignee":"urn:b"}]}"#;
 
     fn no_parties() -> EditRules {
@@ -1205,6 +1515,7 @@ mod tests {
                 "policyAssigner": { "max": 0 }, "policyAssignee": { "max": 0 },
                 "ruleAssigner": { "max": 0 }, "ruleAssignee": { "max": 0 }
             })),
+            None,
         )
         .unwrap();
         r

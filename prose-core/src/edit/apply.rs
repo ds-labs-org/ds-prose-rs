@@ -284,6 +284,12 @@ fn set_text(
 ) -> Result<(), EditError> {
     check_node(doc, &slot.node, expect, false)?;
     let bad = || EditError::NoSuchPath(slot.to_string());
+    // The prefixes a compact policy type is read with; only a host that
+    // limits the types needs them.
+    let prefixes = match (slot.field, rules.policy_types.is_empty()) {
+        (Field::Kind, false) => super::prefixes(doc),
+        _ => Default::default(),
+    };
     let node = resolve_mut(doc, &slot.node).ok_or_else(|| no_node(&slot.node))?;
     match (node, slot.field) {
         (NodeMut::Policy(_), Field::Kind) if value.is_empty() => {
@@ -291,7 +297,16 @@ fn set_text(
                 "a policy needs a type, or it cannot be read back".into(),
             ));
         }
-        (NodeMut::Policy(p), Field::Kind) => p.kind = value.to_string(),
+        (NodeMut::Policy(p), Field::Kind) => {
+            // A no-op is allowed: a document that holds another type (shown
+            // as outside the list) is not made un-editable by it.
+            if value != p.kind && !rules.policy_type_allowed(value, &prefixes) {
+                return Err(EditError::NotAllowed(
+                    "this policy type is not one of the types allowed here".into(),
+                ));
+            }
+            p.kind = value.to_string()
+        }
         (NodeMut::Policy(_), Field::Uid)
             if !value.is_empty() && rules.policy_uid.max == Some(0) =>
         {
@@ -464,7 +479,7 @@ fn new_node(
                 })
                 .unwrap_or(1);
             New::Policy(PolicyNode {
-                kind: rules.defaults.policy_kind.clone(),
+                kind: rules.new_policy_kind(),
                 uid: (rules.policy_uid.max != Some(0))
                     .then(|| format!("{}{n}", rules.defaults.uid_prefix)),
                 ..PolicyNode::default()

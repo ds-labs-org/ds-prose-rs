@@ -666,3 +666,16 @@ fn dts_declares_the_value_source_api() {
         assert!(TYPES_D_TS.contains(name), "{name}");
     }
 }
+
+#[test]
+fn a_policy_type_key_is_not_a_value_source_use_the_limit() {
+    for key in ["policyType", "policyTypes", "odrl:policyType"] {
+        let err = value_sources(&json!({ key: ["Set"] })).unwrap_err();
+        assert!(err.contains("limits.policyTypes"), "{key}: {err}");
+        let mut s = Default::default();
+        let err = set_value_source(&mut s, key, &json!(["Set"]), true).unwrap_err();
+        assert!(err.contains("limits.policyTypes"), "{key}: {err}");
+    }
+    // Every other key reads as before.
+    assert!(value_sources(&json!({ "assignee": ["did:web:a"] })).is_ok());
+}

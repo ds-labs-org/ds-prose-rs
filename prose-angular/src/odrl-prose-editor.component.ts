@@ -118,7 +118,11 @@ export class OdrlProseEditorComponent implements OnChanges, OnDestroy {
    * profiles declare and never relabel a term.
    */
   readonly shapes = input<string | null>(null);
-  /** How many items each list may hold; a list not named keeps its default. */
+  /**
+   * How many items each list may hold (a list not named keeps its default),
+   * and `policyTypes`, the policy types the editor offers, such as
+   * `{ policyTypes: ['Set'] }`: one type is shown as text with no dropdown.
+   */
   readonly limits = input<EditLimits | null>(null);
   /** Validate with a closed vocabulary: ODRL plus the loaded profiles. Default `false`; with a `preset`, the preset's. */
   readonly strict = input<boolean | undefined>(undefined);

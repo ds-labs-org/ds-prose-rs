@@ -78,6 +78,13 @@ writes a term the loaded profiles do not define into a vocabulary slot, rather
 than commit and flag it. `setLimits({ logicalDepth: { max: 2 } })` caps how
 deep `and`/`or`/`xone` groups nest: the buttons that would go deeper are
 hidden and the editor refuses the edit; a document already deeper is kept.
+`setLimits({ policyTypes: ['Set'] })` restricts the policy types the editor
+offers (bare, `odrl:` or full-IRI class names, or a prefix a loaded profile
+binds; the first is the default): one type is text in the heading with no
+dropdown, several are a dropdown of those. Another type in a document is shown
+as outside the list and flagged; `'strip'` rewrites it to the first allowed type
+(`removed()` gives `value` and `replacedWith`), `'reject'` fails the load. An
+empty list or an unknown name throws and keeps the previous limits.
 
 ## Documentation
 

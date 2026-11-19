@@ -755,3 +755,67 @@ test('outOfScope: strip, limits that change later strip the document on screen a
   assert.equal(out.removed.length, 1);
   assert.equal(out.strippedJson, '{"uid":"a"}');
 });
+
+// --- policyTypes (#79) -------------------------------------------------------
+
+test('limits.policyTypes reaches setLimits as given', () => {
+  const s = new EditorSession();
+  const f = fake();
+  s.apply(inputs({ limits: { policyTypes: ['Set'] } }), f.mount);
+  assert.deepEqual(f.calls.find((c) => c[0] === 'setLimits'), ['setLimits', { policyTypes: ['Set'] }]);
+});
+
+test('a changed policyTypes array is handed over again, an equal one is not', () => {
+  const s = new EditorSession();
+  const f = fake();
+  s.apply(inputs({ limits: { policyTypes: ['Set'] } }), f.mount);
+  f.calls.length = 0;
+  // A new array with the same content: nothing to hand over.
+  s.apply(inputs({ limits: { policyTypes: ['Set'] } }), f.mount);
+  assert.ok(!names(f.calls).includes('setLimits'), names(f.calls).join());
+  // Another content, and another order, are changes.
+  s.apply(inputs({ limits: { policyTypes: ['Set', 'Offer'] } }), f.mount);
+  assert.equal(names(f.calls).filter((n) => n === 'setLimits').length, 1);
+  s.apply(inputs({ limits: { policyTypes: ['Offer', 'Set'] } }), f.mount);
+  assert.equal(names(f.calls).filter((n) => n === 'setLimits').length, 2);
+  // Dropping the key is a change too: setLimits({}) lifts it.
+  s.apply(inputs({ limits: {} }), f.mount);
+  assert.equal(names(f.calls).filter((n) => n === 'setLimits').length, 3);
+});
+
+test('outOfScope strip reports a rewritten policy type with its new fields', () => {
+  const s = new EditorSession();
+  const scope = { removed: [] };
+  const f = fake(new Set(), scope);
+  const REWRITE = [{ path: '@type', key: '@type', limit: 'policyTypes', value: 'Offer', replacedWith: 'Set' }];
+  const mount = (...a) => {
+    const h = f.mount(...a);
+    const setLimits = h.setLimits;
+    h.setLimits = (l) => {
+      setLimits(l);
+      scope.removed = REWRITE;
+    };
+    return h;
+  };
+  const out = s.apply(inputs({ outOfScope: 'strip', limits: { policyTypes: ['Set'] } }), mount);
+  assert.deepEqual(out.removed, REWRITE);
+  assert.equal(out.jsonError, undefined);
+});
+
+test('outOfScope reject keeps the previous limits when the policy types refuse the document', () => {
+  const s = new EditorSession();
+  const f = fake(new Set(), { refuseLimits: true });
+  const out = s.apply(inputs({ outOfScope: 'reject', limits: { policyTypes: ['Set'] } }), f.mount);
+  assert.ok(out.jsonError, 'the error is emitted');
+  // The next change tries the same limits again.
+  f.calls.length = 0;
+  s.apply(inputs({ outOfScope: 'reject', limits: { policyTypes: ['Set'] } }), f.mount);
+  assert.ok(names(f.calls).includes('setLimits'));
+});
+
+test('the dataspace preset keeps its depth next to the host policyTypes', () => {
+  const r = resolvePreset('dataspace', { ...none, limits: { policyTypes: ['Set'] } });
+  assert.deepEqual(r.limits, { logicalDepth: { max: 2 }, policyTypes: ['Set'] });
+  // The preset itself sets none.
+  assert.equal('policyTypes' in DATASPACE_PRESET.limits, false);
+});

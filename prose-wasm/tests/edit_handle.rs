@@ -1187,3 +1187,298 @@ async fn the_editor_handle_reports_what_the_profiles_make_unusable_in_the_shapes
     h.set_shapes(None).unwrap();
     assert_eq!(h.shapes_summary(), "null");
 }
+
+// --- policy types (#79) -----------------------------------------------------
+
+const OFFER: &str = r#"{"@context":"http://www.w3.org/ns/odrl.jsonld","@type":"Offer","uid":"urn:policy:5","permission":[{"target":"urn:asset:1","action":"use"}]}"#;
+const KIND: &str = "[data-slot=\"policy[0]#kind\"]";
+
+fn option_values(c: &Element) -> Vec<String> {
+    let Some(sel) = select(c, KIND) else {
+        return vec![];
+    };
+    let list = sel.query_selector_all("option").unwrap();
+    (0..list.length())
+        .map(|i| {
+            list.item(i)
+                .unwrap()
+                .dyn_into::<web_sys::HtmlOptionElement>()
+                .unwrap()
+                .value()
+        })
+        .collect()
+}
+
+fn message(e: &JsValue) -> String {
+    js_sys::Reflect::get(e, &"message".into())
+        .unwrap()
+        .as_string()
+        .unwrap()
+}
+
+#[wasm_bindgen_test]
+async fn policy_types_default_lists_every_class_in_a_select_with_select_input() {
+    let (c, mut h, _calls) = mount(ONE).await;
+    h.set_term_input("select").unwrap();
+    settle().await;
+    assert_eq!(option_values(&c).len(), 7, "{}", c.inner_html());
+}
+
+#[wasm_bindgen_test]
+async fn a_single_policy_type_hides_the_select_and_shows_the_type_as_text() {
+    let (c, mut h, _calls) = mount(ONE).await;
+    h.set_term_input("select").unwrap();
+    h.set_limits(js(r#"{"policyTypes":["Set"]}"#))
+        .expect("limits");
+    settle().await;
+    assert!(select(&c, KIND).is_none(), "{}", c.inner_html());
+    let heading = select(&c, "h3").unwrap().text_content().unwrap();
+    assert!(heading.contains("Set"), "{heading}");
+    // Without a select input too.
+    let (c, mut h, _calls) = mount(ONE).await;
+    h.set_limits(js(r#"{"policyTypes":["odrl:Set"]}"#)).unwrap();
+    settle().await;
+    assert!(select(&c, KIND).is_none(), "{}", c.inner_html());
+}
+
+#[wasm_bindgen_test]
+async fn several_policy_types_list_only_those_even_with_free_input() {
+    let (c, mut h, _calls) = mount(ONE).await;
+    h.set_limits(js(r#"{"policyTypes":["Set","Offer"]}"#))
+        .unwrap();
+    settle().await;
+    assert_eq!(option_values(&c), ["Set", "Offer"]);
+}
+
+#[wasm_bindgen_test]
+async fn policy_types_take_a_full_iri_and_keep_the_host_order() {
+    let (c, mut h, _calls) = mount(ONE).await;
+    h.set_limits(js(
+        r#"{"policyTypes":["http://www.w3.org/ns/odrl/2/Agreement","odrl:Offer","Set"]}"#,
+    ))
+    .unwrap();
+    settle().await;
+    assert_eq!(option_values(&c), ["Agreement", "Offer", "Set"]);
+}
+
+#[wasm_bindgen_test]
+async fn a_profile_prefix_and_class_name_are_accepted_once_the_profile_is_loaded() {
+    let (c, mut h, _calls) = mount(ONE).await;
+    h.set_profile(Some(RESEARCH.to_string())).unwrap();
+    h.set_limits(js(r#"{"policyTypes":["Set","ex:ResearchAgreement"]}"#))
+        .unwrap();
+    settle().await;
+    assert_eq!(option_values(&c).len(), 2, "{}", c.inner_html());
+    // The prefix is unknown before: it throws, the limits stay.
+    let (_c, mut h2, _calls) = mount(ONE).await;
+    let err = h2
+        .set_limits(js(r#"{"policyTypes":["ex:ResearchAgreement"]}"#))
+        .unwrap_err();
+    assert!(message(&err).contains("prefix"), "{}", message(&err));
+}
+
+#[wasm_bindgen_test]
+async fn invalid_policy_types_throw_and_keep_the_previous_limits() {
+    let (c, mut h, _calls) = mount(ONE).await;
+    h.set_limits(js(r#"{"policyTypes":["Set","Offer"]}"#))
+        .unwrap();
+    settle().await;
+    let before = c.inner_html();
+    for bad in [
+        r#"{"policyTypes":[]}"#,
+        r#"{"policyTypes":"Set"}"#,
+        r#"{"policyTypes":[3]}"#,
+        r#"{"policyTypes":[""]}"#,
+        r#"{"policyTypes":["nope:Set"]}"#,
+        r#"{"policyTypes":["Bogus"]}"#,
+    ] {
+        let err = h.set_limits(js(bad)).expect_err(bad);
+        assert!(
+            message(&err).contains("policyTypes"),
+            "{bad}: {}",
+            message(&err)
+        );
+    }
+    // A valid policyTypes beside a bad entry does not stick either.
+    assert!(
+        h.set_limits(js(
+            r#"{"policyTypes":["Agreement"],"permission":{"bad":1}}"#
+        ))
+        .is_err()
+    );
+    settle().await;
+    assert_eq!(c.inner_html(), before);
+    assert_eq!(option_values(&c), ["Set", "Offer"]);
+}
+
+#[wasm_bindgen_test]
+async fn set_limits_null_restores_every_policy_type() {
+    let (c, mut h, _calls) = mount(ONE).await;
+    h.set_term_input("select").unwrap();
+    h.set_limits(js(r#"{"policyTypes":["Set"]}"#)).unwrap();
+    settle().await;
+    assert!(select(&c, KIND).is_none());
+    h.set_limits(JsValue::NULL).unwrap();
+    settle().await;
+    assert_eq!(option_values(&c).len(), 7, "{}", c.inner_html());
+    // A later call without the key lifts it too.
+    h.set_limits(js(r#"{"policyTypes":["Set"]}"#)).unwrap();
+    h.set_limits(js(r#"{"duty":{"max":0}}"#)).unwrap();
+    settle().await;
+    assert_eq!(option_values(&c).len(), 7);
+}
+
+#[wasm_bindgen_test]
+async fn an_outside_type_is_shown_selected_noted_and_flagged() {
+    let (c, mut h, calls) = mount(OFFER).await;
+    h.set_validation(js("{}")).unwrap();
+    h.set_limits(js(r#"{"policyTypes":["Set"]}"#)).unwrap();
+    settle().await;
+    let sel = select(&c, KIND).expect("a select");
+    assert_eq!(sel.get_attribute("data-outside").as_deref(), Some("true"));
+    assert_eq!(option_values(&c), ["Offer", "Set"]);
+    assert!(select(&c, ".prose-slot-note").is_some());
+    assert!(
+        c.text_content().unwrap().contains("is not a policy type"),
+        "{}",
+        c.inner_html()
+    );
+    // The document is not changed by showing it.
+    assert!(calls.borrow().is_empty());
+    assert_eq!(h.json(), OFFER);
+}
+
+#[wasm_bindgen_test]
+async fn a_report_flags_an_outside_type() {
+    let (_c, mut h, _calls) = mount(OFFER).await;
+    h.set_validation(js("{}")).unwrap();
+    h.set_limits(js(r#"{"policyTypes":["Set"]}"#)).unwrap();
+    settle().await;
+    let report = h.report();
+    let text = js_sys::JSON::stringify(&report)
+        .map(String::from)
+        .unwrap_or_default();
+    assert!(text.contains("prose.value-not-allowed"), "{text}");
+}
+
+#[wasm_bindgen_test]
+async fn policy_types_strip_rewrites_the_type_and_reports_it() {
+    let (c, mut h, calls) = mount(ONE).await;
+    h.set_out_of_scope("strip").unwrap();
+    h.set_limits(js(r#"{"policyTypes":["Set"]}"#)).unwrap();
+    h.update(OFFER, None).expect("loads");
+    settle().await;
+    let removed: serde_json::Value = serde_json::from_str(&h.removed()).unwrap();
+    assert_eq!(
+        removed,
+        serde_json::json!([{
+            "path": "@type", "key": "@type", "limit": "policyTypes",
+            "value": "Offer", "replacedWith": "Set"
+        }])
+    );
+    assert!(h.json().contains("\"@type\":\"Set\""), "{}", h.json());
+    assert!(calls.borrow().is_empty(), "a strip is not an edit");
+    assert!(select(&c, KIND).is_none());
+    // The echo of the same text is a no-op that keeps the report.
+    let before = c.inner_html();
+    h.update(OFFER, None).unwrap();
+    settle().await;
+    assert_eq!(c.inner_html(), before);
+    assert_eq!(h.removed(), serde_json::to_string(&removed).unwrap());
+    h.update(ONE, None).unwrap();
+    assert_eq!(h.removed(), "[]");
+}
+
+#[wasm_bindgen_test]
+async fn policy_types_strip_on_a_limits_change_rewrites_the_document_on_screen() {
+    let (_c, mut h, _calls) = mount(OFFER).await;
+    h.set_out_of_scope("strip").unwrap();
+    h.set_limits(js(r#"{"policyTypes":["Set"]}"#)).unwrap();
+    settle().await;
+    assert!(h.json().contains("\"@type\":\"Set\""), "{}", h.json());
+    assert!(h.removed().contains("replacedWith"), "{}", h.removed());
+}
+
+#[wasm_bindgen_test]
+async fn policy_types_reject_refuses_a_document_and_a_limits_change() {
+    let (c, mut h, _calls) = mount(ONE).await;
+    h.set_out_of_scope("reject").unwrap();
+    h.set_limits(js(r#"{"policyTypes":["Set"]}"#))
+        .expect("ONE is a Set");
+    settle().await;
+    let before = c.inner_html();
+    let err = h.update(OFFER, None).expect_err("an Offer is refused");
+    assert_eq!(error_paths(&err), ["@type"]);
+    assert!(message(&err).contains("(policyTypes)"), "{}", message(&err));
+    assert!(message(&err).contains("\"Offer\""), "{}", message(&err));
+    assert_eq!(
+        js_sys::Reflect::get(&err, &"name".into())
+            .unwrap()
+            .as_string()
+            .unwrap(),
+        "OutOfScopeError"
+    );
+    assert_eq!(c.inner_html(), before);
+    assert_eq!(h.json(), ONE);
+    // A limits change that the document on screen breaks is refused, and
+    // the previous limits stay.
+    let (c2, mut h2, _calls) = mount(OFFER).await;
+    h2.set_out_of_scope("reject").unwrap();
+    assert!(h2.set_limits(js(r#"{"policyTypes":["Set"]}"#)).is_err());
+    settle().await;
+    // The previous limits stay: the type is still free text, not a select.
+    assert_eq!(select(&c2, KIND).unwrap().tag_name(), "SPAN");
+    h2.set_limits(js(r#"{"policyTypes":["Offer"]}"#))
+        .expect("in scope");
+}
+
+#[wasm_bindgen_test]
+async fn policy_types_compose_with_value_sources_for_other_roles() {
+    let (c, mut h, _calls) = mount(ONE).await;
+    h.set_value_sources(js(r#"{"assignee":{"values":["did:web:a"],"closed":true}}"#))
+        .unwrap();
+    h.set_limits(js(r#"{"policyTypes":["Set","Offer"]}"#))
+        .unwrap();
+    settle().await;
+    assert_eq!(option_values(&c), ["Set", "Offer"]);
+    let summaries = h.value_source_summaries();
+    assert!(summaries.contains("assignee"), "{summaries}");
+    // And the other way round: sources set after the limit keep it.
+    h.set_value_sources(js(r#"{"assignee":["did:web:b"]}"#))
+        .unwrap();
+    settle().await;
+    assert_eq!(option_values(&c), ["Set", "Offer"]);
+    // A policyType key is not a source.
+    let err: JsValue = h
+        .set_value_sources(js(r#"{"policyType":["Set"]}"#))
+        .unwrap_err()
+        .into();
+    assert!(
+        message(&err).contains("limits.policyTypes"),
+        "{}",
+        message(&err)
+    );
+    assert_eq!(option_values(&c), ["Set", "Offer"]);
+}
+
+#[wasm_bindgen_test]
+async fn choosing_a_listed_type_edits_and_the_reducer_keeps_the_rest_out() {
+    let (c, mut h, calls) = mount(ONE).await;
+    h.set_limits(js(r#"{"policyTypes":["Set","Offer"]}"#))
+        .unwrap();
+    settle().await;
+    let sel: web_sys::HtmlSelectElement = select(&c, KIND).unwrap().dyn_into().unwrap();
+    sel.set_value("Offer");
+    sel.dispatch_event(
+        &web_sys::Event::new_with_event_init_dict("change", &{
+            let i = web_sys::EventInit::new();
+            i.set_bubbles(true);
+            i
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    settle().await;
+    let json = calls.borrow().last().expect("an edit").0.clone();
+    assert!(json.contains("\"@type\":\"Offer\""), "{json}");
+}

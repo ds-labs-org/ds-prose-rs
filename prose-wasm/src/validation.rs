@@ -306,6 +306,15 @@ fn source_key(key: &str) -> Result<SourceKey, String> {
         return Err("valueSources: a key is empty; use a left operand's IRI, or \"assigner\", \"assignee\" or \"target\"".into());
     }
     let bare = key.strip_prefix(ODRL).unwrap_or(key);
+    // The policy types are a limit, not a source a host fills: one input.
+    if matches!(
+        bare.strip_prefix("odrl:").unwrap_or(bare),
+        "policyType" | "policyTypes"
+    ) {
+        return Err(format!(
+            "valueSources: \"{key}\" is not a source; restrict the policy types with limits.policyTypes"
+        ));
+    }
     Ok(match EntityRole::parse(bare) {
         Some(role) => SourceKey::Role(role),
         None => SourceKey::Operand(key.to_string()),
