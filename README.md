@@ -473,7 +473,7 @@ order. A change to `@1` may only add keys; removing or renaming one is `@2`.
 
 ```json
 { "schema": "ds-prose/validation-report@1",
-  "tool": {"name": "ds-prose-rs", "version": "0.9.0"},
+  "tool": {"name": "ds-prose-rs", "version": "0.10.0"},
   "mode": "strict",
   "tiers": ["profile", "odrl", "prose", "input"],
   "ruleset": 2,
@@ -658,9 +658,8 @@ drive. It knows ODRL and nothing about any particular engine or wire format.
   and `EditRules` do not look at the profile.
 
 ### Compatibility
-**Unreleased (after 0.9.0), at a glance.** This section is the release notes for the
-next release; the paragraphs after it give the detail. When it ships the heading becomes
-"Changed in 0.10.0".
+**Changed in 0.10.0, at a glance.** This section is the release notes for 0.10.0;
+the paragraphs after it give the detail.
 
 Added:
 
