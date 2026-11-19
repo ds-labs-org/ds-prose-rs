@@ -36,7 +36,7 @@
     "tslib": "^2.3.0"
   },
   "devDependencies": {
-    "@angular/compiler": "^19.2.0",
+    "@angular/compiler": "^22.2.2",
     "@angular/compiler-cli": "^19.2.0",
     "@angular/core": "^19.2.0",
     "ng-packagr": "^19.2.0",
