@@ -658,6 +658,18 @@ drive. It knows ODRL and nothing about any particular engine or wire format.
   and `EditRules` do not look at the profile.
 
 ### Compatibility
+**Changed in 0.11.0, at a glance.** This section is the release notes for 0.11.0;
+the paragraphs after it give the detail.
+
+Added:
+
+- `preset` on `ProseValidatorService.validate()` (#89): a seventh, optional argument
+  (`'dataspace'`) laid under `options` by the editor's own `resolvePreset`, so a host's other
+  editors (a raw JSON textarea) get the report of `<ds-odrl-prose-editor preset="dataspace">`
+  without copying the merge. Without it nothing changes; an unknown preset rejects.
+- Demo: a sample with the Dialectical Ethical Profile for ODRL (Dataspaces binding, Turtle)
+  and an agreement that uses it.
+
 **Changed in 0.10.0, at a glance.** This section is the release notes for 0.10.0;
 the paragraphs after it give the detail.
 
