@@ -138,10 +138,11 @@ async validate(
   shapes: string | null = null,
   overlays: readonly string[] | null = null,
   valueSources: ValueSources | null = null,
+  preset: string | null = null,
 ): Promise<ValidationReport>
 ```
 
-It waits for the wasm module and does no network access. `shapes` is the text of companion SHACL shapes and `overlays` the texts of operator overlays; it rejects when either cannot be read. `valueSources` are the host's runtime value sources, by left operand IRI or party role. It is strict unless `options.strict` is `false`. It rejects when the wasm cannot be loaded, or when a profile or the options cannot be read. A problem in the policy is a finding in the report, never a rejection.
+It waits for the wasm module and does no network access. `shapes` is the text of companion SHACL shapes and `overlays` the texts of operator overlays; it rejects when either cannot be read. `valueSources` are the host's runtime value sources, by left operand IRI or party role. `preset` is the editor's `preset` input (`'dataspace'`), laid under `options` the same way, so a host's other editors (a raw JSON textarea) validate as the prose editor does; an unknown preset rejects. It is strict unless `options.strict` is `false`. It rejects when the wasm cannot be loaded, or when a profile or the options cannot be read. A problem in the policy is a finding in the report, never a rejection.
 
 {{source prose-angular/test/docs-examples.ts#service}}
 
