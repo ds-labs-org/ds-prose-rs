@@ -42,6 +42,11 @@ pub const PRESETS: &[Preset] = &[
         label: "Research (closed)",
         text: include_str!("../../prose-core/tests/profiles/research-closed.jsonld"),
     },
+    Preset {
+        id: "profile-ethics-dataspaces",
+        label: "Ethics profile for dataspaces (Turtle)",
+        text: include_str!("../profiles/ethics-dataspaces.ttl"),
+    },
 ];
 
 #[derive(Clone, Debug, PartialEq)]
@@ -802,6 +807,35 @@ mod tests {
         assert_eq!(
             PRESETS[2].id, "profile-odrl22",
             "the others keep their place"
+        );
+    }
+
+    #[test]
+    fn the_ethics_dataspaces_profile_is_a_preset_that_applies() {
+        let p = PRESETS.iter().find(|p| p.id == "profile-ethics-dataspaces");
+        let p = p.expect("a dataspaces ethics profile button");
+        assert_eq!(p.label, "Ethics profile for dataspaces (Turtle)");
+        assert_eq!(
+            PRESETS[3].id, "profile-sample-closed",
+            "the others keep their place"
+        );
+        let s = applied(p.text);
+        assert_eq!(s.error, None);
+        assert!(s.wording.is_some());
+        // Its sample policy declares it, and reads with its operands.
+        let policy = include_str!("../profiles/ethics-dataspaces-policy.json");
+        assert_eq!(
+            declared_profile(policy).as_deref(),
+            Some("https://w3id.org/hegel-odrl/profile/dataspaces/v1/")
+        );
+        let w = s.wording.as_ref().unwrap();
+        assert!(prose_yew::prose_core::render_with(policy, &w.0).is_ok());
+        assert!(
+            prose_yew::prose_core::render_with(policy, &w.0)
+                .unwrap()
+                .document
+                .warnings
+                .is_empty()
         );
     }
 

@@ -32,4 +32,8 @@ pub const ALL: &[Preset] = &[
         label: "Profile not declared (has a fix)",
         json: include_str!("../../prose-core/tests/strict/not-declared.json"),
     },
+    Preset {
+        label: "Ethics agreement (dataspaces profile)",
+        json: include_str!("../profiles/ethics-dataspaces-policy.json"),
+    },
 ];

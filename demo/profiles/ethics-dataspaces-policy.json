@@ -1,0 +1,33 @@
+{
+  "@context": [
+    "http://www.w3.org/ns/odrl.jsonld",
+    { "eth": "https://w3id.org/hegel-odrl/ns/ethics/" }
+  ],
+  "@type": "Agreement",
+  "uid": "urn:policy:ethics-dataspaces-1",
+  "profile": "https://w3id.org/hegel-odrl/profile/dataspaces/v1/",
+  "assigner": "http://example.com/org:provider",
+  "assignee": "http://example.com/org:consumer",
+  "target": "http://example.com/data:training-set",
+  "permission": [{
+    "action": "use",
+    "duty": [{ "action": "eth:verifyEnclave" }],
+    "constraint": [{
+      "leftOperand": "eth:carbonIntensity",
+      "operator": "lteq",
+      "rightOperand": { "@value": "50", "@type": "xsd:decimal" }
+    }, {
+      "leftOperand": "eth:openSourceEngine",
+      "operator": "eq",
+      "rightOperand": { "@value": "true", "@type": "xsd:boolean" }
+    }, {
+      "leftOperand": "eth:executionEnclave",
+      "operator": "isAnyOf",
+      "rightOperand": [{ "@id": "eth:TEE" }, { "@id": "eth:confidentialComputing" }]
+    }, {
+      "leftOperand": "eth:platformSovereignty",
+      "operator": "eq",
+      "rightOperand": "EU"
+    }]
+  }]
+}

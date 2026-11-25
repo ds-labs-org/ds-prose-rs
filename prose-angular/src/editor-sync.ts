@@ -473,3 +473,14 @@ export function resolvePreset(preset: string | null | undefined, given: PresetIn
     refuseTerms: given.refuseTerms ?? base?.refuseTerms ?? false,
   };
 }
+
+/**
+ * The options `ProseValidatorService.validate()` hands the validator: the
+ * host's `options` as given without a preset; with one, the preset laid under
+ * them as the editor does for `preset` and `validation` (so `options.strict`
+ * and `rules` win key by key). Throws for a preset it does not know.
+ */
+export function validatorOptions(preset: string | null | undefined, options: ValidateOptions | null | undefined): ValidateOptions | null {
+  if (preset == null) return options ?? null;
+  return resolvePreset(preset, { strict: undefined, validation: options, termInput: undefined, limits: null, refuseTerms: undefined }).options;
+}

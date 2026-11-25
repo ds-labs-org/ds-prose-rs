@@ -169,7 +169,10 @@ ds-prose convention), is in the
 To validate without rendering, inject `ProseValidatorService`:
 `await service.validate(policyJson, [profileText])` returns the report, and
 rejects only when the wasm cannot load or a profile or the options cannot be
-read.
+read. Pass `'dataspace'` as the seventh argument (`preset`) to validate with
+the options of the editor's `preset` input, with `options` laid over it the
+same way: a raw JSON editor next to `<ds-odrl-prose-editor preset="dataspace">`
+then refuses what the prose editor refuses.
 
 If the wasm cannot be loaded (a wrong `PROSE_WASM_URL`, a 404, a network
 failure) the element shows an error (`<p class="prose-error" role="alert">`),
