@@ -1,0 +1,121 @@
+# Publishes the Rust crates `prose-core` and `prose-yew` to crates.io.
+#
+#   git tag prose-yew-v0.11.0 && git push origin prose-yew-v0.11.0
+#
+# The tag is the version, and it must be the workspace version in Cargo.toml
+# (both crates share it). `prose-core` goes first: `prose-yew` depends on it.
+#
+# Publishing to crates.io cannot be undone (a version can only be yanked), so
+# a manual run ("Run workflow") defaults to a dry run, which builds and
+# packages everything except the upload.
+#
+# Authentication. The first version of a crate cannot use trusted publishing
+# (the trusted-publisher link is set on the crate's settings, which exist only
+# once it does), so this needs the secret CARGO_REGISTRY_TOKEN in the `crates`
+# environment (a crates.io token scoped to publish-new and publish-update).
+# After the first release, switch to trusted publishing and delete the secret.
+name: Release crates
+
+on:
+  push:
+    tags:
+      - "prose-yew-v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to rehearse, e.g. prose-yew-v0.11.0"
+        required: true
+      dry_run:
+        description: "Build and package, but do not publish"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-crates
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: crates
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      # A tag push publishes; a manual run publishes only if dry_run is off.
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: The tag is the workspace version
+        id: info
+        run: |
+          if [[ ! "$TAG" =~ ^prose-yew-v([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$ ]]; then
+            echo "::error::not a release tag: $TAG (expected prose-yew-vX.Y.Z)"
+            exit 1
+          fi
+          version="${BASH_REMATCH[1]}"
+          have="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name=="prose-yew") | .version')"
+          if [ "$version" != "$have" ]; then
+            echo "::error::tag is $version but Cargo.toml says $have"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing the crates at $version (dry run: $DRY_RUN)"
+
+      # Releases come from main's history only.
+      - name: The tagged commit is on main
+        if: github.event_name == 'push'
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+      - uses: dtolnay/rust-toolchain@1.96.1
+      - uses: Swatinem/rust-cache@v2
+
+      - name: These versions are not published yet
+        run: |
+          for crate in prose-core prose-yew; do
+            if curl -fsS -A "ds-prose-rs release" "https://crates.io/api/v1/crates/$crate/${{ steps.info.outputs.version }}" >/dev/null 2>&1; then
+              echo "::error::$crate ${{ steps.info.outputs.version }} is already on crates.io; bump the version"
+              exit 1
+            fi
+          done
+
+      # prose-yew needs prose-core on the registry to be packaged, so before
+      # prose-core is published it can only be listed, not built.
+      - name: Package prose-core
+        run: cargo publish -p prose-core --dry-run --locked
+
+      - name: List what prose-yew packages
+        run: cargo package -p prose-yew --list --locked
+
+      - name: Publish prose-core
+        if: env.DRY_RUN != 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          [ -n "$CARGO_REGISTRY_TOKEN" ] || { echo "::error::no CARGO_REGISTRY_TOKEN secret in the crates environment"; exit 1; }
+          cargo publish -p prose-core --locked
+
+      - name: Publish prose-yew
+        if: env.DRY_RUN != 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          # The index takes a moment to carry the new prose-core.
+          for i in 1 2 3 4 5 6; do
+            cargo publish -p prose-yew --locked && exit 0
+            echo "prose-core not visible yet; retrying in 30 s"; sleep 30
+          done
+          exit 1
+
+      - name: Summary
+        run: |
+          if [ "$DRY_RUN" = 'true' ]; then
+            echo "### Dry run: prose-core and prose-yew ${{ steps.info.outputs.version }} packaged, nothing uploaded" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Published prose-core and prose-yew ${{ steps.info.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          fi
