@@ -7,6 +7,11 @@ the library crates or the npm packages.
 | file | what it is | source |
 |---|---|---|
 | `odrl22-trimmed.json` | the ODRL 2.2 vocabulary, trimmed to what the reader uses | W3C, see below |
+| `ethics-dataspaces.ttl` | the Dialectical Ethical Profile for ODRL 1.0, Dataspaces binding (`hegel-ds.ttl`), in Turtle | <https://nka11.github.io/odrl/profile-dataspaces/hegel-ds.ttl>, linked from its [specification](https://nka11.github.io/odrl/profile-dataspaces/EthicsProfile.html), fetched 2026-11-25 (after its enclave values were typed `odrl:RightOperand`, nka11/odrl@836375e), unchanged |
+| `ethics-dataspaces-policy.json` | an Agreement that uses it (carbon intensity, open-source engine, enclave and sovereignty constraints, a verify-enclave duty) | written for the demo |
+
+The profile imports the core module (`hegel-core.ttl`); the demo loads only the
+dataspaces file, so what the core defines is not worded.
 
 The research profile presets (JSON-LD and Turtle) are the test fixtures in
 `prose-core/tests/profiles/`, used as they are.

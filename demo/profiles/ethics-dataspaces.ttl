@@ -1,0 +1,173 @@
+@prefix odrl:   <http://www.w3.org/ns/odrl/2/> .
+@prefix hegel:  <https://w3id.org/hegel-odrl/ns/hegel/> .
+@prefix hegel-ds: <https://w3id.org/hegel-odrl/ns/hegel-ds/> .
+@prefix eth:    <https://w3id.org/hegel-odrl/ns/ethics/> .
+@prefix prov:   <http://www.w3.org/ns/prov#> .
+@prefix cred:   <https://www.w3.org/2018/credentials#> .
+@prefix owl:    <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs:   <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix skos:   <http://www.w3.org/2004/02/skos/core#> .
+@prefix dct:    <http://purl.org/dc/terms/> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+@prefix prof:   <http://www.w3.org/ns/dx/prof/> .
+@prefix role:   <http://www.w3.org/ns/dx/prof/role/> .
+
+# =====================================================================
+#  Dialectical Ethical Profile for ODRL -- DATASPACE BINDING
+#  Specialises ../profile-ethics/hegel-core.ttl for federated data
+#  spaces: VC 2.0 attestations, DID identities, Bitstring Status List
+#  revocation, PROV-O telemetry, TEE enforcement, platform ethics.
+#
+#  NOTE: the hegel: / eth: namespaces are shared with the core module.
+#  Terms defined here keep their original URIs (examples in the draft
+#  use them) and are tagged rdfs:isDefinedBy this ontology.
+#  The cred: prefix is the namespace of the VC 2.0 context vocabulary
+#  (the draft's "vc" prefix pointed at the context URL instead).
+# =====================================================================
+
+<https://w3id.org/hegel-odrl/profile/dataspaces/v1/>
+    a owl:Ontology, prof:Profile, skos:Collection ;
+    rdfs:label "Dialectical Ethical Profile for ODRL 1.0 - Dataspaces (hegel-odrl-dataspaces)"@en ;
+    dct:description "Binding of the hegel-odrl core to federated data spaces."@en ;
+    owl:versionInfo "1.0-draft" ;
+    owl:imports <https://w3id.org/hegel-odrl/profile/core/v1/> ;
+    prof:isProfileOf <https://w3id.org/hegel-odrl/profile/core/v1/> ;
+    dct:conformsTo <https://w3id.org/hegel-odrl/profile/core/v1/> ;
+    prof:hasResource [
+        a prof:ResourceDescriptor ;
+        prof:hasRole role:vocabulary ;
+        prof:hasArtifact <https://w3id.org/hegel-odrl/ns/hegel-ds/> ;
+        dct:format <https://www.iana.org/assignments/media-types/text/turtle>
+    ] , [
+        a prof:ResourceDescriptor ;
+        prof:hasRole role:schema ;
+        prof:hasArtifact <https://w3id.org/hegel-odrl/ns/hegel-ds/context.jsonld> ;
+        dct:format <https://www.iana.org/assignments/media-types/application/ld+json>
+    ] .
+
+# ---------------------------------------------------------------------
+#  Credentials (VC 2.0 specialisations of hegel:Attestation)
+# ---------------------------------------------------------------------
+
+hegel:EthicalAdherenceCredential
+    a rdfs:Class, owl:Class ;
+    rdfs:subClassOf hegel:EthicalAdherenceAttestation, cred:VerifiableCredential ;
+    rdfs:isDefinedBy <https://w3id.org/hegel-odrl/profile/dataspaces/v1/> ;
+    rdfs:label "Ethical Adherence Credential"@en ;
+    skos:definition "Ex-ante W3C VC 2.0 signed by the consumer, presented in a Verifiable Presentation, tying the consumer DID to the policy hash and accepted commitments. Its credentialStatus MUST be a BitstringStatusListEntry (statusPurpose: revocation)."@en .
+
+hegel:InspectionReportCredential
+    a rdfs:Class, owl:Class ;
+    rdfs:subClassOf hegel:InspectionReport, cred:VerifiableCredential ;
+    rdfs:isDefinedBy <https://w3id.org/hegel-odrl/profile/dataspaces/v1/> ;
+    rdfs:label "Inspection Report Credential"@en ;
+    skos:definition "Ex-post W3C VC 2.0 issued by the inspection oracle (hegel:inspectionSource). On confirmed breach the oracle flips the consumer's Bitstring Status List bit from 0 to 1."@en .
+
+# In this binding every commitment's attestation is a Verifiable Credential.
+hegel:EthicalCommitment
+    rdfs:subClassOf [
+        a owl:Restriction ;
+        owl:onProperty hegel:attestationCredential ;
+        owl:allValuesFrom hegel:EthicalAdherenceCredential
+    ] .
+
+hegel:attestationCredential
+    rdfs:range cred:VerifiableCredential .
+
+hegel-ds:FederatedEthicsCommittee
+    a rdfs:Class, owl:Class ;
+    rdfs:subClassOf hegel:DeliberativeBody ;
+    rdfs:label "Federated Ethics Committee"@en ;
+    skos:definition "A deliberative body operated by the data space federation (e.g. a Gaia-X ethics committee), identified by a DID."@en .
+
+# --- credentialSubject properties -------------------------------------
+
+hegel:boundPolicyUid a owl:DatatypeProperty ;
+    rdfs:isDefinedBy <https://w3id.org/hegel-odrl/profile/dataspaces/v1/> ;
+    rdfs:label "bound policy UID"@en ;
+    skos:definition "UID of the ODRL Agreement this adhesion credential is bound to."@en .
+
+hegel:policyDigestSha256 a owl:DatatypeProperty ;
+    rdfs:isDefinedBy <https://w3id.org/hegel-odrl/profile/dataspaces/v1/> ;
+    rdfs:label "policy digest (SHA-256)"@en ;
+    skos:definition "Hex SHA-256 digest of the bound policy."@en .
+
+hegel:acceptedCommitments a owl:DatatypeProperty ;
+    rdfs:isDefinedBy <https://w3id.org/hegel-odrl/profile/dataspaces/v1/> ;
+    rdfs:label "accepted commitments"@en ;
+    skos:definition "Human-readable constraint expressions the assignee accepts (e.g. 'eth:disparateImpactRatio >= 0.80')."@en .
+
+hegel:unlearningLiabilityAccepted a owl:DatatypeProperty ;
+    rdfs:isDefinedBy <https://w3id.org/hegel-odrl/profile/dataspaces/v1/> ;
+    rdfs:range xsd:boolean ;
+    rdfs:label "unlearning liability accepted"@en ;
+    skos:definition "Assignee accepts liability for mandatory eth:machineUnlearning on breach."@en .
+
+hegel:auditedPolicyUid a owl:DatatypeProperty ;
+    rdfs:isDefinedBy <https://w3id.org/hegel-odrl/profile/dataspaces/v1/> ;
+    rdfs:label "audited policy UID"@en ;
+    skos:definition "UID of the Agreement covered by an inspection report."@en .
+
+hegel:provGraphDigest a owl:DatatypeProperty ;
+    rdfs:isDefinedBy <https://w3id.org/hegel-odrl/profile/dataspaces/v1/> ;
+    rdfs:label "PROV graph digest"@en ;
+    skos:definition "Digest ('sha256:<hex>') of the PROV-O graph the verdict is based on."@en .
+
+hegel:measuredMetrics a owl:DatatypeProperty ;
+    rdfs:isDefinedBy <https://w3id.org/hegel-odrl/profile/dataspaces/v1/> ;
+    rdfs:label "measured metrics"@en ;
+    skos:definition "JSON object mapping left-operand terms (eth:*, hegel:predictiveRiskScore) to the values measured by the oracle."@en .
+
+hegel:verdictState a owl:ObjectProperty ;
+    rdfs:isDefinedBy <https://w3id.org/hegel-odrl/profile/dataspaces/v1/> ;
+    rdfs:range hegel:PDPState ;
+    rdfs:label "verdict state"@en ;
+    skos:definition "PDP state the oracle's verdict drives the Agreement into."@en .
+
+hegel:triggeredRemedy a owl:ObjectProperty ;
+    rdfs:isDefinedBy <https://w3id.org/hegel-odrl/profile/dataspaces/v1/> ;
+    rdfs:range odrl:Action ;
+    rdfs:label "triggered remedy"@en ;
+    skos:definition "Remedy action (e.g. eth:machineUnlearning) triggered by the verdict."@en .
+
+# ---------------------------------------------------------------------
+#  Platform ethics operands & enclave enforcement (moved from eth: core)
+# ---------------------------------------------------------------------
+
+eth:PlatformEthicsScheme a skos:ConceptScheme ; rdfs:label "Platform Ethics Operands"@en .
+eth:ExecutionEnclaveScheme a skos:ConceptScheme ; rdfs:label "Execution Enclaves"@en .
+
+eth:carbonIntensity a odrl:LeftOperand, skos:Concept ; skos:inScheme eth:PlatformEthicsScheme ;
+    rdfs:isDefinedBy <https://w3id.org/hegel-odrl/profile/dataspaces/v1/> ;
+    rdfs:label "Platform Carbon Intensity"@en ;
+    skos:definition "Maximum carbon intensity of the compute infrastructure (e.g. <= 50 gCO2/kWh). Right operand: xsd:decimal with odrl:unit qudt:GM-PER-KILO-W-HR. Evaluated by an oracle (Antigone)."@en .
+
+eth:renewableEnergyShare a odrl:LeftOperand, skos:Concept ; skos:inScheme eth:PlatformEthicsScheme ;
+    rdfs:isDefinedBy <https://w3id.org/hegel-odrl/profile/dataspaces/v1/> ;
+    rdfs:label "Renewable Energy Share"@en ;
+    skos:definition "Minimum verified renewable share of data-center energy during execution. Right operand: xsd:decimal 0-100 (qudt:PERCENT). Oracle-evaluated."@en .
+
+eth:executionEnclave a odrl:LeftOperand, skos:Concept ; skos:inScheme eth:PlatformEthicsScheme ;
+    rdfs:isDefinedBy <https://w3id.org/hegel-odrl/profile/dataspaces/v1/> ;
+    rdfs:label "Execution Enclave"@en ;
+    skos:definition "Mandates hardware-isolated confidential execution to prevent inspection or premature weight exfiltration. Right operand: eth:ExecutionEnclaveScheme concept. Synchronous (attested)."@en .
+
+eth:platformSovereignty a odrl:LeftOperand, skos:Concept ; skos:inScheme eth:PlatformEthicsScheme ;
+    rdfs:isDefinedBy <https://w3id.org/hegel-odrl/profile/dataspaces/v1/> ;
+    rdfs:label "Platform Sovereignty"@en ;
+    skos:definition "Legal and physical jurisdiction of compute node and storage plane. Right operand: ISO 3166 URI / jurisdiction code (e.g. EU, ES). Synchronous."@en .
+
+eth:openSourceEngine a odrl:LeftOperand, skos:Concept ; skos:inScheme eth:PlatformEthicsScheme ;
+    rdfs:isDefinedBy <https://w3id.org/hegel-odrl/profile/dataspaces/v1/> ;
+    rdfs:label "Open Source Engine"@en ;
+    skos:definition "Requires analytical databases, brokers and processing engines to use OSI-approved licenses for auditability. Right operand: xsd:boolean."@en .
+
+eth:verifyEnclave a odrl:Action, skos:Concept ; skos:inScheme eth:ActionScheme ;
+    rdfs:isDefinedBy <https://w3id.org/hegel-odrl/profile/dataspaces/v1/> ;
+    odrl:includedIn odrl:ensureExclusivity ;
+    rdfs:label "Verify Enclave"@en ;
+    skos:definition "Ex-ante duty: provide remote hardware attestation proving computation runs exclusively inside a certified TEE."@en .
+
+eth:TEE a odrl:RightOperand, skos:Concept ; skos:inScheme eth:ExecutionEnclaveScheme ; rdfs:label "Trusted Execution Environment"@en .
+eth:confidentialComputing a odrl:RightOperand, skos:Concept ; skos:inScheme eth:ExecutionEnclaveScheme ; rdfs:label "Confidential computing"@en .
+eth:federatedSecureAggregation a odrl:RightOperand, skos:Concept ; skos:inScheme eth:ExecutionEnclaveScheme ; rdfs:label "Federated secure aggregation"@en .
