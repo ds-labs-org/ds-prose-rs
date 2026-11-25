@@ -1,0 +1,20 @@
+{
+  "@context": [
+    "http://www.w3.org/ns/odrl.jsonld",
+    { "ex": "https://example.org/odrl/profile/research/",
+      "foo": "https://example.net/foo/" }
+  ],
+  "@type": "Set",
+  "uid": "urn:policy:not-loaded",
+  "profile": [
+    "https://example.org/odrl/profile/research",
+    "https://example.org/odrl/profile/missing"
+  ],
+  "permission": [{
+    "target": "urn:asset:1",
+    "action": "ex:train"
+  }, {
+    "target": "urn:asset:1",
+    "action": "foo:bar"
+  }]
+}

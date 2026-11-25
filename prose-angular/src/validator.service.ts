@@ -1,0 +1,45 @@
+import { Injectable, inject } from '@angular/core';
+import type { ValidateOptions, ValidationReport, ValueSources } from '@ds-labs/prose-wasm';
+import { overlayTexts, shapesText, valueSourcesOf } from './validation-sync';
+import { PROSE_WASM_MODULE, PROSE_WASM_URL, loadWasm } from './wasm-runtime';
+
+/**
+ * Validates ODRL policies against ODRL profiles without rendering anything
+ * (a form's submit guard, a list of policies). It runs the same engine as
+ * `<ds-odrl-prose [strict]>` and the `ds-prose-validate` command, so the
+ * report is the same.
+ */
+@Injectable({ providedIn: 'root' })
+export class ProseValidatorService {
+  private readonly wasmUrl = inject(PROSE_WASM_URL);
+  private readonly wasmModule = inject(PROSE_WASM_MODULE);
+
+  /**
+   * The report for the policy `json` against `profiles` (the text of each
+   * profile, JSON-LD, or Turtle with the Turtle build; the service does no
+   * network access). Strict unless `options.strict` is `false`. Waits for
+   * the wasm module to load; rejects when it cannot, or when a profile or
+   * the options cannot be read.
+   * `shapes` is the text of the dataspace's companion SHACL shapes
+   * (JSON-LD, or Turtle with the Turtle build); blank is none, and shapes
+   * that cannot be read reject. `overlays` are the texts of the dataspace's
+   * operator overlays (blank texts are dropped); the shapes win over them.
+   * `valueSources` are the values the host took from its registry or
+   * catalog, by left operand IRI or party role; they sit on top of the
+   * rest, and a closed one makes a value it does not list a finding whose
+   * `expected.source` is `"host"`.
+   * A problem in the policy is never a rejection: it is a finding.
+   */
+  async validate(
+    json: string,
+    profiles: string | readonly string[] | null = null,
+    options: ValidateOptions | null = null,
+    shapes: string | null = null,
+    overlays: readonly string[] | null = null,
+    valueSources: ValueSources | null = null,
+  ): Promise<ValidationReport> {
+    const wasm = await loadWasm({ module: this.wasmModule, url: this.wasmUrl });
+    const list = typeof profiles === 'string' || profiles == null ? profiles : [...profiles];
+    return JSON.parse(wasm.validate(json, list, options, shapesText(shapes), overlayTexts(overlays), valueSourcesOf(valueSources))) as ValidationReport;
+  }
+}

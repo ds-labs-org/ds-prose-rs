@@ -1,0 +1,4 @@
+[
+  { "@type": "Set", "uid": "urn:policy:a1", "permission": [{ "action": "use", "target": "urn:asset:1" }] },
+  { "@type": "Agreement", "uid": "urn:policy:a2", "assigner": "urn:party:x", "assignee": "urn:party:y", "obligation": [{ "action": "delete", "target": "urn:asset:2" }] }
+]

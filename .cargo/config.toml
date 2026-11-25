@@ -1,0 +1,3 @@
+# A wasm test binary cannot be executed; it has to be handed to a browser.
+[target.wasm32-unknown-unknown]
+runner = "wasm-bindgen-test-runner"

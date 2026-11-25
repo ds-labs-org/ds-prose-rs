@@ -1,0 +1,37 @@
+{
+  "@context": {
+    "odrl": "http://www.w3.org/ns/odrl/2/",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "skos": "http://www.w3.org/2004/02/skos/core#",
+    "owl": "http://www.w3.org/2002/07/owl#",
+    "other": "https://example.com/odrl/profile/other/"
+  },
+  "@graph": [
+    {
+      "@id": "https://example.com/odrl/profile/other",
+      "@type": "owl:Ontology",
+      "rdfs:label": { "@value": "Other Profile", "@language": "en" },
+      "owl:versionInfo": "1.0.0",
+      "skos:editorialNote": "A second small synthetic profile, for policies that mix profiles. Not a published profile."
+    },
+    {
+      "@id": "other:archiveCopy",
+      "@type": ["odrl:Action", "skos:Concept"],
+      "rdfs:isDefinedBy": { "@id": "https://example.com/odrl/profile/other" },
+      "rdfs:label": { "@value": "Archive a copy", "@language": "en" },
+      "odrl:includedIn": { "@id": "odrl:use" }
+    },
+    {
+      "@id": "other:region",
+      "@type": ["odrl:LeftOperand", "skos:Concept"],
+      "rdfs:isDefinedBy": { "@id": "https://example.com/odrl/profile/other" },
+      "rdfs:label": { "@value": "Storage region", "@language": "en" }
+    },
+    {
+      "@id": "other:eu",
+      "@type": ["odrl:RightOperand", "skos:Concept"],
+      "rdfs:isDefinedBy": { "@id": "https://example.com/odrl/profile/other" },
+      "rdfs:label": { "@value": "European Union", "@language": "en" }
+    }
+  ]
+}

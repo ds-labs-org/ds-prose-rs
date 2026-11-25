@@ -1,0 +1,12 @@
+## none
+## research
+Warning policy[0] the policy declares the profile <https://example.org/odrl/profile/missing>, which is not loaded
+## research-closed
+Warning policy[0] the policy declares the profile <https://example.org/odrl/profile/missing>, which is not loaded
+## odrl22-excerpt
+Warning policy[0] the policy declares the profile <https://example.org/odrl/profile/research>, which is not loaded
+Warning policy[0] the policy declares the profile <https://example.org/odrl/profile/missing>, which is not loaded
+## research+other
+Warning policy[0] the policy declares the profile <https://example.org/odrl/profile/missing>, which is not loaded
+## research-imports+research
+Warning policy[0] the policy declares the profile <https://example.org/odrl/profile/missing>, which is not loaded

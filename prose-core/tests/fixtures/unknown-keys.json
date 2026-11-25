@@ -1,0 +1,12 @@
+{
+  "@context": "http://www.w3.org/ns/odrl.jsonld",
+  "@type": "Set",
+  "uid": "urn:policy:unk",
+  "x:policyNote": "kept",
+  "permission": [{
+    "action": "use",
+    "target": "urn:asset:4",
+    "x:ruleNote": { "a": 1 },
+    "constraint": [{ "leftOperand": "count", "operator": "lteq", "rightOperand": 3, "x:constraintNote": true }]
+  }]
+}

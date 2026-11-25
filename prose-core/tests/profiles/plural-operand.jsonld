@@ -1,0 +1,43 @@
+{
+  "@context": {
+    "odrl": "http://www.w3.org/ns/odrl/2/",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "owl": "http://www.w3.org/2002/07/owl#",
+    "prose": "https://ds-labs-org.github.io/ds-prose-rs/profile#",
+    "ex": "https://example.org/odrl/profile/research/"
+  },
+  "@graph": [
+    {
+      "@id": "https://example.org/odrl/profile/plural",
+      "@type": "owl:Ontology",
+      "rdfs:label": { "@value": "Plural operand profile", "@language": "en" }
+    },
+    {
+      "@id": "ex:timeWindows",
+      "@type": "odrl:LeftOperand",
+      "rdfs:label": { "@value": "Time windows", "@language": "en" },
+      "prose:plural": true
+    },
+    {
+      "@id": "ex:window",
+      "@type": "odrl:LeftOperand",
+      "rdfs:label": { "@value": "Time window", "@language": "en" }
+    },
+    {
+      "@id": "ex:dateTime",
+      "@type": "odrl:LeftOperand",
+      "rdfs:label": { "@value": "Moments", "@language": "en" },
+      "prose:plural": true
+    },
+    {
+      "@id": "ex:earlierThan",
+      "@type": "odrl:Operator",
+      "rdfs:label": { "@value": "Earlier than", "@language": "en" }
+    },
+    {
+      "@id": "ex:hasOverlap",
+      "@type": "odrl:Operator",
+      "rdfs:label": { "@value": "Has overlap with", "@language": "en" }
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+# Workspace for ds-prose-rs -- PROSE: Prose Renderer for ODRL Semantic Encoding.
+#
+#   prose-core   reads ODRL JSON-LD (compact or lightly expanded) and builds a
+#                structured, plain-language Document. No UI framework, no RDF
+#                store: it reads the JSON the way an ODRL author writes it.
+#   prose-yew    the component: renders a Document as semantic HTML (headings,
+#                ordered rule list, nested condition lists). The host supplies
+#                class names; this crate supplies structure.
+#   demo         the Trunk app: paste an ODRL policy, read it.
+#   catalog      builds the site's catalog of the ds-odrl-compliance-rdf corpus
+#                (fetched at build time, never copied here).
+[workspace]
+resolver = "2"
+members = ["prose-core", "prose-yew", "prose-wasm", "demo", "catalog"]
+
+[workspace.package]
+version = "0.10.0"
+edition = "2024"
+# Let-chains (`if let ... && let ...`) are used throughout; stable since 1.88.
+rust-version = "1.88"
+license = "GPL-3.0-only"
+repository = "https://github.com/ds-labs-org/ds-prose-rs"
+
+# The wasm that ships (npm package, demo): about 30% smaller over the wire
+# than `release`, with no measurable change in render time (measured
+# 2026-10-14). Native builds keep `release`.
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

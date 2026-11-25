@@ -1,0 +1,130 @@
+# The Turtle twin of research.jsonld: the same 118 triples, in the same
+# order. tests/profile_turtle.rs checks that both read as the same vocabulary.
+
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix dct: <http://purl.org/dc/terms/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix prose: <https://ds-labs-org.github.io/ds-prose-rs/profile#> .
+@prefix ex: <https://example.org/odrl/profile/research/> .
+
+<https://example.org/odrl/profile/research>
+    a owl:Ontology ;
+    rdfs:label "Research Data Profile"@en, "Forschungsdatenprofil"@de ;
+    dct:description "Actions, constraints and purposes for sharing research datasets. Synthetic example for ds-prose-rs tests; not a published profile."@en ;
+    owl:versionInfo "0.1.0" ;
+    skos:editorialNote "Test notes. (1) ex:archive is deliberately typed only skos:Concept: a reader must NOT treat it as an ODRL term. (2) ex:distill is deliberately NOT declared here; research-policy.json uses it to test the 'not declared by the loaded profile' warning. (3) prose:* triples are the ds-prose suggestion extension, not ODRL; a reader without the extension must ignore them. (4) The ex:dataSubjectCount note carries HTML on purpose; it must render as plain text." .
+
+ex:train
+    a odrl:Action, skos:Concept ;
+    rdfs:isDefinedBy <https://example.org/odrl/profile/research> ;
+    rdfs:label "Train"@en, "Trainieren"@de ;
+    skos:definition "To use the Asset as training data for a machine-learning model."@en ;
+    odrl:includedIn odrl:use .
+
+ex:fineTune
+    a odrl:Action, skos:Concept ;
+    rdfs:isDefinedBy <https://example.org/odrl/profile/research> ;
+    rdfs:label "Fine-tune"@en ;
+    skos:definition "To adapt an already trained model using the Asset."@en ;
+    skos:note "Fine-tuning implies that the Asset may be read."@en ;
+    odrl:includedIn ex:train ;
+    odrl:implies odrl:read .
+
+ex:pseudonymise
+    a odrl:Action, skos:Concept ;
+    rdfs:isDefinedBy <https://example.org/odrl/profile/research> ;
+    rdfs:label "Pseudonymise"@en ;
+    skos:definition "To replace direct identifiers in the Asset with pseudonyms before any other use."@en ;
+    odrl:includedIn odrl:modify .
+
+ex:dataSubjectCount
+    a odrl:LeftOperand, owl:NamedIndividual, skos:Concept ;
+    rdfs:isDefinedBy <https://example.org/odrl/profile/research> ;
+    rdfs:label "Number of data subjects"@en ;
+    skos:definition "The number of distinct data subjects represented in a result derived from the Asset. Right operand value MUST be an xsd:integer."@en ;
+    skos:note "Only the <code>gteq</code> and <code>gt</code> operators SHOULD be used.<br />Small counts risk re-identification."@en ;
+    prose:operator odrl:gteq, odrl:gt ;
+    prose:datatype xsd:integer .
+
+ex:researchPurpose
+    a odrl:LeftOperand, owl:NamedIndividual, skos:Concept ;
+    rdfs:isDefinedBy <https://example.org/odrl/profile/research> ;
+    skos:prefLabel "Research purpose"@en ;
+    rdfs:comment "The research purpose the action of the Rule is exercised for." ;
+    skos:broader odrl:purpose ;
+    prose:operator odrl:eq, odrl:isAnyOf, odrl:isNoneOf ;
+    prose:rightOperand ex:academic, ex:commercialResearch .
+
+ex:retentionPeriod
+    a odrl:LeftOperand, owl:NamedIndividual, skos:Concept ;
+    rdfs:isDefinedBy <https://example.org/odrl/profile/research> ;
+    rdfs:label "Retention period"@en ;
+    skos:definition "How long results derived from the Asset may be kept, counted from their creation."@en ;
+    prose:operator odrl:lteq, odrl:lt ;
+    prose:datatype xsd:duration .
+
+ex:withinRegion
+    a odrl:Operator, owl:NamedIndividual, skos:Concept ;
+    rdfs:isDefinedBy <https://example.org/odrl/profile/research> ;
+    rdfs:label "Within region"@en ;
+    skos:definition "Indicating that a given location lies inside the region named by the right operand of the Constraint."@en .
+
+ex:academic
+    a odrl:RightOperand, owl:NamedIndividual, skos:Concept ;
+    rdfs:isDefinedBy <https://example.org/odrl/profile/research> ;
+    rdfs:label "Academic research"@en ;
+    skos:definition "Research carried out by an accredited academic institution with no commercial sponsor."@en .
+
+ex:clinical
+    a odrl:RightOperand, owl:NamedIndividual, skos:Concept ;
+    rdfs:isDefinedBy <https://example.org/odrl/profile/research> ;
+    rdfs:label "Clinical research"@en ;
+    skos:definition "Academic research that involves human participants under an approved study protocol."@en ;
+    skos:broader ex:academic .
+
+ex:commercialResearch
+    a odrl:RightOperand, owl:NamedIndividual, skos:Concept ;
+    rdfs:isDefinedBy <https://example.org/odrl/profile/research> ;
+    rdfs:label "Commercial research"@en ;
+    skos:definition "Research funded or directed by a commercial organisation."@en .
+
+ex:dataSteward
+    a rdf:Property, owl:ObjectProperty, skos:Concept ;
+    rdfs:isDefinedBy <https://example.org/odrl/profile/research> ;
+    rdfs:subPropertyOf odrl:function ;
+    rdfs:label "Data steward"@en ;
+    skos:definition "The Party accountable for the curation of the Asset."@en .
+
+ex:ResearchAgreement
+    a rdfs:Class, owl:Class, skos:Concept ;
+    rdfs:isDefinedBy <https://example.org/odrl/profile/research> ;
+    rdfs:subClassOf odrl:Agreement ;
+    rdfs:label "Research agreement"@en ;
+    skos:definition "An Agreement between a data holder and a research institution."@en .
+
+ex:Dataset
+    a rdfs:Class, owl:Class, skos:Concept ;
+    rdfs:isDefinedBy <https://example.org/odrl/profile/research> ;
+    rdfs:subClassOf odrl:Asset ;
+    rdfs:label "Dataset"@en .
+
+ex:ignore
+    a odrl:ConflictTerm, owl:NamedIndividual, skos:Concept ;
+    rdfs:isDefinedBy <https://example.org/odrl/profile/research> ;
+    rdfs:label "Ignore conflicts"@en ;
+    skos:definition "Conflicting rules are ignored; the remaining rules apply."@en .
+
+ex:archive
+    a skos:Concept ;
+    rdfs:isDefinedBy <https://example.org/odrl/profile/research> ;
+    rdfs:label "Archive"@en ;
+    skos:definition "Deliberately not typed odrl:Action: a skos:Concept alone is not an ODRL term and must not appear in any dropdown."@en .
+
+ex:actions
+    a skos:Collection ;
+    skos:prefLabel "Actions for Rules"@en ;
+    skos:member ex:train, ex:fineTune, ex:pseudonymise .

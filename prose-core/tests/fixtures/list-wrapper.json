@@ -1,0 +1,10 @@
+{
+  "@context": "http://www.w3.org/ns/odrl.jsonld",
+  "@type": "Set",
+  "uid": "urn:policy:list",
+  "permission": [{
+    "action": "use",
+    "target": "urn:asset:6",
+    "constraint": { "@list": [{ "leftOperand": "purpose", "operator": "eq", "rightOperand": "research" }] }
+  }]
+}

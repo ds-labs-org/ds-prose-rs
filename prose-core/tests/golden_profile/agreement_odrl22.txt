@@ -1,0 +1,247 @@
+Ok(
+    Reading {
+        document: Document {
+            policies: [
+                Policy {
+                    kind: Agreement,
+                    uid: Some(
+                        "http://example.com/policy:2020",
+                    ),
+                    heading: "Agreement http://example.com/policy:2020",
+                    intro: "An agreement between http://example.com/party:alice (assigner) and http://example.com/party:bob (assignee).",
+                    notes: [
+                        "If a permission and a prohibition conflict, the prohibition wins.",
+                    ],
+                    rules: [
+                        Rule {
+                            kind: Permission,
+                            uid: None,
+                            sentence: "http://example.com/party:bob may distribute http://example.com/data:set1, as permitted by the assigner http://example.com/party:alice.",
+                            refinements: [
+                                Condition {
+                                    text: "The action \"distribute\" is limited to cases where",
+                                    children: [
+                                        Condition {
+                                            text: "the number of times used is at most 5",
+                                            children: [],
+                                            reference: None,
+                                            urls: [],
+                                        },
+                                    ],
+                                    reference: None,
+                                    urls: [],
+                                },
+                            ],
+                            conditions: [
+                                Condition {
+                                    text: "at least one of the following holds",
+                                    children: [
+                                        Condition {
+                                            text: "the purpose is any of \"research\" or \"education\"",
+                                            children: [],
+                                            reference: None,
+                                            urls: [],
+                                        },
+                                        Condition {
+                                            text: "the location is equal to https://example.com/geo/EU",
+                                            children: [],
+                                            reference: None,
+                                            urls: [],
+                                        },
+                                    ],
+                                    reference: None,
+                                    urls: [],
+                                },
+                            ],
+                            follow_ups: [],
+                            references: [],
+                        },
+                    ],
+                },
+            ],
+            warnings: [],
+        },
+        glossary: [
+            PolicyGlossary {
+                terms: [
+                    Gloss {
+                        written: "Agreement",
+                        iri: "http://www.w3.org/ns/odrl/2/Agreement",
+                        kind: PolicyClass,
+                        label: "Agreement",
+                        definition: Some(
+                            "A Policy that grants the assignee a Rule over an Asset from an assigner.",
+                        ),
+                        note: Some(
+                            "An Agreement Policy MUST contain at least one Permission or Prohibition rule, a Party with Assigner function, and a Party with Assignee function (in the same Permission or Prohibition). The Agreement Policy will grant the terms of the Policy from the Assigner to the Assignee.",
+                        ),
+                        broader: [
+                            (
+                                "http://www.w3.org/ns/odrl/2/Policy",
+                                "policy",
+                            ),
+                        ],
+                        implies: [],
+                        profile: Some(
+                            "ODRL Version 2.2",
+                        ),
+                        deprecated: false,
+                    },
+                    Gloss {
+                        written: "odrl:distribute",
+                        iri: "http://www.w3.org/ns/odrl/2/distribute",
+                        kind: Action,
+                        label: "Distribute",
+                        definition: Some(
+                            "To supply the Asset to third-parties.",
+                        ),
+                        note: Some(
+                            "It is recommended to use nextPolicy to express the allowable usages by third-parties.",
+                        ),
+                        broader: [
+                            (
+                                "http://www.w3.org/ns/odrl/2/use",
+                                "Use",
+                            ),
+                        ],
+                        implies: [],
+                        profile: Some(
+                            "ODRL Version 2.2",
+                        ),
+                        deprecated: false,
+                    },
+                    Gloss {
+                        written: "purpose",
+                        iri: "http://www.w3.org/ns/odrl/2/purpose",
+                        kind: LeftOperand,
+                        label: "Purpose",
+                        definition: Some(
+                            "A defined purpose for exercising the action of the Rule.",
+                        ),
+                        note: Some(
+                            "Example: Educational use.",
+                        ),
+                        broader: [],
+                        implies: [],
+                        profile: Some(
+                            "ODRL Version 2.2",
+                        ),
+                        deprecated: false,
+                    },
+                    Gloss {
+                        written: "spatial",
+                        iri: "http://www.w3.org/ns/odrl/2/spatial",
+                        kind: LeftOperand,
+                        label: "Geospatial Named Area",
+                        definition: Some(
+                            "A named and identified geospatial area with defined borders which is used for exercising the action of the Rule. An IRI MUST be used to represent this value.",
+                        ),
+                        note: Some(
+                            "A code value for the area and source of the code must be presented in the Right Operand. Example: the [[iso3166]] Country Codes or the Getty Thesaurus of Geographic Names.",
+                        ),
+                        broader: [],
+                        implies: [],
+                        profile: Some(
+                            "ODRL Version 2.2",
+                        ),
+                        deprecated: false,
+                    },
+                ],
+            },
+        ],
+        mentions: [
+            [
+                Mention {
+                    written: "http://example.com/party:alice",
+                    iri: "http://example.com/party:alice",
+                    label: None,
+                },
+                Mention {
+                    written: "http://example.com/party:bob",
+                    iri: "http://example.com/party:bob",
+                    label: None,
+                },
+                Mention {
+                    written: "http://example.com/data:set1",
+                    iri: "http://example.com/data:set1",
+                    label: None,
+                },
+                Mention {
+                    written: "https://example.com/geo/EU",
+                    iri: "https://example.com/geo/EU",
+                    label: None,
+                },
+            ],
+        ],
+        names: [
+            PolicyNames {
+                intro: [
+                    NameSpan {
+                        start: 21,
+                        end: 51,
+                        mention: 0,
+                    },
+                    NameSpan {
+                        start: 67,
+                        end: 95,
+                        mention: 1,
+                    },
+                ],
+                rules: [
+                    RuleNames {
+                        sentence: [
+                            NameSpan {
+                                start: 0,
+                                end: 28,
+                                mention: 1,
+                            },
+                            NameSpan {
+                                start: 44,
+                                end: 72,
+                                mention: 2,
+                            },
+                            NameSpan {
+                                start: 103,
+                                end: 133,
+                                mention: 0,
+                            },
+                        ],
+                        refinements: [
+                            ConditionNames {
+                                text: [],
+                                children: [
+                                    ConditionNames {
+                                        text: [],
+                                        children: [],
+                                    },
+                                ],
+                            },
+                        ],
+                        conditions: [
+                            ConditionNames {
+                                text: [],
+                                children: [
+                                    ConditionNames {
+                                        text: [],
+                                        children: [],
+                                    },
+                                    ConditionNames {
+                                        text: [
+                                            NameSpan {
+                                                start: 25,
+                                                end: 51,
+                                                mention: 3,
+                                            },
+                                        ],
+                                        children: [],
+                                    },
+                                ],
+                            },
+                        ],
+                        follow_ups: [],
+                    },
+                ],
+            },
+        ],
+    },
+)

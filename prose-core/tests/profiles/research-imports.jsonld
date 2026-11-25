@@ -1,0 +1,31 @@
+{
+  "@context": {
+    "odrl": "http://www.w3.org/ns/odrl/2/",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "skos": "http://www.w3.org/2004/02/skos/core#",
+    "owl": "http://www.w3.org/2002/07/owl#",
+    "prof": "http://www.w3.org/ns/dx/prof/",
+    "ext": "https://example.org/odrl/profile/research-ext/"
+  },
+  "@graph": [
+    {
+      "@id": "https://example.org/odrl/profile/research-ext",
+      "@type": ["owl:Ontology", "prof:Profile"],
+      "rdfs:label": { "@value": "Research Extension Profile", "@language": "en" },
+      "owl:versionInfo": "0.1.0",
+      "owl:imports": [
+        { "@id": "https://example.org/odrl/profile/research" },
+        { "@id": "http://www.w3.org/ns/odrl/2/" }
+      ],
+      "prof:isProfileOf": { "@id": "https://example.org/odrl/profile/base" },
+      "skos:editorialNote": "Imports research (load it too) and is a profile of base, which no test loads: a strict check of a policy under this profile is incomplete until base is loaded. Not a published profile."
+    },
+    {
+      "@id": "ext:summarise",
+      "@type": ["odrl:Action", "skos:Concept"],
+      "rdfs:isDefinedBy": { "@id": "https://example.org/odrl/profile/research-ext" },
+      "rdfs:label": { "@value": "Summarise", "@language": "en" },
+      "odrl:includedIn": { "@id": "odrl:use" }
+    }
+  ]
+}

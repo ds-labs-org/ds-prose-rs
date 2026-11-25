@@ -1,0 +1,32 @@
+{
+  "@context": [
+    "http://www.w3.org/ns/odrl.jsonld",
+    { "ex": "https://example.org/odrl/profile/research/",
+      "foo": "https://example.net/foo/" }
+  ],
+  "@type": "Agreement",
+  "uid": "urn:policy:violating",
+  "profile": "https://example.org/odrl/profile/research",
+  "assigner": "http://example.com/org:hospital",
+  "assignee": "http://example.com/org:university",
+  "target": "http://example.com/data:cohort-2026",
+  "permission": [{
+    "action": {
+      "rdf:value": { "@id": "ex:fineTune" },
+      "refinement": [{
+        "leftOperand": "ex:dataSubjectCount",
+        "operator": "gteq",
+        "rightOperand": "ten"
+      }]
+    },
+    "constraint": [{
+      "leftOperand": "ex:researchPurpose",
+      "operator": "lteq",
+      "rightOperand": { "@id": "ex:academic" }
+    }]
+  }, {
+    "action": "ex:distil"
+  }, {
+    "action": "foo:bar"
+  }]
+}

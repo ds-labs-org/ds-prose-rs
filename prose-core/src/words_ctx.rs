@@ -1,0 +1,411 @@
+//! Wording with loaded profiles: a term a loaded profile declares reads with
+//! the profile's label; every other term, and every ODRL term, reads as the
+//! `words` module phrases it.
+use crate::Gloss;
+use crate::profile::{Prefixes, ProfileVocab, Term, TermKind, Wording};
+use crate::words::{self, Phrase, ValueShape, local_name};
+use std::borrow::Cow;
+use std::collections::HashMap;
+
+const ODRL_NS: &str = "http://www.w3.org/ns/odrl/2/";
+
+/// The wording one reading uses. Without a profile it is `words`, exactly.
+pub(crate) struct WordCtx<'a> {
+    /// `None` when no profile is loaded.
+    wording: Option<&'a Wording>,
+    /// Borrowed when a caller already holds them: a gloss per term shown
+    /// must not copy a large policy context.
+    prefixes: Cow<'a, Prefixes>,
+    /// Namespace -> the first loaded profile that declares a term in it.
+    /// ODRL's own namespace is left out.
+    namespaces: HashMap<&'a str, &'a ProfileVocab>,
+}
+
+impl<'a> WordCtx<'a> {
+    /// `w`, with a policy's compact terms expanded by `prefixes`.
+    pub(crate) fn new(w: &'a Wording, prefixes: Prefixes) -> WordCtx<'a> {
+        let mut namespaces = HashMap::new();
+        for p in w.profiles() {
+            for t in p.terms() {
+                let ns = namespace(&t.iri);
+                if ns != ODRL_NS {
+                    namespaces.entry(ns).or_insert(p);
+                }
+            }
+        }
+        WordCtx {
+            wording: (!w.is_empty()).then_some(w),
+            prefixes: Cow::Owned(prefixes),
+            namespaces,
+        }
+    }
+
+    /// Whether a profile is loaded.
+    pub(crate) fn profiled(&self) -> bool {
+        self.wording.is_some()
+    }
+
+    pub(crate) fn set_prefixes(&mut self, prefixes: Prefixes) {
+        self.prefixes = Cow::Owned(prefixes);
+    }
+
+    pub(crate) fn langs(&self) -> &[String] {
+        self.wording.map_or(&[], |w| w.languages())
+    }
+
+    /// `written` as an expanded IRI.
+    pub(crate) fn expand(&self, written: &str) -> String {
+        match self.wording {
+            Some(w) => w.expand(&self.prefixes, written),
+            None => self.prefixes.expand(written),
+        }
+    }
+
+    /// The loaded term `written` names, and its profile.
+    pub(crate) fn resolve(&self, written: &str) -> Option<(&'a Term, &'a ProfileVocab)> {
+        let w = self.wording?;
+        w.lookup(&self.expand(written))
+    }
+
+    /// The loaded term of `kind` that `written` names, unless it is an ODRL
+    /// term: those keep their built-in phrasing, whatever a profile says.
+    fn worded(&self, written: &str, kind: TermKind) -> Option<String> {
+        let (t, _) = self.resolve(written)?;
+        if t.iri.starts_with(ODRL_NS) || !t.kinds.contains(&kind) {
+            return None;
+        }
+        Some(t.display_label(self.langs()))
+    }
+
+    /// An action as a base-form verb phrase.
+    pub(crate) fn action(&self, raw: &str) -> String {
+        match self.worded(raw, TermKind::Action) {
+            Some(label) => lower_first(&label),
+            None => words::action(raw),
+        }
+    }
+
+    /// A left operand as a noun phrase.
+    pub(crate) fn operand(&self, raw: &str) -> String {
+        match self.worded(raw, TermKind::LeftOperand) {
+            Some(label) => {
+                let label = lower_first(&label);
+                let article = ["the ", "a ", "an "]
+                    .iter()
+                    .any(|a| label.to_lowercase().starts_with(a));
+                if article {
+                    label
+                } else {
+                    format!("the {label}")
+                }
+            }
+            None => words::operand(raw),
+        }
+    }
+
+    /// Whether the noun phrase used for `left` is plural: a profile's label
+    /// when the profile says `prose:plural`, otherwise the built-in phrase
+    /// when it is plural ("the date and time").
+    fn plural_subject(&self, left: &str) -> bool {
+        match self.resolve(left) {
+            Some((t, _))
+                if !t.iri.starts_with(ODRL_NS) && t.kinds.contains(&TermKind::LeftOperand) =>
+            {
+                t.hints.plural
+            }
+            _ => words::plural_operand(left),
+        }
+    }
+
+    /// An operator as the verb phrase that follows `left`. A label that is
+    /// already a verb phrase ("Has part") is kept; otherwise it follows
+    /// "is" ("Greater than" reads "is greater than"). The verb agrees in
+    /// number with the subject: when the subject is the built-in plural noun
+    /// phrase ("the date and time"), "is" reads "are", "has" "have", and so
+    /// on, for a profile label as for a built-in phrase.
+    pub(crate) fn operator_for(&self, left: &str, op: &str, shape: ValueShape) -> String {
+        let plural = self.plural_subject(left);
+        match self.worded(op, TermKind::Operator) {
+            Some(label) => Phrase::from_label(&lower_first(&label)).render(plural),
+            None => words::built_in_phrase(left, op, plural, shape),
+        }
+    }
+
+    /// A unit, after its value: a profile term's label as written.
+    pub(crate) fn unit(&self, raw: &str) -> String {
+        match self.resolve(raw) {
+            Some((t, _)) if !t.iri.starts_with(ODRL_NS) => t.display_label(self.langs()),
+            _ => words::humanise(local_name(raw)),
+        }
+    }
+
+    /// A right-operand IRI as a profile value's label.
+    pub(crate) fn value(&self, raw: &str) -> Option<String> {
+        self.worded(raw, TermKind::RightOperand)
+            .map(|l| lower_first(&l))
+    }
+
+    /// The label of a policy class, for the heading.
+    pub(crate) fn policy_class(&self, raw: &str) -> Option<String> {
+        self.worded(raw, TermKind::PolicyClass)
+    }
+
+    /// The label of a party function, written as a rule property.
+    pub(crate) fn party_function(&self, raw: &str) -> Option<String> {
+        self.worded(raw, TermKind::PartyFunction)
+    }
+
+    /// The loaded profile `id` names, if one is loaded.
+    pub(crate) fn profile(&self, id: &str) -> Option<&'a ProfileVocab> {
+        let w = self.wording?;
+        let want = self.expand(id);
+        let want = want.trim_end_matches(['#', '/']);
+        w.profiles()
+            .find(|p| p.iri().map(|i| i.trim_end_matches(['#', '/'])) == Some(want))
+    }
+
+    /// Whether the profile `id` is covered by the loaded ones (ODRL's core
+    /// always is). True when no profile is loaded: nothing is said then.
+    pub(crate) fn covers(&self, id: &str) -> bool {
+        self.wording.is_none_or(|w| w.covers(&self.expand(id)))
+    }
+
+    /// The loaded profile whose namespace `written` is in, when no loaded
+    /// profile declares it: likely a typo, or a term from a newer version.
+    pub(crate) fn undeclared_in(&self, written: &str) -> Option<&'a ProfileVocab> {
+        let iri = self.expand(written);
+        if self.resolve(written).is_some() {
+            return None;
+        }
+        self.namespaces.get(namespace(&iri)).copied()
+    }
+
+    /// The glossary entry for `written`, used as a `kind`.
+    pub(crate) fn gloss(&self, written: &str, kind: TermKind) -> Option<Gloss> {
+        let (t, p) = self.resolve(written)?;
+        let kind = if t.kinds.contains(&kind) {
+            kind
+        } else {
+            *t.kinds.first()?
+        };
+        Some(self.gloss_of(written, t, p, kind))
+    }
+
+    fn gloss_of(&self, written: &str, t: &Term, p: &ProfileVocab, kind: TermKind) -> Gloss {
+        let langs = self.langs();
+        let labelled = |iris: &mut dyn Iterator<Item = &String>| {
+            let mut out: Vec<(String, String)> = Vec::new();
+            for i in iris {
+                if !out.iter().any(|(x, _)| x == i) {
+                    out.push((i.clone(), self.label_of(i)));
+                }
+            }
+            out
+        };
+        Gloss {
+            written: written.to_string(),
+            iri: t.iri.clone(),
+            kind,
+            label: t.display_label(langs),
+            definition: t.definition.pick(langs).map(str::to_string),
+            note: t.note.pick(langs).map(str::to_string),
+            broader: labelled(&mut t.included_in.iter().chain(&t.broader)),
+            implies: labelled(&mut t.implies.iter()),
+            profile: profile_title(p, langs),
+            deprecated: t.deprecated,
+        }
+    }
+
+    /// The label of any IRI: a loaded term's, else its local name.
+    fn label_of(&self, iri: &str) -> String {
+        match self.wording.and_then(|w| w.lookup(iri)) {
+            Some((t, _)) => t.display_label(self.langs()),
+            None => words::humanise(local_name(iri)),
+        }
+    }
+
+    /// The profile's title in the preferred language, for prose.
+    pub(crate) fn title(&self, p: &ProfileVocab) -> Option<String> {
+        p.title().pick(self.langs()).map(str::to_string)
+    }
+}
+
+/// How a warning names a profile: its IRI, else its title.
+pub(crate) fn profile_name(p: &ProfileVocab) -> String {
+    match (p.iri(), p.title().pick(&[])) {
+        (Some(i), _) => format!("<{i}>"),
+        (None, Some(t)) => format!("\"{t}\""),
+        (None, None) => "(unnamed)".to_string(),
+    }
+}
+
+fn profile_title(p: &ProfileVocab, langs: &[String]) -> Option<String> {
+    p.title().pick(langs).or(p.iri()).map(str::to_string)
+}
+
+/// The IRI up to and including its last `#` or `/`.
+pub(crate) fn namespace(iri: &str) -> &str {
+    match iri.rfind(['#', '/']) {
+        Some(i) => &iri[..=i],
+        None => iri,
+    }
+}
+
+/// A label read inside a sentence. A Title Case label (two or more words,
+/// each starting with an upper-case letter) has each plain capitalised word
+/// lower-cased ("Restricted Discovery Claim" becomes "restricted discovery
+/// claim"); acronyms and CamelCase words stay ("EU Data Act" becomes "EU data
+/// act"). Any other label only loses its first letter, unless it starts with
+/// an acronym ("EU region" stays).
+fn lower_first(label: &str) -> String {
+    let words: Vec<&str> = label.split(' ').collect();
+    let title_case = words.len() > 1
+        && words
+            .iter()
+            .all(|w| w.chars().next().is_some_and(char::is_uppercase));
+    if title_case {
+        return words
+            .iter()
+            .map(|w| {
+                if is_plain_capitalised(w) {
+                    w.to_lowercase()
+                } else {
+                    w.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+    }
+    let mut chars = label.chars();
+    match (chars.next(), chars.next()) {
+        (Some(_), Some(second)) if second.is_uppercase() => label.to_string(),
+        (Some(first), _) => first.to_lowercase().chain(label.chars().skip(1)).collect(),
+        (None, _) => String::new(),
+    }
+}
+
+/// A word that is a capital followed by no other capital ("Credential",
+/// "A"). Each part of a hyphenated word must be one, and a lone letter does
+/// not count there: "Data-Driven" is plain, "Eona-X" is not.
+fn is_plain_capitalised(word: &str) -> bool {
+    let hyphenated = word.contains('-');
+    word.split('-').all(|part| {
+        let mut chars = part.chars();
+        chars.next().is_some_and(char::is_uppercase)
+            && !chars.clone().any(char::is_uppercase)
+            && (!hyphenated || chars.next().is_some())
+    })
+}
+
+/// [`crate::wording::gloss`]: `written` as a policy with `prefixes` writes
+/// it, explained by the first loaded profile that declares it. Without a
+/// use to go by, a term is glossed as its first kind.
+pub(crate) fn gloss(w: &Wording, prefixes: &Prefixes, written: &str) -> Option<Gloss> {
+    let ctx = WordCtx {
+        wording: (!w.is_empty()).then_some(w),
+        prefixes: Cow::Borrowed(prefixes),
+        namespaces: HashMap::new(),
+    };
+    let (t, p) = ctx.resolve(written)?;
+    let kind = *t.kinds.first()?;
+    Some(ctx.gloss_of(written, t, p, kind))
+}
+
+/// What [`crate::wording::operator_phrase`] words: an operator after its left operand, for
+/// one kind of right operand, optionally with the loaded profiles. Build one
+/// with [`OperatorQuery::new`] and the builder methods; fields may be added
+/// later without breaking callers.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug)]
+pub struct OperatorQuery<'a> {
+    /// The left operand, as a policy writes it.
+    pub left: &'a str,
+    /// The operator, as a policy writes it.
+    pub op: &'a str,
+    /// What the one right operand is; [`ValueShape::Other`] by default.
+    pub value: ValueShape,
+    profiles: Option<(&'a Wording, &'a Prefixes)>,
+}
+
+impl<'a> OperatorQuery<'a> {
+    /// A query for `op` after `left`, with the built-in wording and no known
+    /// value.
+    pub fn new(left: &'a str, op: &'a str) -> OperatorQuery<'a> {
+        OperatorQuery {
+            left,
+            op,
+            value: ValueShape::Other,
+            profiles: None,
+        }
+    }
+
+    /// The shape of the right operand, from [`ValueShape::of`].
+    pub fn value(mut self, value: ValueShape) -> OperatorQuery<'a> {
+        self.value = value;
+        self
+    }
+
+    /// Word with the loaded profiles of `wording`, `prefixes` being those the
+    /// policy binds: an operator or left operand a profile declares reads
+    /// with its label.
+    pub fn wording(mut self, wording: &'a Wording, prefixes: &'a Prefixes) -> OperatorQuery<'a> {
+        self.profiles = Some((wording, prefixes));
+        self
+    }
+}
+
+/// The phrase that follows the left operand of `q`: the built-in wording,
+/// or the profile's label for an operator it declares outside ODRL. It
+/// agrees in number with the left operand, and reads a point in time, a
+/// whole day and a duration each in its own words.
+pub(crate) fn operator_phrase(q: &OperatorQuery<'_>) -> String {
+    match q.profiles {
+        Some((w, prefixes)) => {
+            let ctx = WordCtx {
+                wording: (!w.is_empty()).then_some(w),
+                prefixes: Cow::Borrowed(prefixes),
+                namespaces: HashMap::new(),
+            };
+            ctx.operator_for(q.left, q.op, q.value)
+        }
+        None => words::built_in_phrase(q.left, q.op, words::plural_operand(q.left), q.value),
+    }
+}
+
+#[cfg(test)]
+mod lower_first_tests {
+    use super::lower_first;
+
+    #[test]
+    fn title_case_labels_are_lowercased_word_by_word() {
+        for (label, want) in [
+            ("Restricted Discovery Claim", "restricted discovery claim"),
+            ("Generic Claim", "generic claim"),
+            ("Membership", "membership"),
+            ("EU Data Act", "EU data act"),
+            (
+                "Membership Credential Groups",
+                "membership credential groups",
+            ),
+            ("MembershipCredential Groups", "MembershipCredential groups"),
+            ("Eona-X Member", "Eona-X member"),
+            ("Data-Driven Service", "data-driven service"),
+        ] {
+            assert_eq!(lower_first(label), want, "{label}");
+        }
+    }
+
+    #[test]
+    fn other_labels_only_lose_their_first_letter() {
+        for (label, want) in [
+            ("Paris region", "paris region"),
+            ("EU region", "EU region"),
+            ("number of data subjects", "number of data subjects"),
+            ("Purpose Of use", "purpose Of use"),
+            ("ODRL", "ODRL"),
+            ("", ""),
+        ] {
+            assert_eq!(lower_first(label), want, "{label}");
+        }
+    }
+}

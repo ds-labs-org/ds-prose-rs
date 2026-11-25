@@ -1,0 +1,57 @@
+{
+  "profiles": [
+    {
+      "@context": {
+        "odrl": "http://www.w3.org/ns/odrl/2/",
+        "prose": "https://ds-labs-org.github.io/ds-prose-rs/profile#",
+        "owl": "http://www.w3.org/2002/07/owl#",
+        "ex": "https://example.org/odrl/profile/units/"
+      },
+      "@graph": [
+        {
+          "@id": "https://example.org/odrl/profile/units",
+          "@type": "owl:Ontology"
+        },
+        {
+          "@id": "ex:storage",
+          "@type": "odrl:LeftOperand",
+          "prose:operator": {
+            "@id": "odrl:lteq"
+          },
+          "prose:unit": [
+            {
+              "@id": "ex:gigabyte"
+            }
+          ],
+          "prose:closed": true
+        }
+      ]
+    }
+  ],
+  "options": {},
+  "policy": {
+    "@context": [
+      "http://www.w3.org/ns/odrl.jsonld",
+      {
+        "u": "https://example.org/odrl/profile/units/"
+      }
+    ],
+    "@type": "Set",
+    "uid": "urn:policy:h",
+    "profile": "https://example.org/odrl/profile/units",
+    "permission": [
+      {
+        "target": "urn:asset:1",
+        "action": "use",
+        "constraint": [
+          {
+            "leftOperand": "u:storage",
+            "operator": "lteq",
+            "rightOperand": 5,
+            "unit": "http://dbpedia.org/resource/Megabyte"
+          }
+        ]
+      }
+    ]
+  }
+}

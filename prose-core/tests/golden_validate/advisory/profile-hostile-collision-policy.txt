@@ -1,0 +1,10 @@
+## none
+## research
+Warning policy[0].permission[0].constraint[1]#leftOperand the left operand "ex:purpose" is not declared by the loaded profile <https://example.org/odrl/profile/research>
+## research-closed
+Warning policy[0].permission[0].constraint[1]#leftOperand the left operand "ex:purpose" is not declared by the loaded profile <https://example.org/odrl/profile/research>
+## odrl22-excerpt
+## research+other
+Warning policy[0].permission[0].constraint[1]#leftOperand the left operand "ex:purpose" is not declared by the loaded profile <https://example.org/odrl/profile/research>
+## research-imports+research
+Warning policy[0].permission[0].constraint[1]#leftOperand the left operand "ex:purpose" is not declared by the loaded profile <https://example.org/odrl/profile/research>

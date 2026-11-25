@@ -1,0 +1,47 @@
+# The Turtle twin of dataspace-shapes.jsonld, with real RDF lists.
+# tests/shapes.rs checks that both read as equal shapes.
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix dx: <https://example.org/dataspace/> .
+
+dx:PurposeConstraintShape a sh:NodeShape ;
+    sh:property
+        [ sh:path odrl:leftOperand ; sh:hasValue dx:purpose ] ,
+        [ sh:path odrl:operator ; sh:in ( odrl:eq odrl:isAnyOf ) ] ,
+        [ sh:path odrl:rightOperand ; sh:in ( dx:research dx:marketing ) ] .
+
+dx:AlternativesShape a sh:NodeShape ;
+    sh:or ( dx:MembershipConstraintShape dx:RegionConstraintShape ) .
+
+dx:MembershipConstraintShape
+    sh:property
+        [ sh:path odrl:leftOperand ; sh:hasValue dx:participantType ] ,
+        [ sh:path odrl:rightOperand ; sh:class dx:Membership ] .
+
+dx:RegionConstraintShape
+    sh:property
+        [ sh:path odrl:leftOperand ; sh:hasValue dx:region ] ,
+        [ sh:path odrl:rightOperand ; sh:in ( dx:eu dx:us ) ] .
+
+dx:PolicyShape a sh:NodeShape ;
+    sh:property [
+        sh:path odrl:constraint ;
+        sh:qualifiedValueShape [
+            sh:property
+                [ sh:path odrl:leftOperand ; sh:hasValue dx:count ] ,
+                [ sh:path odrl:rightOperand ; sh:datatype xsd:integer ; sh:minInclusive 1 ; sh:maxInclusive 100 ] ,
+                [ sh:path odrl:unit ; sh:in ( dx:people ) ]
+        ] ;
+        sh:qualifiedMinCount 1
+    ] .
+
+dx:CodeConstraintShape
+    sh:property
+        [ sh:path odrl:leftOperand ; sh:hasValue dx:code ] ,
+        [ sh:path odrl:rightOperand ; sh:pattern "^[A-Z]{3}-[0-9]+$" ] .
+
+dx:RuleShape a sh:NodeShape ;
+    sh:property
+        [ sh:path odrl:action ; sh:in ( dx:train dx:share ) ] ,
+        [ sh:path odrl:leftOperand ; sh:in ( dx:purpose dx:participantType dx:count dx:code dx:region ) ] .

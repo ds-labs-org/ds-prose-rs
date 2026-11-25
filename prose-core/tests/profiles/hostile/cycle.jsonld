@@ -1,0 +1,13 @@
+{
+  "@context": {
+    "odrl": "http://www.w3.org/ns/odrl/2/",
+    "skos": "http://www.w3.org/2004/02/skos/core#",
+    "ex": "https://example.org/cycle/"
+  },
+  "@graph": [
+    { "@id": "ex:a", "@type": "odrl:Action", "odrl:includedIn": { "@id": "ex:b" } },
+    { "@id": "ex:b", "@type": "odrl:Action", "odrl:includedIn": { "@id": "ex:a" } },
+    { "@id": "ex:c", "@type": "odrl:Action", "odrl:includedIn": { "@id": "ex:a" } },
+    { "@id": "ex:x", "@type": "odrl:RightOperand", "skos:broader": { "@id": "ex:x" } }
+  ]
+}

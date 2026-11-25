@@ -1,0 +1,26 @@
+{
+  "profiles": [
+    "research.jsonld"
+  ],
+  "options": {},
+  "policy": {
+    "@context": [
+      "http://www.w3.org/ns/odrl.jsonld",
+      {
+        "ex": "https://example.org/odrl/profile/research/",
+        "foo": "https://example.net/foo/",
+        "other": "https://example.com/odrl/profile/other/",
+        "ext": "https://example.org/odrl/profile/research-ext/"
+      }
+    ],
+    "@type": "Set",
+    "uid": "urn:policy:h",
+    "profile": "https://example.org/odrl/profile/research",
+    "permission": [
+      {
+        "target": "urn:asset:1",
+        "action": "ex:distil"
+      }
+    ]
+  }
+}

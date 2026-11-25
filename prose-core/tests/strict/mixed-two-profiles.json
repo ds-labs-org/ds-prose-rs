@@ -1,0 +1,25 @@
+{
+  "@context": [
+    "http://www.w3.org/ns/odrl.jsonld",
+    { "ex": "https://example.org/odrl/profile/research/",
+      "other": "https://example.com/odrl/profile/other/" }
+  ],
+  "@type": "Set",
+  "uid": "urn:policy:mixed",
+  "profile": [
+    "https://example.org/odrl/profile/research",
+    "https://example.com/odrl/profile/other"
+  ],
+  "permission": [{
+    "target": "urn:asset:1",
+    "action": "ex:train",
+    "constraint": [{
+      "leftOperand": "other:region",
+      "operator": "eq",
+      "rightOperand": { "@id": "other:eu" }
+    }]
+  }, {
+    "target": "urn:asset:1",
+    "action": "other:archiveCopy"
+  }]
+}

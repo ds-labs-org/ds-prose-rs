@@ -1,0 +1,46 @@
+{
+  "name": "@ds-labs/prose-angular",
+  "version": "0.10.0",
+  "description": "Angular component that renders ODRL JSON-LD as plain-language prose (ds-prose-rs, compiled to WebAssembly)",
+  "keywords": [
+    "angular",
+    "odrl",
+    "policy",
+    "json-ld",
+    "wasm",
+    "dataspace"
+  ],
+  "license": "GPL-3.0-only",
+  "author": "Nicolas Karageuzian",
+  "homepage": "https://github.com/ds-labs-org/ds-prose-rs#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ds-labs-org/ds-prose-rs.git",
+    "directory": "prose-angular"
+  },
+  "bugs": "https://github.com/ds-labs-org/ds-prose-rs/issues",
+  "type": "module",
+  "scripts": {
+    "build": "ng-packagr -p ng-package.json -c tsconfig.lib.prod.json && cp ../LICENSE ../dist-npm/prose-angular/LICENSE",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "tsc --noEmit -p tsconfig.json && node --test test/*.test.mjs"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "@angular/core": ">=19.0.0"
+  },
+  "dependencies": {
+    "@ds-labs/prose-wasm": "^0.10.0",
+    "tslib": "^2.3.0"
+  },
+  "devDependencies": {
+    "@angular/compiler": "^19.2.0",
+    "@angular/compiler-cli": "^19.2.0",
+    "@angular/core": "^19.2.0",
+    "ng-packagr": "^19.2.0",
+    "rxjs": "^7.8.0",
+    "typescript": "~5.7.0"
+  }
+}
