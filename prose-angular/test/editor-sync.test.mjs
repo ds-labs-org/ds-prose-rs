@@ -2,7 +2,7 @@
 // or skip, which inputs to hand over, what a change does), against a fake handle.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { DATASPACE_PRESET, EditorSession, resolvePreset } from '../src/editor-sync.ts';
+import { DATASPACE_PRESET, EditorSession, resolvePreset, validatorOptions } from '../src/editor-sync.ts';
 
 const A = '{"@type":"Set","uid":"a"}';
 const B = '{"@type":"Set","uid":"b"}';
@@ -818,4 +818,24 @@ test('the dataspace preset keeps its depth next to the host policyTypes', () => 
   assert.deepEqual(r.limits, { logicalDepth: { max: 2 }, policyTypes: ['Set'] });
   // The preset itself sets none.
   assert.equal('policyTypes' in DATASPACE_PRESET.limits, false);
+});
+
+// --- the validator service's options ----------------------------------------------
+
+test('validatorOptions: without a preset the options are the host\'s, as before', () => {
+  assert.equal(validatorOptions(null, null), null);
+  assert.equal(validatorOptions(undefined, undefined), null);
+  assert.deepEqual(validatorOptions(null, { strict: false }), { strict: false });
+});
+
+test('validatorOptions: a preset is laid under the options exactly as the editor does', () => {
+  assert.deepEqual(validatorOptions('dataspace', null), resolvePreset('dataspace', none).options);
+  const own = { strict: false, rules: { 'heuristic.duplicate-action': 'error' } };
+  assert.deepEqual(validatorOptions('dataspace', own), resolvePreset('dataspace', { ...none, validation: own }).options);
+  assert.equal(validatorOptions('dataspace', own).structural, true);
+  assert.equal(validatorOptions('dataspace', own).rules['heuristic.single-child-group'], 'warning');
+});
+
+test('validatorOptions: an unknown preset throws, as for the editor', () => {
+  assert.throws(() => validatorOptions('nope', null), /preset must be one of dataspace/);
 });

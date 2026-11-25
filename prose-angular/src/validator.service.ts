@@ -1,5 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import type { ValidateOptions, ValidationReport, ValueSources } from '@ds-labs/prose-wasm';
+import { validatorOptions } from './editor-sync';
 import { overlayTexts, shapesText, valueSourcesOf } from './validation-sync';
 import { PROSE_WASM_MODULE, PROSE_WASM_URL, loadWasm } from './wasm-runtime';
 
@@ -28,6 +29,10 @@ export class ProseValidatorService {
    * catalog, by left operand IRI or party role; they sit on top of the
    * rest, and a closed one makes a value it does not list a finding whose
    * `expected.source` is `"host"`.
+   * `preset` is the editor's `preset` input (`'dataspace'`), laid under
+   * `options` the same way, so the report is the editor's for the same
+   * preset, options, profiles, shapes, overlays and value sources; an unknown
+   * preset rejects.
    * A problem in the policy is never a rejection: it is a finding.
    */
   async validate(
@@ -37,9 +42,10 @@ export class ProseValidatorService {
     shapes: string | null = null,
     overlays: readonly string[] | null = null,
     valueSources: ValueSources | null = null,
+    preset: string | null = null,
   ): Promise<ValidationReport> {
     const wasm = await loadWasm({ module: this.wasmModule, url: this.wasmUrl });
     const list = typeof profiles === 'string' || profiles == null ? profiles : [...profiles];
-    return JSON.parse(wasm.validate(json, list, options, shapesText(shapes), overlayTexts(overlays), valueSourcesOf(valueSources))) as ValidationReport;
+    return JSON.parse(wasm.validate(json, list, validatorOptions(preset, options), shapesText(shapes), overlayTexts(overlays), valueSourcesOf(valueSources))) as ValidationReport;
   }
 }
